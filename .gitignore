@@ -1,3 +1,4 @@
+# Vagrant machine state — contains full VM disks, never commit
 .vagrant/
 *.vmdk
 *.log

@@ -53,38 +53,46 @@ TMPEOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/tower.conf
 ```
 
-Update the base system and note the versions — this tutorial pins everything:
+Update the base system, then reboot — one reboot does double duty: it applies any kernel update AND proves tmpfiles.d recreates `/var/run/tower`:
 
 ```bash
 sudo dnf -y update
 cat /etc/rocky-release
+sudo reboot                # your ssh session drops; that's expected
 ```
+
+Reconnect and verify the control node:
+
+```bash
+vagrant ssh ace-control
+ls -ld /var/run/tower               # back after reboot, awx:awx 0750 — tmpfiles.d works
+id awx                              # service user exists
+sudo -u awx bash -c 'echo $HOME'    # /var/lib/awx
+ping -c1 192.168.56.20              # execution plane reachable
+```
+
+Now run the **Preflight checks** (section below) on this box. All green → `exit` and move on.
 
 ## Prep the execution plane node
 
 `ace-exec` needs exactly one thing today — the same service user (on a real RPM install, receptor runs as `awx` on execution nodes too). Everything else (receptor, podman, TLS) is Lab 12's job:
 
 ```bash
-exit                       # leave ace-control
 vagrant ssh ace-exec
 sudo useradd --system --home-dir /var/lib/awx --create-home --shell /bin/bash awx
 sudo dnf -y update
+sudo reboot
 ```
 
-Run the preflight checks below on this VM as well before you leave it.
-
-## Verify
+Reconnect and verify:
 
 ```bash
-# from ace-control:
-ping -c1 192.168.56.20              # execution plane reachable
-# from ace-exec:
-ping -c1 192.168.56.10              # control plane reachable the other way
+vagrant ssh ace-exec
 id awx                              # service user exists
-sudo -u awx bash -c 'echo $HOME'    # /var/lib/awx
-ls -ld /var/run/tower               # exists, awx:awx, 0750
-sudo reboot                         # ...then check /var/run/tower again — tmpfiles.d proof
+ping -c1 192.168.56.10              # control plane reachable the other way
 ```
+
+Run the **Preflight checks** on this box too. Both VMs green = Lab 2 done.
 
 ## The filesystem contract (matches the real RPM install exactly)
 
