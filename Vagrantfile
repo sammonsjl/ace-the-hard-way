@@ -25,6 +25,10 @@ Vagrant.configure("2") do |config|
     node.vm.provider "vmware_desktop" do |v|
       v.vmx["memsize"]  = "8192"
       v.vmx["numvcpus"] = "4"
+      # Pin NIC PCI slots (bento box defaults) — silences the Vagrant VMX-allowlisting
+      # warning and keeps networking stable when Vagrant stops managing these.
+      v.vmx["ethernet0.pcislotnumber"] = "160"
+      v.vmx["ethernet1.pcislotnumber"] = "224"
     end
     node.vm.provider "virtualbox" do |v|
       v.memory = 8192
@@ -43,6 +47,8 @@ Vagrant.configure("2") do |config|
     node.vm.provider "vmware_desktop" do |v|
       v.vmx["memsize"]  = "4096"
       v.vmx["numvcpus"] = "2"
+      v.vmx["ethernet0.pcislotnumber"] = "160"
+      v.vmx["ethernet1.pcislotnumber"] = "224"
     end
     node.vm.provider "virtualbox" do |v|
       v.memory = 4096
