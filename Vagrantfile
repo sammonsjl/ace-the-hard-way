@@ -12,6 +12,11 @@
 Vagrant.configure("2") do |config|
   config.vm.box = ENV.fetch("VAGRANT_BOX", "bento/rockylinux-9")
 
+  # The repo is shared into every VM at /vagrant (two-way sync).
+  # Handy for reading the labs from inside the VM — and for editing them
+  # the moment reality disagrees with the docs.
+  config.vm.synced_folder ".", "/vagrant"
+
   config.vm.define "ace-control" do |node|
     node.vm.hostname = "ace-control"
     node.vm.network "private_network", ip: "192.168.56.10"
