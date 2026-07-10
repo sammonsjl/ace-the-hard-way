@@ -85,6 +85,16 @@ Restart (these two need a full restart, not a reload):
 sudo systemctl restart postgresql
 ```
 
+> **Warning — write the units in full: `1GB`, not `1G`.** PostgreSQL only accepts the memory-unit suffixes `B`, `kB`, `MB`, `GB`, and `TB`. A bare `1G` is an invalid value, and PostgreSQL rejects the *entire* config file when it reads it, so the postmaster exits `FATAL` before it ever opens a socket:
+>
+> ```
+> LOG:  invalid value for parameter "shared_buffers": "1G"
+> HINT: Valid units for this parameter are "B", "kB", "MB", "GB", and "TB".
+> FATAL: configuration file "/var/lib/pgsql/data/postgresql.conf" contains errors
+> ```
+>
+> The nasty part: this is fatal only on a **cold start / restart**. A live server that gets a `reload` (SIGHUP) logs the error and keeps running on the *old* value — so the typo hides until the next restart, which may be days later at a reboot. Cross-check the exact spelling before you `restart`. (`max_connections = 1024` uses no unit suffix and is never involved in this failure.)
+
 ## Verify
 
 ```bash
