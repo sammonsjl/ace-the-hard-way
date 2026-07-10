@@ -18,7 +18,7 @@ redis-server --version    # record the version (Rocky 9 ships 6.2.x — fine; AW
 AWX talks to redis over a Unix socket — that's how the real installer wires it too (socket shared between the redis and awx services). Edit the config — on Rocky 9 it's `/etc/redis/redis.conf`:
 
 ```bash
-sudo vi /etc/redis/redis.conf
+sudo vim /etc/redis/redis.conf
 ```
 
 Set these (the `unixsocket` lines exist commented-out — uncomment and edit):
@@ -26,7 +26,7 @@ Set these (the `unixsocket` lines exist commented-out — uncomment and edit):
 ```
 port 0                                      # no TCP — socket only, nothing to firewall
 unixsocket /var/run/redis/redis.sock
-unixsocketperm 770                          # owner+group only
+unixsocketperm 770
 ```
 
 `/var/run/redis` is created by the redis package's own tmpfiles.d entry (`/usr/lib/tmpfiles.d/redis.conf`) — you already know from Lab 2 why that matters after a reboot.
