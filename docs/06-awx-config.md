@@ -13,7 +13,7 @@ Layout we build (mirrors the AAP 2.6 bundle):
 ```
 /etc/tower/
 ├── SECRET_KEY               # 0400, awx-only
-├── settings.py             # base marker; defaults cover the rest
+├── settings.py             # reads SECRET_KEY from the file above
 └── conf.d/
     ├── postgres.py          # database connection (Lab 3)
     ├── websocket.py         # broadcast-websocket secret
@@ -35,15 +35,19 @@ sudo install -d -o awx -g awx /var/log/tower
 ## SECRET_KEY
 
 ```bash
-sudo -u awx bash -c 'umask 077; openssl rand -base64 48 > /etc/tower/SECRET_KEY'
+sudo -u awx bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/tower/SECRET_KEY'
 sudo chmod 0400 /etc/tower/SECRET_KEY
+sudo -u awx wc -c /etc/tower/SECRET_KEY    # want: ~64 bytes, not 0
 ```
 
 ## Base settings file
 
+`settings.py` reads the key file into `SECRET_KEY` — the base file the installer normally generates:
+
 ```bash
 sudo -u awx tee /etc/tower/settings.py >/dev/null <<'EOF'
-# Base production settings. Package defaults apply; put overrides in conf.d/.
+with open('/etc/tower/SECRET_KEY') as f:
+    SECRET_KEY = f.read().strip()
 EOF
 ```
 
