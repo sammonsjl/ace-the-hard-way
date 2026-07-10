@@ -60,27 +60,15 @@ sudo dnf -y update
 cat /etc/rocky-release
 ```
 
-**Verify the node** — confirm everything is right BEFORE rebooting, so any post-reboot difference is the reboot's doing:
+**Verify the node**, then reboot as the last step (applies any kernel update; tmpfiles.d will recreate `/var/run/tower` on the way up):
 
 ```bash
 id awx                              # service user exists
 sudo -u awx bash -c 'echo $HOME'    # /var/lib/awx
-ls -ld /var/run/tower               # exists now, awx:awx 0750
+ls -ld /var/run/tower               # exists, awx:awx 0750
 ping -c1 192.168.56.20              # execution plane reachable
-```
-
-Also run the **Preflight checks** (section below) now. All green → reboot. The reboot does double duty: applies any kernel update AND proves tmpfiles.d recreates `/var/run/tower`:
-
-```bash
-sudo reboot                # your ssh session drops; that's expected
-```
-
-Reconnect for the one check only a reboot can prove:
-
-```bash
-vagrant ssh ace-control
-ls -ld /var/run/tower               # back after reboot — tmpfiles.d works
-exit
+# ...plus the Preflight checks (section below)
+sudo reboot                         # ssh session drops; that's expected
 ```
 
 ## Prep the execution plane node
@@ -93,16 +81,12 @@ sudo useradd --system --home-dir /var/lib/awx --create-home --shell /bin/bash aw
 sudo dnf -y update
 ```
 
-**Verify before rebooting**, same discipline:
+Verify, then reboot as the last step:
 
 ```bash
 id awx                              # service user exists
 ping -c1 192.168.56.10              # control plane reachable the other way
-```
-
-Run the **Preflight checks** here too, then reboot to land on the updated kernel:
-
-```bash
+# ...plus the Preflight checks (section below)
 sudo reboot
 ```
 
