@@ -68,9 +68,11 @@ sudo -u awx cp -a /opt/ansible-ui/frontend/awx/dist/. /var/lib/awx/public/ui/
 ## Verify
 
 ```bash
-ls /var/lib/awx/public/ui/index.html          # want: the SPA entrypoint exists
-ls /var/lib/awx/public/ui/assets | head        # want: hashed JS/CSS bundles
+sudo -u awx ls /var/lib/awx/public/ui/index.html     # want: the SPA entrypoint exists
+sudo -u awx ls /var/lib/awx/public/ui/assets | head   # want: hashed JS/CSS bundles
 ```
+
+Check as `awx`: `/var/lib/awx` is the awx user's home and isn't world-readable, so a plain `ls` gives "Permission denied." nginx gets its own read access to this path in Lab 10.
 
 If both list files, the UI is built and staged.
 
