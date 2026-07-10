@@ -29,7 +29,7 @@ sudo -u awx /var/lib/awx/venv/awx/bin/pip install supervisor uwsgi
 
 ```bash
 sudo tee /etc/tmpfiles.d/tower.conf >/dev/null <<'EOF'
-d /var/run/tower 0755 awx awx -
+d /run/tower 0755 awx awx -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/tower.conf
 sudo install -d -o root -g root -m 0755 /var/log/supervisor
