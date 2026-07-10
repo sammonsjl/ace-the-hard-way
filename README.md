@@ -37,10 +37,10 @@ You run (or will run) Ansible Automation Platform, AWX, or similar, and you want
 **AWX from source**
 
 5. [AWX from source](docs/05-awx-source.md)
-6. [Building the UI](docs/06-awx-ui.md)
-7. [Configuring AWX](docs/07-awx-config.md)
-8. [Database init](docs/08-awx-init.md)
-9. [Running the services](docs/09-awx-services.md)
+6. [Configuring AWX](docs/06-awx-config.md)
+7. [Database init](docs/07-awx-init.md)
+8. [Running the services](docs/08-awx-services.md)
+9. [Building the UI](docs/09-awx-ui.md)
 10. [nginx front door](docs/10-nginx.md)
 11. [Receptor](docs/11-receptor.md)
 
@@ -58,7 +58,7 @@ You run (or will run) Ansible Automation Platform, AWX, or similar, and you want
 **Appendix labs — break it on purpose**
 
 - [A1: The EPEL uwsgi conflict](docs/a1-epel-uwsgi-conflict.md) — deliberately clobber your uwsgi, diagnose the ABI mismatch, armor the box with `excludepkgs`
-- [A2: The same stack, native systemd](docs/a2-native-systemd.md) — rebuild Lab 9 without supervisord and compare both worlds
+- [A2: The same stack, native systemd](docs/a2-native-systemd.md) — rebuild Lab 8 without supervisord and compare both worlds
 - [A3: Backup and restore](docs/a3-backup-restore.md) — what actually holds state, and proving you can get it back
 
 — [Glossary](docs/glossary.md) · [Cleanup](docs/99-cleanup.md)

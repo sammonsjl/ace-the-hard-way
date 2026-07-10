@@ -1,4 +1,4 @@
-# Lab 9 — Running the services
+# Lab 8 — Running the services
 
 ## What you will have at the end
 
@@ -42,4 +42,4 @@ The real supervisor config (`tower.conf`) runs **eight** programs, not six:
 - [ ] Socket dirs under `/var/run/tower` need a **tmpfiles.d** entry (they vanish on reboot — the installer even ships a `systemd-tmpfiles --create` fix for exactly this)
 - [ ] systemd topology: the service is enabled as `automation-controller.service`, and dependent SYSTEM services (postgres, redis, nginx) get `PartOf=` overrides tied to a target — restart the target, the family restarts. Worth reproducing as `automation-controller.target`
 
-Next: [nginx front door](10-nginx.md)
+Next: [Building the UI](09-awx-ui.md)

@@ -1,4 +1,4 @@
-# Lab 7 — Configuring AWX
+# Lab 6 — Configuring AWX
 
 ## What you will have at the end
 
@@ -20,4 +20,4 @@ Settings, secrets, and database config written by hand.
 - [ ] `/etc/tower/conf.d/*.py` fragments — one concern per file: `postgres.py`, `channels.py` (includes a generated broadcast-websocket secret), `cluster_host_id.py`, `execution_environments.py`, `container_groups.py`, `callback_receiver_workers.py`
 - [ ] Mirror this layout — it's tidy and it matches what any AAP admin already knows
 
-Next: [Database init](08-awx-init.md)
+Next: [Database init](07-awx-init.md)

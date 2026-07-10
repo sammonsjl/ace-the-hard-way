@@ -1,4 +1,4 @@
-# Lab 8 — Database init
+# Lab 7 — Database init
 
 ## What you will have at the end
 
@@ -12,4 +12,4 @@ A migrated database, an admin user, and a registered instance.
 - [ ] `awx-manage create_preload_data` (demo project/inventory/template)
 - [ ] Verify: tables exist, instance registered (`awx-manage list_instances`)
 
-Next: [Running the services](09-awx-services.md)
+Next: [Running the services](08-awx-services.md)

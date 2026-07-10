@@ -83,6 +83,6 @@ sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage --version  # records the devel 
 sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage --help     # want: the command list, no Traceback
 ```
 
-If `--help` prints the command list, the backend is built. (It can't talk to a database yet — that's Lab 7's `/etc/tower` config and the migrate step later.)
+If `--help` prints the command list, the backend is built. (It can't talk to a database yet — that's Lab 6's `/etc/tower` config and the migrate step later.)
 
-Next: [Building the UI](06-awx-ui.md)
+Next: [Configuring AWX](06-awx-config.md)

@@ -52,6 +52,6 @@ Same Django app, two plugs — that's why AWX needs two web servers.
 |---|---|
 | **gateway (Jewel)** | The platform's front door: single login, one URL, proxies to AWX and future services (Labs 15–16). |
 | **envoy** | The proxy the gateway drives — the actual traffic router in front of the platform services. |
-| **awx-manage** | AWX's admin command (Django manage.py in a suit): migrations, users, instance registration, all of Lab 8. |
+| **awx-manage** | AWX's admin command (Django manage.py in a suit): migrations, users, instance registration, all of Lab 7. |
 
 Back to the [README](../README.md)

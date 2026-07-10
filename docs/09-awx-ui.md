@@ -1,4 +1,4 @@
-# Lab 6 — Building the UI
+# Lab 9 — Building the UI
 
 ## What you will have at the end
 
@@ -72,8 +72,6 @@ sudo -u awx ls /var/lib/awx/public/ui/index.html     # want: the SPA entrypoint 
 sudo -u awx ls /var/lib/awx/public/ui/assets | head   # want: hashed JS/CSS bundles
 ```
 
-Check as `awx`: `/var/lib/awx` is the awx user's home and isn't world-readable, so a plain `ls` gives "Permission denied." nginx gets its own read access to this path in Lab 10.
-
 If both list files, the UI is built and staged.
 
 ## What Lab 10 (nginx) will need
@@ -86,4 +84,4 @@ This SPA is served as its own site, not through Django's `collectstatic`. When w
 
 `AWX_SERVER` is baked in at build time. If you later front this host with a hostname instead of `192.168.56.10`, rebuild with the new `AWX_SERVER`.
 
-Next: [Configuring AWX](07-awx-config.md)
+Next: [nginx front door](10-nginx.md)

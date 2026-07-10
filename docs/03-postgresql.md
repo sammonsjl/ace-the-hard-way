@@ -75,7 +75,7 @@ sudo systemctl reload postgresql
 
 ## Create the AWX database and user
 
-Pick a real password and stash it somewhere you'll find in Lab 7 (it goes into `/etc/tower/conf.d/postgres.py`):
+Pick a real password and stash it somewhere you'll find in Lab 6 (it goes into `/etc/tower/conf.d/postgres.py`):
 
 ```bash
 sudo -u postgres psql <<'SQL'
