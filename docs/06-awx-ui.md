@@ -19,9 +19,9 @@ Two consequences to know up front:
 
 All commands on **ace-control**. Assumes `git` from Lab 5 is present.
 
-## Switch to Node 20
+## Install Node 20
 
-If you installed Node 18 for an earlier pass, reset the stream first:
+Node 20 ships as a module stream on Rocky 9. Reset the module so the stream resolves cleanly, then install:
 
 ```bash
 sudo dnf -y module reset nodejs
