@@ -38,7 +38,16 @@ PostgreSQL 15 defaults to scram-sha-256 for password hashing — confirm rather 
 sudo -u postgres psql -c "SHOW password_encryption;"   # want: scram-sha-256
 ```
 
-Now make the client-connection rules use it. Edit `/var/lib/pgsql/data/pg_hba.conf` — find the IPv4/IPv6 `host` lines near the bottom and set their METHOD to `scram-sha-256`:
+Now make the client-connection rules use it. Edit `/var/lib/pgsql/data/pg_hba.conf` and look at the `host` lines near the bottom. **Rocky's stock `initdb` ships them as `ident`, not `scram-sha-256`** — so you will actually see this:
+
+```
+# TYPE  DATABASE  USER  ADDRESS       METHOD
+local   all       all                 peer
+host    all       all   127.0.0.1/32  ident      # <- stock default, change this
+host    all       all   ::1/128       ident      # <- stock default, change this
+```
+
+Change both TCP-loopback lines' METHOD to `scram-sha-256` so it matches the password auth we just confirmed:
 
 ```
 # TYPE  DATABASE  USER  ADDRESS       METHOD
@@ -47,9 +56,18 @@ host    all       all   127.0.0.1/32  scram-sha-256
 host    all       all   ::1/128       scram-sha-256
 ```
 
-(`local ... peer` stays — that's what lets the `postgres` OS user administer the DB without a password.)
+(`local ... peer` stays — that's what lets the `postgres` OS user administer the DB without a password. `peer` reads the OS uid straight off the Unix socket, which is why `sudo -u postgres psql` always works.)
 
-Apply:
+> **Warning — leave those lines on `ident` and every TCP login fails, password or not.** `ident` (RFC 1413) asks an `identd` server on the *client* to vouch for which OS user owns the connecting socket. No VM runs `identd`, so the lookup can't complete and PostgreSQL rejects the connection *before it ever checks the password*:
+>
+> ```
+> psql: error: connection to server at "localhost" (::1), port 5432 failed:
+> FATAL:  Ident authentication failed for user "awx"
+> ```
+>
+> Two things make this sneaky. First, `sudo -u postgres psql` keeps working the whole time (it uses the Unix socket → the `local ... peer` rule), so the DB *looks* fine. Second, `-h localhost` usually resolves to the IPv6 loopback `::1` first, so the rule that bites you is the `::1/128` line — change **both** loopback lines, not just the IPv4 one.
+
+Apply — this is a `reload`, not a `restart`. `pg_hba.conf` is re-read on `SIGHUP`; no need to bounce the server:
 
 ```bash
 sudo systemctl reload postgresql
