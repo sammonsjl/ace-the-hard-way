@@ -11,6 +11,13 @@ Every process you'll build, one line each. Come back here whenever a name goes b
 
 nginx sits in front and sorts: `/websocket/` paths → daphne's socket, everything else → uwsgi's socket, static files served directly.
 
+| Term | Meaning |
+|---|---|
+| **WSGI** | *Web Server Gateway Interface* — Python's standard plug between a web server and an app. Synchronous: one request in, one response out, connection closes. What uwsgi speaks. |
+| **ASGI** | *Asynchronous Server Gateway Interface* — WSGI's async successor, built for connections that stay open (websockets, long polling). What daphne speaks. |
+
+Same Django app, two plugs — that's why AWX needs two web servers.
+
 ## The workers
 
 | Process | What it does |
