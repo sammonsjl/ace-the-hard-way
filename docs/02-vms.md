@@ -53,25 +53,35 @@ TMPEOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/tower.conf
 ```
 
-Update the base system, then reboot — one reboot does double duty: it applies any kernel update AND proves tmpfiles.d recreates `/var/run/tower`:
+Update the base system:
 
 ```bash
 sudo dnf -y update
 cat /etc/rocky-release
-sudo reboot                # your ssh session drops; that's expected
 ```
 
-Reconnect and verify the control node:
+**Verify the node** — confirm everything is right BEFORE rebooting, so any post-reboot difference is the reboot's doing:
 
 ```bash
-vagrant ssh ace-control
-ls -ld /var/run/tower               # back after reboot, awx:awx 0750 — tmpfiles.d works
 id awx                              # service user exists
 sudo -u awx bash -c 'echo $HOME'    # /var/lib/awx
+ls -ld /var/run/tower               # exists now, awx:awx 0750
 ping -c1 192.168.56.20              # execution plane reachable
 ```
 
-Now run the **Preflight checks** (section below) on this box. All green → `exit` and move on.
+Also run the **Preflight checks** (section below) now. All green → reboot. The reboot does double duty: applies any kernel update AND proves tmpfiles.d recreates `/var/run/tower`:
+
+```bash
+sudo reboot                # your ssh session drops; that's expected
+```
+
+Reconnect for the one check only a reboot can prove:
+
+```bash
+vagrant ssh ace-control
+ls -ld /var/run/tower               # back after reboot — tmpfiles.d works
+exit
+```
 
 ## Prep the execution plane node
 
@@ -81,18 +91,22 @@ Now run the **Preflight checks** (section below) on this box. All green → `exi
 vagrant ssh ace-exec
 sudo useradd --system --home-dir /var/lib/awx --create-home --shell /bin/bash awx
 sudo dnf -y update
-sudo reboot
 ```
 
-Reconnect and verify:
+**Verify before rebooting**, same discipline:
 
 ```bash
-vagrant ssh ace-exec
 id awx                              # service user exists
 ping -c1 192.168.56.10              # control plane reachable the other way
 ```
 
-Run the **Preflight checks** on this box too. Both VMs green = Lab 2 done.
+Run the **Preflight checks** here too, then reboot to land on the updated kernel:
+
+```bash
+sudo reboot
+```
+
+Both VMs verified and rebooted = Lab 2 done.
 
 ## The filesystem contract (matches the real RPM install exactly)
 
