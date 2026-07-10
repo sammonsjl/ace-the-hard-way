@@ -2,63 +2,86 @@
 
 ## What you will have at the end
 
-The AWX web UI built from source and collected into `/var/lib/awx/public/static`, where nginx will serve it in Lab 10.
+The AWX web UI built from the `ansible-ui` **`devel`** tree as a standalone single-page app, pointed at this box's AWX API, and staged where nginx will serve it in Lab 10. No gateway required.
 
 ## Where the UI comes from
 
-The UI is a **separate repo** — `ansible/ansible-ui`, branch **`main`** (the standalone AWX UI; the awx repo only carries the build glue).
+The UI is a **separate repo** — `ansible/ansible-ui`, branch **`devel`**, built as a standalone app that talks straight to AWX's own API. This is the newer platform-era UI, but it still ships a standalone AWX build in the `frontend/awx` workspace (`@ansible/awx-ui`), and that build runs **without the gateway**.
 
-This is the one component we do **not** track on `devel`. On `ansible-ui`, `devel` is the next-generation **platform** UI (`@ansible/ui`, Node 20+, built from the `platform/` workflow that fronts the gateway) — it has no `build:awx` script, so AWX's `make ui` cannot build it. The standalone AWX web UI that community AWX ships lives on **`main`** and builds with Node 18 — which is exactly why AWX's UI Makefile defaults to `main`. We leave that default alone. `main` still moves, so record the commit you built.
+How it finds AWX: the workspace's Vite config bakes an `AWX_SERVER` env var into the build and targets `AWX_API_PREFIX = /api/v2` — AWX's own API, not the platform's `/api/controller/v2`. Set `AWX_SERVER` to this host and the SPA calls back to our AWX directly.
 
-Two hard facts from the build itself:
+Two consequences to know up front:
 
-- **Node must be 18.x.** AWX's UI Makefile checks the major version and refuses to build on anything else.
-- AWX's `make ui` clones `ansible-ui`, builds it, and drops the output at `awx/ui/build` — which is already on AWX's `STATICFILES_DIRS`, so `collectstatic` finds it with no extra wiring.
+- **Node must be 20+.** This tree (`@ansible/ui`, `engines: node >=20`) will not install on Node 18. That's the opposite of the older `main` UI — so we switch the Node stream here.
+- **We do not use `make ui`.** That target drives the old `main`/`build:awx` path and hard-checks Node 18. We build the `frontend/awx` workspace directly with Vite instead.
 
-All commands on **ace-control**. Assumes `git` and `make` from Lab 5 are present.
+> Upstream files standalone mode under "Not Recommended" (the recommended path fronts the gateway). We use it deliberately: it's the AWX UI without Jewel, which is exactly what this stage of the build needs.
 
-## Install Node 18
+All commands on **ace-control**. Assumes `git` from Lab 5 is present.
+
+## Switch to Node 20
+
+If you installed Node 18 for an earlier pass, reset the stream first:
 
 ```bash
-sudo dnf -y module install nodejs:18/common
-node --version        # want: v18.x
+sudo dnf -y module reset nodejs
+sudo dnf -y module install nodejs:20/common
+node --version        # want: v20.x
 npm --version         # record it
 ```
 
-## Build the UI
+## Clone `ansible-ui` (devel)
 
-`make ui` (from the awx repo) clones `ansible-ui` (branch `main`, its default) into `awx/ui/src`, checks Node 18, installs deps, builds the production bundle, and copies it to `awx/ui/build`. Run it as `awx` in one self-contained shell:
+```bash
+sudo install -d -o awx -g awx /opt/ansible-ui
+sudo -u awx git clone --branch devel https://github.com/ansible/ansible-ui.git /opt/ansible-ui
+```
+
+## Build the AWX UI
+
+`npm ci` installs the whole nx monorepo (all workspaces), then we build just the `frontend/awx` workspace. `AWX_SERVER` is baked into the bundle, so set it to the URL nginx will serve this host on (Lab 10 terminates TLS):
 
 ```bash
 sudo -u awx bash <<'AWXEOF'
 set -euo pipefail
-cd /opt/awx
-node --version                                    # v18.x, or the build refuses
-make ui
-git -C awx/ui/src rev-parse --short HEAD           # RECORD THIS — the ansible-ui main commit you built
+cd /opt/ansible-ui
+node --version                                   # v20.x, or the install refuses
+npm ci                                           # installs the full workspace tree (slow)
+export AWX_SERVER="https://192.168.56.10"        # this host; baked into the build
+cd frontend/awx
+npm run build                                    # vite build -> frontend/awx/dist
+git -C /opt/ansible-ui rev-parse --short HEAD    # RECORD THIS — the ansible-ui devel commit you built
 AWXEOF
 ```
 
-> The webpack production build is memory-hungry. The 8 GB control VM handles it, but if Node dies with "JavaScript heap out of memory," give it more headroom: `NODE_OPTIONS=--max-old-space-size=4096 make ui` (or raise the VM's RAM).
+> The Vite build is memory-hungry (monaco, PatternFly). The 8 GB control VM should handle it; if Node dies with "JavaScript heap out of memory," give it headroom: `NODE_OPTIONS=--max-old-space-size=4096 npm run build` (or raise the VM's RAM).
 
-## Collect static files
+## Stage it for nginx
 
-`collectstatic` gathers the built UI (plus Django's admin/DRF assets) into `STATIC_ROOT` = `/var/lib/awx/public/static`:
+Copy the built SPA to a stable served path under AWX's public dir:
 
 ```bash
-sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage collectstatic --noinput --clear
+sudo install -d -o awx -g awx /var/lib/awx/public/ui
+sudo -u awx cp -a /opt/ansible-ui/frontend/awx/dist/. /var/lib/awx/public/ui/
 ```
 
 ## Verify
 
 ```bash
-# The built UI landed where AWX expects it:
-ls /opt/awx/awx/ui/build/awx/index_awx.html          # want: the file exists
-
-# collectstatic populated the static root:
-ls /var/lib/awx/public/static/awx/ | head            # want: hashed JS/CSS assets
+ls /var/lib/awx/public/ui/index.html          # want: the SPA entrypoint exists
+ls /var/lib/awx/public/ui/assets | head        # want: hashed JS/CSS bundles
 ```
 
-If both list files, the UI is built and staged. nginx will serve `/static` from here in Lab 10.
+If both list files, the UI is built and staged.
+
+## What Lab 10 (nginx) will need
+
+This SPA is served as its own site, not through Django's `collectstatic`. When we set up nginx, it will:
+
+- serve `/var/lib/awx/public/ui` at `/`, with a SPA fallback to `index.html`;
+- proxy `/api/` to AWX (uwsgi) — the SPA calls `AWX_SERVER` + `/api/v2`, same origin;
+- proxy `/websocket/` to daphne (the build sets `AWX_WEBSOCKET_PREFIX = /websocket/`).
+
+`AWX_SERVER` is baked in at build time. If you later front this host with a hostname instead of `192.168.56.10`, rebuild with the new `AWX_SERVER`.
 
 Next: [Configuring AWX](07-awx-config.md)
