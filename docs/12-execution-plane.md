@@ -66,19 +66,19 @@ Same PKI as Lab 11 (receptor's own — `nodeid=` bakes the node ID into the cert
 **On ace-exec — key and CSR:**
 
 ```bash
-sudo receptor --cert-makereq bits=4096 commonname=ace-exec nodeid=ace-exec \
+sudo /usr/local/bin/receptor --cert-makereq bits=4096 commonname=ace-exec nodeid=ace-exec \
   dnsname=ace-exec ipaddress=192.168.56.20 \
   outreq=/tmp/ace-exec.csr \
   outkey=/etc/receptor/tls/ace-exec.key
 sudo chown awx:awx /etc/receptor/tls/ace-exec.key
 sudo chmod 0640 /etc/receptor/tls/ace-exec.key
-sudo cp /tmp/ace-exec.csr /vagrant/ && rm /tmp/ace-exec.csr
+sudo cp /tmp/ace-exec.csr /vagrant/ && sudo rm /tmp/ace-exec.csr
 ```
 
 **On ace-control — sign with the mesh CA, ship back cert + CA + work public key:**
 
 ```bash
-sudo receptor --cert-signreq verify=yes \
+sudo /usr/local/bin/receptor --cert-signreq verify=yes \
   cacert=/etc/receptor/tls/ca/mesh-CA.crt \
   cakey=/etc/receptor/tls/ca/mesh-CA.key \
   req=/vagrant/ace-exec.csr \
@@ -127,9 +127,10 @@ And lingering, so `/run/user/<uid>` exists for `awx` without an interactive logi
 sudo loginctl enable-linger awx
 ```
 
-Pre-pull the default EE (the one Lab 7's `register_default_execution_environments` registered), so the first job doesn't pay the download:
+Pre-pull the default EE (the one Lab 7's `register_default_execution_environments` registered), so the first job doesn't pay the download. **Change directory first** — `sudo -u` keeps your current working directory, and `/home/vagrant` is 0700, so rootless podman invoked from there dies with `cannot chdir to /home/vagrant: Permission denied`. Run all `sudo -u awx podman ...` commands from a world-readable directory:
 
 ```bash
+cd /tmp
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman images --digests    # RECORD the digest
 ```
@@ -232,17 +233,22 @@ sudo firewall-cmd --list-ports    # want: 27199/tcp
 
 ## Peer the control node (ace-control)
 
-The mesh direction matches the bundle's example inventory (`[automationcontroller:vars] peers=execution_nodes`): **controllers dial out, execution nodes listen.** Append the peer to `/etc/receptor/receptor.conf` — the `tls_client` section from Lab 11 does the identity, `redial` keeps the link self-healing:
+The mesh direction matches the bundle's example inventory (`[automationcontroller:vars] peers=execution_nodes`): **controllers dial out, execution nodes listen.** Edit `/etc/receptor/receptor.conf` — the `tls_client` section from Lab 11 does the identity, `redial` keeps the link self-healing:
 
 ```bash
-sudo -u awx tee -a /etc/receptor/receptor.conf >/dev/null <<'EOF'
+sudo vim /etc/receptor/receptor.conf
+```
 
+**Replace** the Lab 11 `- local-only` line (a node with a real peer must not be isolation-mode) with:
+
+```yaml
 - tcp-peer:
     address: ace-exec:27199
     redial: true
     tls: tls_client
-EOF
+```
 
+```bash
 sudo systemctl restart receptor
 ```
 
@@ -261,9 +267,10 @@ sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl \
 # want: Reply from ace-exec ...
 ```
 
-And prove the sandbox works end to end on **ace-exec**:
+And prove the sandbox works end to end on **ace-exec** (again from a readable cwd):
 
 ```bash
+cd /tmp
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
   podman run --rm quay.io/ansible/awx-ee:latest ansible --version
 # want: ansible [core ...] — the EE runs rootless as awx

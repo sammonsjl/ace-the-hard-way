@@ -218,24 +218,44 @@ EOF
 
 ## SELinux: handled, not disabled
 
-Same philosophy as the installer — booleans and file contexts, never permissive. Three problems to solve: nginx (`httpd_t`) may not make outbound connections, may not read `var_lib_t` content, and may not connect to `var_run_t` sockets:
+Verified against the bundle, and the split matters: the installer's `nginx` role sets exactly **one** thing — the `httpd_can_network_connect` boolean. Everything else (socket `connectto` allowances, file contexts for `/var/lib/awx`) comes from the **automation-controller RPM's own SELinux policy module**, which a from-source build doesn't have. So on this box, three denials are *expected*, and we replace the RPM policy by hand:
 
 ```bash
-# the exact boolean the installer sets
+# 1. the exact boolean the installer sets
 sudo setsebool -P httpd_can_network_connect on
 
-# the SPA and static files live under /var/lib — label them web content
+# 2. the SPA and static files live under /var/lib — label them web content
+#    (this is the RPM policy's file-context equivalent)
 sudo semanage fcontext -a -t httpd_sys_content_t '/var/lib/awx/public(/.*)?'
 sudo restorecon -Rv /var/lib/awx/public
-
-# the sockets — label the runtime dir so new sockets inherit a type nginx may touch
-sudo semanage fcontext -a -t httpd_var_run_t '/run/tower(/.*)?'
-sudo restorecon -Rv /var/run/tower
+ls -ld /var/lib/awx    # want: 0755 (Lab 2) — nginx must TRAVERSE the path too,
+                       # or every file 403s with "stat() failed (13: Permission denied)"
 ```
 
-The fcontext rule on `/run/tower` also covers reboots: `systemd-tmpfiles` recreates the directory (Lab 8's `tower.conf`) with the label from this rule, and sockets created inside inherit it.
+Third: the socket. **WHAT breaks:** `connect() to unix:/var/run/tower/uwsgi.sock failed (13: Permission denied)` even though classic permissions are right. **WHY:** SELinux's `connectto` check is against the *domain of the process that bound the socket* (uwsgi runs unconfined under our hand-rolled supervisord), not the socket file's label — so no boolean and no fcontext rule can allow it. The RPM ships a policy module for this; we write the minimal equivalent:
 
-> **If you get a 502:** it's almost always SELinux or socket permissions. Check `sudo tail /var/log/nginx/error.log` (look for `Permission denied` on a `.sock`) and `sudo ausearch -m avc -ts recent`. Whatever you find — WHAT/WHY/FIX it into this lab.
+```bash
+sudo dnf -y install policycoreutils-python-utils setools-console
+sudo tee /tmp/ace-nginx-upstream.te >/dev/null <<'EOF'
+module ace-nginx-upstream 1.0;
+
+require {
+    type httpd_t;
+    type unconfined_service_t;
+    class unix_stream_socket connectto;
+}
+
+# nginx (httpd_t) may connect to sockets bound by our supervisord family
+allow httpd_t unconfined_service_t:unix_stream_socket connectto;
+EOF
+checkmodule -M -m -o /tmp/ace-nginx-upstream.mod /tmp/ace-nginx-upstream.te
+semodule_package -o /tmp/ace-nginx-upstream.pp -m /tmp/ace-nginx-upstream.mod
+sudo semodule -i /tmp/ace-nginx-upstream.pp
+```
+
+This is a one-rule module — the narrow, production-grade fix, and philosophically identical to what the RPM does. It survives reboots, relabels, and package updates (`semodule -l | grep ace` to confirm it's loaded).
+
+> **If you still get a 502:** check `sudo tail /var/log/nginx/error.log` (a `Permission denied` on a `.sock` means classic perms — is the Lab 8 setgid dir intact? `ls -ld /var/run/tower` should say `2775 nginx nginx`, sockets `awx nginx 660`) and `sudo ausearch -m avc -ts recent` for anything SELinux still blocks. Never reach for `chmod 666` on the socket — uwsgi recreates it on every restart with `chmod-socket = 660`, so live chmods silently evaporate. The dir's setgid bit + group `nginx` is the mechanism that survives restarts.
 
 ## firewalld: open the front door
 

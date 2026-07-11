@@ -70,29 +70,31 @@ Here's a genuinely undocumented corner, straight from the bundle: receptor certs
 Create the CA (the bundle's CN is "Ansible Automation Controller Nodes Mesh ROOT CA"; ours keeps the shape without the trademark):
 
 ```bash
-sudo receptor --cert-init commonname="ACE Nodes Mesh ROOT CA" bits=4096 \
+sudo /usr/local/bin/receptor --cert-init commonname="ACE Nodes Mesh ROOT CA" bits=4096 \
   outcert=/etc/receptor/tls/ca/mesh-CA.crt \
   outkey=/etc/receptor/tls/ca/mesh-CA.key
-sudo chown awx:awx /etc/receptor/tls/ca/mesh-CA.*
-sudo chmod 0640 /etc/receptor/tls/ca/mesh-CA.*
+sudo chown awx:awx /etc/receptor/tls/ca/mesh-CA.crt /etc/receptor/tls/ca/mesh-CA.key
+sudo chmod 0640 /etc/receptor/tls/ca/mesh-CA.crt /etc/receptor/tls/ca/mesh-CA.key
 ```
+
+> Files are listed explicitly — no `mesh-CA.*` — because **wildcards expand in YOUR shell, before sudo runs**. `/etc/receptor/tls` is 0750 awx-owned; your login shell can't read it, the glob matches nothing, and the command fails with a baffling "No such file or directory". (The installer never hits this: Ansible's `file` module takes literal paths.)
 
 Then this node's mesh cert — request and sign, both on this box (it's the CA host). Cert files are named after the node, matching the bundle (`/etc/receptor/tls/<node>.crt`):
 
 ```bash
-sudo receptor --cert-makereq bits=4096 commonname=ace-control nodeid=ace-control \
+sudo /usr/local/bin/receptor --cert-makereq bits=4096 commonname=ace-control nodeid=ace-control \
   dnsname=ace-control ipaddress=192.168.56.10 \
   outreq=/etc/receptor/tls/ace-control.csr \
   outkey=/etc/receptor/tls/ace-control.key
 
-sudo receptor --cert-signreq verify=yes \
+sudo /usr/local/bin/receptor --cert-signreq verify=yes \
   cacert=/etc/receptor/tls/ca/mesh-CA.crt \
   cakey=/etc/receptor/tls/ca/mesh-CA.key \
   req=/etc/receptor/tls/ace-control.csr \
   outcert=/etc/receptor/tls/ace-control.crt \
   notafter="$(date --rfc-3339=seconds -d '+2 years' | sed 's/ /T/')"
 
-sudo chown awx:awx /etc/receptor/tls/ace-control.*
+sudo chown awx:awx /etc/receptor/tls/ace-control.crt /etc/receptor/tls/ace-control.key
 sudo chmod 0640 /etc/receptor/tls/ace-control.key
 sudo rm /etc/receptor/tls/ace-control.csr
 
@@ -139,6 +141,9 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 
 - log-level: info
 
+# no mesh peers yet — see the note below; Lab 12 REPLACES this with the tcp-peer
+- local-only
+
 - control-service:
     service: control
     filename: /var/run/awx-receptor/receptor.sock
@@ -174,6 +179,7 @@ EOF
 - **`control-service`** at the AAP socket path, `0660`, with `tls: tls_server` — TLS applies when the control service is reached over the network; local unix-socket clients like `receptorctl` and the dispatcher connect plain.
 - **`tls_server` / `tls_client`** are the bundle's section names. AWX discovers the `tls-client` section by scanning the config — the name itself just has to be referenced consistently (Lab 12's `tcp-peer` uses it).
 - **`work-command` (local)** is how control-plane work (project updates, system jobs) would execute *on this node* — see the warning below.
+- **`local-only`** — a war story, now bundle-verified. Without it, this config has **no backends** (no listener, no peers — those come in Lab 12), and receptor treats that as "nothing to do": it logs `WARNING Nothing to do - no backends are running` and exits cleanly, which looks like a crash loop from systemd and makes `receptorctl` throw `Connection refused`. The installer's template emits exactly `- local-only` for a single controller with no listener. It means "run as an isolated node" — remove it the moment a real peer exists (Lab 12 does). If you hit the crash loop first: fix the config, then `sudo systemctl reset-failed receptor` before restarting.
 
 > **Honest warning about `local` work:** on a real AAP control node, `local` work runs inside a control-plane EE under podman. This control plane is bare metal **by design** — no podman. The mesh, the demo job, and everything in Labs 12–14 work fine (jobs execute on ace-exec). What can't run here: SCM project updates and the built-in cleanup system jobs. Lab 14 shows the manual-project pattern that sidesteps this, and what to do about the cleanup schedules.
 

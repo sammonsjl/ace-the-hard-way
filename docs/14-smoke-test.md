@@ -4,9 +4,33 @@
 
 The whole point: a job launched on your hand-built control plane, dispatched over YOUR receptor mesh, executed in an EE container on the execution plane you built. Labs 1–14 = a complete, working controller.
 
-## First: make the demo runnable on a bare-metal control plane
+## First: the Demo Project problem — and both fixes
 
-One honest limitation to deal with (flagged in Lab 11). The Demo Project is an **SCM project** — git type. Syncing it is control-plane work, and on a real AAP control node that sync runs inside a control-plane EE under podman. This control plane is bare metal by design: no podman, so no SCM syncs. The pattern that sidesteps it — and a classic Tower pattern in its own right — is a **manual project**: playbooks placed directly in `PROJECTS_ROOT`, no sync needed. The job payload is transmitted to ace-exec by the dispatcher itself (in-process, no container), so nothing else changes.
+Launching the demo kicks off a **project sync first**, and the sync runs on **ace-control**, not ace-exec. That's not a wiring mistake: SCM updates are control-plane work by definition (every node type's project updates run on the controlplane queue), and they execute inside the **control-plane EE** — a podman container. Bundle-verified: the installer's `receptor` role installs `podman` + `crun` on control nodes too (`node_type: control` is in its "workable types" list), configures rootless podman for `awx`, and registers a `control_plane_execution_environment` image. A real AAP control node runs containers for exactly this.
+
+So there are two honest paths, and which one you take defines what this tutorial's control plane *is*:
+
+**Path A — bundle-faithful: give the control node its sandbox.** Same moves as Lab 12's podman section, run on **ace-control**:
+
+```bash
+sudo dnf -y install podman crun
+grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
+sudo loginctl enable-linger awx
+cd /tmp
+sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
+```
+
+Then add `XDG_RUNTIME_DIR` to the family's environment so the dispatcher's `local` work can start containers — in `/etc/tower/supervisord.conf`, extend every `environment=` line (uid from `id -u awx`):
+
+```ini
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx",XDG_RUNTIME_DIR="/run/user/<AWX_UID>"
+```
+
+Restart the family (`sudo systemctl restart automation-controller`) and SCM project syncs, the Demo Project included, work as shipped — and the cleanup system jobs at the end of this lab stop being a problem too.
+
+**Path B — bare-metal purist: the manual project.** No containers on control, ever. A classic Tower pattern: playbooks placed directly in `PROJECTS_ROOT`, no sync needed. The job payload is transmitted to ace-exec by the dispatcher itself (in-process, no container), so nothing else changes. The trade: no SCM projects, and the cleanup schedules keep failing.
+
+The rest of this lab works under either path; Path B's manual-project steps follow.
 
 On **ace-control**, create the project dir and write the playbook by hand — it keeps the name `hello.yml`, so the Demo Job Template needs no change:
 
@@ -48,9 +72,10 @@ curl -sk -u "admin:${AWX_PW}" -X PATCH \
 
 ## Set up the watch posts
 
-**Terminal 1 — ace-exec**, watch for the EE container to appear:
+**Terminal 1 — ace-exec**, watch for the EE container to appear (`cd /tmp` first — rootless podman can't start from the 0700 vagrant home):
 
 ```bash
+cd /tmp
 watch -n1 "sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman ps"
 ```
 
@@ -103,9 +128,9 @@ curl -sk -u "admin:${AWX_PW}" https://192.168.56.10/api/v2/jobs/<JOB_ID>/ \
 
 That's an automation platform, by hand, from source.
 
-## Loose end: the cleanup schedules
+## Loose end: the cleanup schedules (Path B only)
 
-AWX ships default system-job schedules (Cleanup Job Details, Cleanup Activity Stream, ...). System jobs are `local` work — control-plane EE, podman — so **on this build they will fail on schedule**, loudly, in the jobs list. Three honest options:
+On **Path A this section is moot** — system jobs run in the control-plane EE like the bundle intends. On Path B: AWX ships default system-job schedules (Cleanup Job Details, Cleanup Activity Stream, ...). System jobs are `local` work — control-plane EE, podman — so **they will fail on schedule**, loudly, in the jobs list. Three honest options:
 
 1. **Leave them failing** — harmless noise, and a permanent reminder of the trade you made
 2. **Disable the schedules** and prune by hand when needed (`awx-manage cleanup_jobs --days=90` runs natively — it's a manage command, not a system job):
@@ -120,7 +145,7 @@ curl -sk -u "admin:${AWX_PW}" -X PATCH \
   -H 'Content-Type: application/json' -d '{"enabled": false}'
 ```
 
-3. **The production answer:** put podman on the control node (that's what real AAP does). If you ever want SCM projects on this build, that's the door — it just stops being the pure bare-metal statement this tutorial makes.
+3. **Switch to Path A** (top of this lab) — the bundle-faithful answer, and it fixes SCM projects at the same time.
 
 > Milestone: **Labs 1–14 are a complete, working controller.** The gateway labs (15–16) add the single-login platform layer on top — and they're the risky tail. Ship this milestone first: commit your notes, tag your fork, take the win.
 

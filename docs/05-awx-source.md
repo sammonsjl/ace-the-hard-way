@@ -85,4 +85,27 @@ sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage --help     # want: the command 
 
 If `--help` prints the command list, the backend is built. (It can't talk to a database yet — that's Lab 6's `/etc/tower` config and the migrate step later.)
 
+## Put `awx-manage` in the PATH — like the RPM does
+
+On a real AAP box you type `awx-manage` anywhere and it works: the RPM ships a wrapper at **`/usr/bin/awx-manage`** that execs the venv binary. The installer's own tasks call that bare `awx-manage` (always as the `awx` user — `become_user: awx` on every single task). Hand-write the same wrapper, with one upgrade for our from-source build: bake in `AWX_MODE=production`, because upstream source defaults to *development* mode and any process that loses that variable loads the wrong settings and dies in strange ways (see Lab 8's warning):
+
+```bash
+sudo tee /usr/bin/awx-manage >/dev/null <<'EOF'
+#!/bin/bash
+# hand-written stand-in for the RPM's /usr/bin/awx-manage wrapper
+export AWX_MODE=production
+export HOME=${HOME:-/var/lib/awx}
+exec /var/lib/awx/venv/awx/bin/awx-manage "$@"
+EOF
+sudo chmod 0755 /usr/bin/awx-manage
+
+sudo -u awx awx-manage --version    # works from anywhere now
+```
+
+Why `/usr/bin` and not `/usr/local/bin`: `sudo`'s `secure_path` on Rocky does not include `/usr/local/bin`, so `sudo -u awx awx-manage` would fail with "command not found" — a trap you'd hit constantly. The RPM uses `/usr/bin`; so do we.
+
+Why still `sudo -u awx`: it's in the PATH for *everyone*, but the config (`/etc/tower`, `SECRET_KEY`) is readable only by `awx` — that's deliberate. Root can read anything, so plain `sudo awx-manage` also works; what you can't do is run it as your login user. Same as a real AAP box.
+
+> Labs 6–14 spell out the full `sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage ...'` form so they work even without this wrapper — but with it, every one of those collapses to `sudo -u awx awx-manage ...`.
+
 Next: [Configuring AWX](06-awx-config.md)

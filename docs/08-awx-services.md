@@ -76,8 +76,11 @@ sudo tee /etc/tower/supervisord.conf >/dev/null <<'EOF'
 [unix_http_server]
 file=/var/run/tower/supervisor.sock
 chmod=0770
+chown=awx:awx
 
 [supervisord]
+umask=022
+minfds=4096
 logfile=/var/log/supervisor/supervisord.log
 pidfile=/var/run/tower/supervisord.pid
 
@@ -89,65 +92,91 @@ serverurl=unix:///var/run/tower/supervisor.sock
 
 [program:uwsgi]
 command=/var/lib/awx/venv/awx/bin/uwsgi /etc/tower/uwsgi.ini
+directory=/var/lib/awx
 user=awx
 autostart=true
 autorestart=true
 stopsignal=INT
+stopwaitsecs=15
+stopasgroup=true
 redirect_stderr=true
 stdout_logfile=/var/log/supervisor/uwsgi.log
-environment=AWX_MODE="production"
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=10
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
 [program:daphne]
 ; TCP for first bring-up (curl-able); Lab 10 moves this to the bundle's unix socket
 command=/var/lib/awx/venv/awx/bin/daphne -b 127.0.0.1 -p 8051 awx.asgi:channel_layer
+directory=/var/lib/awx
 user=awx
 autostart=true
 autorestart=true
+stopwaitsecs=5
 redirect_stderr=true
 stdout_logfile=/var/log/supervisor/daphne.log
-environment=AWX_MODE="production"
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=10
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
 [program:dispatcher]
 command=/var/lib/awx/venv/awx/bin/awx-manage dispatcherd
+directory=/var/lib/awx
 user=awx
 autostart=true
 autorestart=true
 stopwaitsecs=60
 redirect_stderr=true
 stdout_logfile=/var/log/supervisor/dispatcher.log
-environment=AWX_MODE="production"
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=10
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
 [program:callback-receiver]
 command=/var/lib/awx/venv/awx/bin/awx-manage run_callback_receiver
+directory=/var/lib/awx
 user=awx
 autostart=true
 autorestart=true
 redirect_stderr=true
 stdout_logfile=/var/log/supervisor/callback-receiver.log
-environment=AWX_MODE="production"
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=10
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
 [program:wsrelay]
 command=/var/lib/awx/venv/awx/bin/awx-manage run_wsrelay
+directory=/var/lib/awx
 user=awx
 autostart=true
 autorestart=true
 redirect_stderr=true
 stdout_logfile=/var/log/supervisor/wsrelay.log
-environment=AWX_MODE="production"
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=10
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
 [program:ws-heartbeat]
 command=/var/lib/awx/venv/awx/bin/awx-manage run_ws_heartbeat
+directory=/var/lib/awx
 user=awx
 autostart=true
 autorestart=true
+stopwaitsecs=5
 redirect_stderr=true
 stdout_logfile=/var/log/supervisor/ws-heartbeat.log
-environment=AWX_MODE="production"
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=10
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
 [group:ace]
 programs=uwsgi,daphne,dispatcher,callback-receiver,wsrelay,ws-heartbeat
 EOF
 ```
+
+Bundle deltas worth knowing (all folded in above): every program runs with `directory=/var/lib/awx` and gets `HOME`/`USER` in its environment; supervisord itself runs `umask=022 minfds=4096`; every log rotates at 10 MB × 10. Program names differ (the bundle prefixes `awx-` and groups them as `tower-processes`; we keep `ace`).
+
+> **Why `AWX_MODE` is on EVERY program — a war story.** The bundle doesn't set it at all, because Red Hat's package defaults to production. Our from-source build defaults to **development**, and the two modes load different settings. A single awx process that starts without `AWX_MODE=production` runs half-in, half-out: development code paths reading production config — and dies on things like `AttributeError: 'Settings' object has no attribute 'AWX_DISABLE_TASK_MANAGERS'` in the dispatcher. If you ever see an AttributeError on a settings name, check the process's environment *first*, not the settings file. The Lab 5 wrapper bakes the variable in for manual commands for the same reason.
 
 ## The one systemd unit
 
@@ -206,6 +235,30 @@ sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf rest
 
 ## Add rsyslog (the last two programs)
 
-AWX runs on file logging without this, so add it once the core is green. The bundle runs `awx-rsyslogd` and `awx-manage run_rsyslog_configurer` as two more supervised programs writing to `/var/run/awx-rsyslog/rsyslog.sock`. Left as the next increment.
+AWX runs on file logging without this, so add it once the core is green. The bundle's exact commands (verified):
+
+```ini
+[program:rsyslogd]
+command=rsyslogd -n -i /var/run/awx-rsyslog/rsyslog.pid -f /var/lib/awx/rsyslog/rsyslog.conf
+user=awx
+autostart=true
+autorestart=true
+stopsignal=TERM
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/var/log/supervisor/rsyslog.log
+
+[program:rsyslog-configurer]
+command=/var/lib/awx/venv/awx/bin/awx-manage run_rsyslog_configurer
+directory=/var/lib/awx
+user=awx
+autorestart=true
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/var/log/supervisor/rsyslog-configurer.log
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+```
+
+Prereqs when you do it: `dnf install rsyslog`, `install -d -o awx -g awx /var/lib/awx/rsyslog`, a tmpfiles.d entry for `/var/run/awx-rsyslog` (0750 awx awx), add both programs to the `[group:ace]` list. (The bundle also runs an `rsyslog-4xx-recovery` eventlistener from an RPM-shipped script — skipped here.) Left as the next increment.
 
 Next: [Building the UI](09-awx-ui.md)

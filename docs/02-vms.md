@@ -42,6 +42,11 @@ sudo mkdir -p /var/log/tower /var/log/supervisor
 
 sudo chown -R awx:awx /var/lib/awx /etc/tower /var/log/tower
 sudo chmod 0750 /var/log/tower
+
+# the bundle sets the home dir to 0755 — nginx must traverse it to serve
+# /var/lib/awx/public later. useradd created it 0700; fix that now or Lab 10
+# ends in "stat() failed (13: Permission denied)" on every static file.
+sudo chmod 0755 /var/lib/awx
 ```
 
 `/var/run/tower` (the uwsgi/daphne sockets) lives on a tmpfs — it vanishes every reboot unless systemd recreates it. That's what tmpfiles.d is for:
