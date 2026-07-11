@@ -158,6 +158,16 @@ WantedBy=multi-user.target
 EOF
 ```
 
+## SELinux: label the venv executables
+
+Rocky 9 runs SELinux enforcing, and systemd (`init_t`) may not execute binaries labeled `var_lib_t` — which is everything under `/var/lib/awx`. Skip this and the unit dies with `203/EXEC`. Relabel the venv's `bin/` as `bin_t`, the same way the installer sets contexts:
+
+```bash
+sudo dnf -y install policycoreutils-python-utils
+sudo semanage fcontext -a -t bin_t '/var/lib/awx/venv/awx/bin(/.*)?'
+sudo restorecon -Rv /var/lib/awx/venv/awx/bin
+```
+
 ## Start it
 
 ```bash
