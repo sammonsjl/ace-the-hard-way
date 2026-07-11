@@ -272,8 +272,10 @@ And prove the sandbox works end to end on **ace-exec** (again from a readable cw
 ```bash
 cd /tmp
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
-  podman run --rm quay.io/ansible/awx-ee:latest ansible --version
-# want: ansible [core ...] — the EE runs rootless as awx
+  podman run --rm --env OPENSSL_armcap=0 quay.io/ansible/awx-ee:latest ansible-playbook --version
+# want: ansible-playbook [core ...] — the EE runs rootless as awx
+# exit 132 without the --env? That's Lab 11's Apple Silicon SIGILL story. AWX-launched
+# jobs on this node are already covered by the global AWX_TASK_ENV setting from Lab 11.
 ```
 
 > **If the peer never appears:** three usual suspects, in order. (1) firewalld — the connection times out silently; check `sudo firewall-cmd --list-ports` on ace-exec. (2) The node-ID SAN — both certs must show the `1.3.6.1.4.1.2312.19.1` otherName (the openssl check above); a cert made outside receptor's PKI fails TLS with what looks like a CA problem. (3) Clock skew — preflight's chrony check exists for a reason. Whatever it was: WHAT/WHY/FIX into this lab.

@@ -78,6 +78,25 @@ sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/a
 
 (`quay.io/ansible/awx-ee:latest` doubles as the default job EE and the control-plane EE — Lab 7's `register_default_execution_environments` registered both.)
 
+Smoke-test the sandbox — and make it exercise **crypto**, not just the shell (see the warning below for why):
+
+```bash
+sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
+  podman run --rm quay.io/ansible/awx-ee:latest ansible-playbook --version
+echo $?    # want: 0 — if you get 132, read on
+```
+
+> **War story — exit 132 on Apple-Silicon-hosted VMs.** On an aarch64 VM under VMware Fusion, the EE dies with **exit 132 (SIGILL — illegal instruction)** the moment ansible starts, and AWX shows failed project updates/jobs with an **empty** `result_traceback`. It is NOT a wrong-arch image: `podman image inspect --format '{{.Architecture}}'` says arm64, `/bin/true` and bare python run fine. The cause: the guest kernel advertises high-end ARM crypto features, OpenSSL inside the EE autodetects them and takes an accelerated code path using an instruction that traps under the hypervisor. ansible-core imports `cryptography` at startup (`ansible.cli → ansible.parsing.vault`), OpenSSL initializes, SIGILL — before any output, hence the empty traceback. **Fix:** tell OpenSSL to skip ARM capability dispatch in every EE, globally, via AWX's task environment (correctness-safe; small crypto perf cost):
+>
+> ```bash
+> read -s -p "AWX admin password: " AWX_PW; echo
+> curl -sk -u "admin:${AWX_PW}" -X PATCH https://192.168.56.10/api/v2/settings/jobs/ \
+>   -H 'Content-Type: application/json' \
+>   -d '{"AWX_TASK_ENV": {"OPENSSL_armcap": "0"}}' | python3 -m json.tool | grep -A2 AWX_TASK_ENV
+> ```
+>
+> AWX merges `AWX_TASK_ENV` into every task, and ansible-runner passes it into the podman EE as `--env` — control-plane EEs and job EEs on every node, covered in one setting. For *manual* `podman run` tests (which don't go through AWX), pass `--env OPENSSL_armcap=0` yourself. General lesson: exit 132 on an EE = SIGILL — check the image arch first, but on Apple Silicon suspect a CPU-feature trap in a correct-arch image, not a bad pull.
+
 ## The mesh root CA — receptor's own PKI
 
 Here's a genuinely undocumented corner, straight from the bundle: receptor certs are **not** made with openssl, and the mesh does **not** share the Lab 10 web CA. The `receptor` binary ships its own PKI (`--cert-init`, `--cert-makereq`, `--cert-signreq`), and the installer uses it to create a dedicated mesh root CA. Why the special tooling: receptor verifies **node IDs, not hostnames** — each cert carries the node ID in an `otherName` SAN under receptor's private OID (`1.3.6.1.4.1.2312.19.1`), and `--cert-makereq nodeid=...` is what injects it. Sign a normal web cert instead and the mesh fails TLS with errors that never mention the real cause.
