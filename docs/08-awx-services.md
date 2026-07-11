@@ -88,6 +88,7 @@ stdout_logfile=/var/log/supervisor/uwsgi.log
 environment=AWX_MODE="production"
 
 [program:daphne]
+; TCP for first bring-up (curl-able); Lab 10 moves this to the bundle's unix socket
 command=/var/lib/awx/venv/awx/bin/daphne -b 127.0.0.1 -p 8051 awx.asgi:channel_layer
 user=awx
 autostart=true
