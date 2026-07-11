@@ -23,13 +23,23 @@ Both must live in the AWX venv, married to our interpreter — never EPEL builds
 sudo -u awx /var/lib/awx/venv/awx/bin/pip install supervisor uwsgi
 ```
 
+## Install nginx (package only — config comes in Lab 10)
+
+**Match the bundle:** the real installer owns the socket directory as `nginx:nginx`, not `awx:awx` — nginx (not awx) is the one reading `uwsgi.sock`/`daphne.sock`, and a `setgid` bit on the directory makes every socket awx creates inherit the `nginx` group automatically. That only works if the `nginx` system user/group already exists, so pull the package in now — nginx itself isn't configured or started until Lab 10:
+
+```bash
+sudo dnf -y module enable nginx:1.24
+sudo dnf -y install nginx
+sudo usermod -aG nginx awx    # awx needs group-write on the setgid socket dir to create sockets there
+```
+
 ## Socket directory (survives reboot)
 
-`/var/run` is tmpfs — wiped on reboot. A `tmpfiles.d` entry recreates the socket dir every boot:
+`/var/run` is tmpfs — wiped on reboot. A `tmpfiles.d` entry recreates the socket dir every boot. Owner is `nginx:nginx`, mode `2775` — the leading `2` is the setgid bit, so files awx creates inside still come out group `nginx`:
 
 ```bash
 sudo tee /etc/tmpfiles.d/tower.conf >/dev/null <<'EOF'
-d /run/tower 0755 awx awx -
+d /run/tower 2775 nginx nginx -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/tower.conf
 sudo install -d -o root -g root -m 0755 /var/log/supervisor
@@ -182,7 +192,7 @@ sudo systemctl enable --now automation-controller
 sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf status
 # want: all six programs RUNNING
 
-ls -l /var/run/tower/uwsgi.sock          # want: the socket exists
+ls -l /var/run/tower/uwsgi.sock          # want: srw-rw---- awx nginx  (group "nginx" via setgid, not awx)
 
 sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage list_instances'
 # want: ace-control now shows capacity > 0 and a real version (it's heartbeating)

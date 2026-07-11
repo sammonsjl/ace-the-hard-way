@@ -2,11 +2,11 @@
 
 ## What you will have at the end
 
-The execution plane's first node: **ace-exec** running receptor from the release binary, TLS-peered to the control node with certs from your Lab 10 CA, verifying signed work, with podman ready to sandbox jobs. (Same plane, different members later: Kubernetes via container groups — a future chapter.)
+The execution plane's first node: **ace-exec** running receptor from the release binary, TLS-peered to the control node with certs from the Lab 11 **mesh CA**, verifying signed work, with podman ready to sandbox jobs. Verified against the 2.6 bundle's `receptor` and `podman` roles. (Same plane, different members later: Kubernetes via container groups — a future chapter.)
 
 ```
 ace-control                              ace-exec
-  receptor ── tcp-peer ──── TLS (mutual, lab CA) ────► :27199 tcp-listener ── receptor
+  receptor ── tcp-peer ──── TLS (mutual, mesh CA) ───► :27199 tcp-listener ── receptor
   work-signing (private key)                            work-verification (public key)
                                                         work-command: ansible-runner worker
                                                           └── EE container under podman
@@ -18,7 +18,7 @@ Commands run on **both** nodes in this lab — each block says which.
 
 ## Names must resolve (both nodes)
 
-The installer's preflight requires peer names to be DNS-resolvable, and our TLS certs carry DNS names. Two `/etc/hosts` lines stand in for DNS:
+The installer's preflight requires peer names to be DNS-resolvable, and the mesh certs carry DNS names. Two `/etc/hosts` lines stand in for DNS:
 
 ```bash
 # on ace-control:
@@ -30,7 +30,7 @@ echo "192.168.56.10 ace-control" | sudo tee -a /etc/hosts
 
 ## Install receptor (ace-exec)
 
-Same pinned release as Lab 11:
+Same pinned release, same directory contract as Lab 11:
 
 ```bash
 RECEPTOR_VERSION=1.6.5
@@ -40,109 +40,88 @@ curl -fsSL -o /tmp/receptor.tgz \
 sudo tar -xzf /tmp/receptor.tgz -C /usr/local/bin receptor
 receptor --version    # want: 1.6.5
 
-sudo install -d -o awx -g awx -m 0750 /var/lib/receptor
-sudo install -d -m 0755 /etc/receptor /etc/receptor/tls /etc/receptor/tls/ca
-sudo tee /etc/tmpfiles.d/receptor.conf >/dev/null <<'EOF'
-d /run/receptor 0750 awx awx -
+sudo install -d -o awx -g awx -m 0750 /etc/receptor /etc/receptor/tls /etc/receptor/tls/ca
+sudo install -d -o awx -g awx -m 0700 /var/lib/receptor
+sudo tee /etc/tmpfiles.d/awx-receptor.conf >/dev/null <<'EOF'
+D /var/run/awx-receptor 0750 awx awx -
 EOF
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/receptor.conf
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/awx-receptor.conf
 df --output=fstype /var/lib/receptor | tail -1    # want: NOT tmpfs (installer preflight)
 ```
 
-Also create the TLS dirs on **ace-control** (its mesh cert lands there too):
+And the installer's nofile limits for the work user:
 
 ```bash
-sudo install -d -m 0755 /etc/receptor/tls /etc/receptor/tls/ca
+sudo tee /etc/security/limits.d/awx.conf >/dev/null <<'EOF'
+# AWX limits
+awx soft nofile 4096
+awx hard nofile 8192
+EOF
 ```
 
-## The mesh TLS — the undocumented dark art
+## The mesh cert — CSR here, signed by the CA host
 
-Here's the part no one writes down: **receptor does not verify hostnames, it verifies node IDs.** Each node's cert must carry the node ID in a SAN of type `otherName` with receptor's private OID — `1.3.6.1.4.1.2312.19.1`. Sign a normal web-style cert and the mesh fails TLS with errors that never mention the real cause. The AAP installer's `certificate_authority` role bakes this OID into every receptor cert; we do it by hand.
-
-Rules we follow: private keys never leave the node they're born on. Only public material (CSRs, certs, the CA cert) crosses `/vagrant` — which is fine, because `/vagrant` also lives on your laptop.
+Same PKI as Lab 11 (receptor's own — `nodeid=` bakes the node ID into the cert's `otherName` SAN). The installer's flow: the key is born on the node and never leaves; the CSR travels to the CA host (ace-control), comes back as a cert. Our courier is `/vagrant` — only public material crosses it.
 
 **On ace-exec — key and CSR:**
 
 ```bash
-sudo tee /etc/receptor/tls/receptor.cnf >/dev/null <<'EOF'
-[req]
-distinguished_name = dn
-req_extensions = ext
-prompt = no
-[dn]
-CN = ace-exec
-[ext]
-subjectAltName = DNS:ace-exec, IP:192.168.56.20, otherName:1.3.6.1.4.1.2312.19.1;UTF8:ace-exec
-EOF
-
-sudo openssl genrsa -out /etc/receptor/tls/receptor.key 2048
-sudo chown awx:awx /etc/receptor/tls/receptor.key && sudo chmod 0600 /etc/receptor/tls/receptor.key
-sudo openssl req -new -key /etc/receptor/tls/receptor.key \
-  -config /etc/receptor/tls/receptor.cnf -out /vagrant/ace-exec.csr
+sudo receptor --cert-makereq bits=4096 commonname=ace-exec nodeid=ace-exec \
+  dnsname=ace-exec ipaddress=192.168.56.20 \
+  outreq=/tmp/ace-exec.csr \
+  outkey=/etc/receptor/tls/ace-exec.key
+sudo chown awx:awx /etc/receptor/tls/ace-exec.key
+sudo chmod 0640 /etc/receptor/tls/ace-exec.key
+sudo cp /tmp/ace-exec.csr /vagrant/ && rm /tmp/ace-exec.csr
 ```
 
-**On ace-control — sign it with the Lab 10 CA** (the extension must be restated at signing time; `x509 -req` drops CSR extensions by default):
+**On ace-control — sign with the mesh CA, ship back cert + CA + work public key:**
 
 ```bash
-sudo openssl x509 -req -in /vagrant/ace-exec.csr \
-  -CA /etc/tower/ca/ca.crt -CAkey /etc/tower/ca/ca.key -CAcreateserial \
-  -days 825 -sha256 -out /vagrant/ace-exec.crt \
-  -extfile <(printf "subjectAltName=DNS:ace-exec,IP:192.168.56.20,otherName:1.3.6.1.4.1.2312.19.1;UTF8:ace-exec")
-```
+sudo receptor --cert-signreq verify=yes \
+  cacert=/etc/receptor/tls/ca/mesh-CA.crt \
+  cakey=/etc/receptor/tls/ca/mesh-CA.key \
+  req=/vagrant/ace-exec.csr \
+  outcert=/vagrant/ace-exec.crt \
+  notafter="$(date --rfc-3339=seconds -d '+2 years' | sed 's/ /T/')"
 
-**On ace-control — its own mesh cert** (client side of the TLS connection; key stays here):
-
-```bash
-sudo openssl genrsa -out /etc/receptor/tls/receptor.key 2048
-sudo chown awx:awx /etc/receptor/tls/receptor.key && sudo chmod 0600 /etc/receptor/tls/receptor.key
-sudo openssl req -new -key /etc/receptor/tls/receptor.key \
-  -subj "/CN=ace-control" -out /tmp/ace-control.csr
-sudo openssl x509 -req -in /tmp/ace-control.csr \
-  -CA /etc/tower/ca/ca.crt -CAkey /etc/tower/ca/ca.key -CAcreateserial \
-  -days 825 -sha256 -out /etc/receptor/tls/receptor.crt \
-  -extfile <(printf "subjectAltName=DNS:ace-control,IP:192.168.56.10,otherName:1.3.6.1.4.1.2312.19.1;UTF8:ace-control")
-rm /tmp/ace-control.csr
-
-# the CA cert doubles as the mesh CA — one platform CA, like the installer
-sudo cp /etc/tower/ca/ca.crt /etc/receptor/tls/ca/mesh-CA.crt
-sudo cp /etc/tower/ca/ca.crt /vagrant/mesh-CA.crt
-
-# ship the work-signing PUBLIC key (Lab 11) alongside
-sudo cp /etc/receptor/work_public_key.pem /vagrant/
+sudo cp /etc/receptor/tls/ca/mesh-CA.crt /vagrant/       # cert only — the CA key stays home
+sudo cat /etc/receptor/work_public_key.pem > /tmp/wpk && sudo cp /tmp/wpk /vagrant/work_public_key.pem
 ```
 
 **On ace-exec — collect the public material:**
 
 ```bash
-sudo cp /vagrant/ace-exec.crt /etc/receptor/tls/receptor.crt
-sudo cp /vagrant/mesh-CA.crt /etc/receptor/tls/ca/mesh-CA.crt
-sudo cp /vagrant/work_public_key.pem /etc/receptor/work_public_key.pem
-sudo openssl verify -CAfile /etc/receptor/tls/ca/mesh-CA.crt /etc/receptor/tls/receptor.crt
+sudo install -o awx -g awx -m 0640 /vagrant/ace-exec.crt /etc/receptor/tls/ace-exec.crt
+sudo install -o awx -g awx -m 0640 /vagrant/mesh-CA.crt /etc/receptor/tls/ca/mesh-CA.crt
+sudo install -o awx -g awx -m 0640 /vagrant/work_public_key.pem /etc/receptor/work_public_key.pem
+
+sudo openssl verify -CAfile /etc/receptor/tls/ca/mesh-CA.crt /etc/receptor/tls/ace-exec.crt
 # want: OK
+sudo openssl x509 -in /etc/receptor/tls/ace-exec.crt -noout -text | grep -A2 'Alternative'
+# want: otherName (1.3.6.1.4.1.2312.19.1), DNS:ace-exec, IP:192.168.56.20
 
 # tidy the shared folder — nothing secret was in it, but don't leave clutter
 rm -f /vagrant/ace-exec.csr /vagrant/ace-exec.crt /vagrant/mesh-CA.crt /vagrant/work_public_key.pem
 ```
 
-The cert/key/CA paths (`/etc/receptor/tls/receptor.crt|key`, `/etc/receptor/tls/ca/mesh-CA.crt`) match the ones AWX's own managed configs use — downstream fidelity again.
-
 ## ansible-runner and podman (ace-exec)
 
-The work-command needs `ansible-runner`; ansible-runner needs podman to run the EE. Pinned to the 2.4 series — record the exact version you get:
+The bundle installs exactly this trio on execution nodes: `ansible-runner`, `podman`, `crun`. Their runner comes as an RPM from RH repos; upstream, pip is the way — pinned to the 2.4 series, record what you get:
 
 ```bash
-sudo dnf -y install python3.12 python3.12-pip podman
+sudo dnf -y install python3.12 python3.12-pip podman crun
 sudo pip3.12 install 'ansible-runner==2.4.*'
 ansible-runner --version    # RECORD THIS
 ```
 
-Rootless podman as the `awx` user needs two things the box won't have. First, subordinate UID/GID ranges — **`useradd --system` (Lab 2) does not create them**, and without them every pull fails with a user-namespace error:
+Rootless podman as `awx` needs two things (the bundle's `podman` role does both). Subordinate UID/GID ranges — **`useradd --system` (Lab 2) does not create them**, and without them every pull fails with a user-namespace error:
 
 ```bash
 grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
 ```
 
-Second, lingering — so `/run/user/<uid>` exists for `awx` without an interactive login:
+And lingering, so `/run/user/<uid>` exists for `awx` without an interactive login:
 
 ```bash
 sudo loginctl enable-linger awx
@@ -157,33 +136,43 @@ sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman images --digests    # 
 
 ## receptor.conf on ace-exec
 
+The bundle shape for an execution node — verification but no signing, a TLS listener, no local work type:
+
 ```bash
-sudo tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
+sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 ---
 - node:
     id: ace-exec
     datadir: /var/lib/receptor
 
+- work-verification:
+    publickey: /etc/receptor/work_public_key.pem
+
 - log-level: info
 
 - control-service:
     service: control
-    filename: /var/run/receptor/receptor.sock
-    permissions: '0660'
+    filename: /var/run/awx-receptor/receptor.sock
+    permissions: 0660
+    tls: tls_server
 
 - tls-server:
-    name: mesh-server
-    cert: /etc/receptor/tls/receptor.crt
-    key: /etc/receptor/tls/receptor.key
-    requireclientcert: true
+    name: tls_server
+    cert: /etc/receptor/tls/ace-exec.crt
+    key: /etc/receptor/tls/ace-exec.key
     clientcas: /etc/receptor/tls/ca/mesh-CA.crt
+    requireclientcert: true
+
+- tls-client:
+    name: tls_client
+    cert: /etc/receptor/tls/ace-exec.crt
+    key: /etc/receptor/tls/ace-exec.key
+    rootcas: /etc/receptor/tls/ca/mesh-CA.crt
+    insecureskipverify: false
 
 - tcp-listener:
     port: 27199
-    tls: mesh-server
-
-- work-verification:
-    publickey: /etc/receptor/work_public_key.pem
+    tls: tls_server
 
 - work-command:
     worktype: ansible-runner
@@ -194,14 +183,15 @@ sudo tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 EOF
 ```
 
-- **`worktype: ansible-runner`** — exactly this string; it's what AWX submits for execution nodes.
-- **`requireclientcert: true`** — mutual TLS: the control node must present a CA-signed cert too, not just encrypt.
+- **`worktype: ansible-runner`** — exactly this string; it's what AWX submits for execution nodes. (The bundle writes a bare `ansible-runner` and relies on PATH; we spell out the pip-installed path.)
+- **`requireclientcert: true`** — mutual TLS: the control node must present a mesh-CA-signed cert too, not just encrypt.
 - **`verifysignature: true`** + `work-verification` — only work signed by the control node's private key runs here. An attacker on the network segment can't feed this node jobs.
-- The local `control-service` socket is for on-box `receptorctl` debugging — the mesh can't reach it (no remote service exposure).
+- The `tls-client` section is unused today (this node dials nobody) but it's part of the bundle's end state on every mesh node — and the v2 mesh-scaling chapter will want it.
+- The local `control-service` socket is for on-box `receptorctl` debugging — the mesh can't reach it.
 
 ## The unit (ace-exec)
 
-One difference from Lab 11: rootless podman resolves its runtime dir from `XDG_RUNTIME_DIR`, and a system service gets no such variable — jobs would fail with a cryptic "cannot find runtime directory". Bake it in:
+One difference from Lab 11's unit (besides no `PartOf` — that's controller-only): rootless podman resolves its runtime dir from `XDG_RUNTIME_DIR`, and a system service gets no such variable — jobs would fail with a cryptic "cannot find runtime directory". Bake it in:
 
 ```bash
 AWX_UID=$(id -u awx)
@@ -230,7 +220,7 @@ sudo systemctl enable --now receptor
 
 ## firewalld (ace-exec)
 
-The receptor listener is `27199/tcp` — the installer opens it, and without it **the mesh times out silently** (no error, just a peer that never appears):
+The receptor listener is `27199/tcp` — the installer's firewall role opens it on execution nodes, and without it **the mesh times out silently** (no error, just a peer that never appears):
 
 ```bash
 sudo dnf -y install firewalld
@@ -242,21 +232,15 @@ sudo firewall-cmd --list-ports    # want: 27199/tcp
 
 ## Peer the control node (ace-control)
 
-Append two sections to `/etc/receptor/receptor.conf` — the TLS client identity and the peering. The `tls-client` **name must be `tlsclient`**: AWX looks up the section by that name when it submits work over a TLS peer:
+The mesh direction matches the bundle's example inventory (`[automationcontroller:vars] peers=execution_nodes`): **controllers dial out, execution nodes listen.** Append the peer to `/etc/receptor/receptor.conf` — the `tls_client` section from Lab 11 does the identity, `redial` keeps the link self-healing:
 
 ```bash
-sudo tee -a /etc/receptor/receptor.conf >/dev/null <<'EOF'
-
-- tls-client:
-    name: tlsclient
-    rootcas: /etc/receptor/tls/ca/mesh-CA.crt
-    cert: /etc/receptor/tls/receptor.crt
-    key: /etc/receptor/tls/receptor.key
-    mintls13: false
+sudo -u awx tee -a /etc/receptor/receptor.conf >/dev/null <<'EOF'
 
 - tcp-peer:
     address: ace-exec:27199
-    tls: tlsclient
+    redial: true
+    tls: tls_client
 EOF
 
 sudo systemctl restart receptor
@@ -264,15 +248,17 @@ sudo systemctl restart receptor
 
 ## Verify (ace-control)
 
+The bundle validates the mesh exactly this way — `receptorctl ping` as the service user:
+
 ```bash
 sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl \
-  --socket /var/run/receptor/receptor.sock status
+  --socket /var/run/awx-receptor/receptor.sock status
 # want: KnownConnectionCosts lists ace-exec;
 #       an Advertisement from ace-exec with WorkTypes: ansible-runner
 
 sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl \
-  --socket /var/run/receptor/receptor.sock ping ace-exec
-# want: replies with round-trip times
+  --socket /var/run/awx-receptor/receptor.sock ping ace-exec --count 1
+# want: Reply from ace-exec ...
 ```
 
 And prove the sandbox works end to end on **ace-exec**:
@@ -283,6 +269,6 @@ sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
 # want: ansible [core ...] — the EE runs rootless as awx
 ```
 
-> **If the peer never appears:** three usual suspects, in order. (1) firewalld — the connection times out silently; check `sudo firewall-cmd --list-ports` on ace-exec. (2) The otherName OID — `openssl x509 -in /etc/receptor/tls/receptor.crt -noout -text | grep -A1 'Alternative'` must show the `1.3.6.1.4.1.2312.19.1` otherName; without it receptor logs a TLS verification failure that looks like a CA problem. (3) Clock skew — preflight's chrony check exists for a reason. Whatever it was: WHAT/WHY/FIX into this lab.
+> **If the peer never appears:** three usual suspects, in order. (1) firewalld — the connection times out silently; check `sudo firewall-cmd --list-ports` on ace-exec. (2) The node-ID SAN — both certs must show the `1.3.6.1.4.1.2312.19.1` otherName (the openssl check above); a cert made outside receptor's PKI fails TLS with what looks like a CA problem. (3) Clock skew — preflight's chrony check exists for a reason. Whatever it was: WHAT/WHY/FIX into this lab.
 
 Next: [Instance registration](13-instance-registration.md)

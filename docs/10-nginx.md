@@ -14,7 +14,7 @@ laptop ── https://192.168.56.10 (lab-CA-signed cert)
             └── /api/        → unix:/var/run/tower/uwsgi.sock   (uwsgi protocol)
 ```
 
-**Decision (documented):** TLS from day one, not plain HTTP. The bundle never ships HTTP-only, and the platform CA built here is reused for the receptor mesh (Lab 12) and the gateway (Lab 15) — skipping it now just moves the work.
+**Decision (documented):** TLS from day one, not plain HTTP. The bundle never ships HTTP-only, and the web CA built here signs the gateway's front door later (Lab 15) — skipping it now just moves the work. (The receptor mesh gets its **own** root CA in Lab 11, exactly like the bundle.)
 
 All commands on **ace-control**.
 
@@ -44,16 +44,16 @@ CSRF_TRUSTED_ORIGINS = ['https://192.168.56.10', 'https://ace-control']
 EOF
 ```
 
-Now restart the family and verify the socket appeared:
+Now restart the family and verify the socket appeared (note it may take a while for the socket to appear):
 
 ```bash
 sudo systemctl restart automation-controller
-ls -l /var/run/tower/daphne.sock    # want: a socket (type "s"), owned awx awx
+ls -l /var/run/tower/daphne.sock    # want: srw------- (or similar) owned awx nginx — group "nginx" via the Lab 8 setgid dir
 ```
 
 ## The lab CA
 
-The installer's `certificate_authority` role generates its own CA, signs **every** service cert with it (nginx, receptor, redis-TLS), and installs it into the system trust store. Hand-roll the same — this one CA signs nginx today, the receptor mesh in Lab 12, and the gateway in Lab 15:
+The installer's `certificate_authority` role generates a CA for the platform's **web certs** and installs it into the system trust store. Hand-roll the same — this CA signs nginx today and the gateway's front in Lab 15. (One correction from reading the actual bundle: the receptor mesh is NOT signed by this CA — the `receptor` role creates its own dedicated root CA with `receptor --cert-init`. Lab 11 does the same.)
 
 ```bash
 sudo install -d -m 0700 /etc/tower/ca
@@ -71,12 +71,14 @@ sudo chmod 0600 /etc/tower/tower.key
 sudo openssl req -new -key /etc/tower/tower.key \
   -subj "/CN=ace-control" -out /tmp/tower.csr
 
+printf "subjectAltName=DNS:ace-control,IP:192.168.56.10,IP:127.0.0.1\n" | sudo tee /tmp/tower_ext.cnf >/dev/null
+
 sudo openssl x509 -req -in /tmp/tower.csr \
   -CA /etc/tower/ca/ca.crt -CAkey /etc/tower/ca/ca.key -CAcreateserial \
   -days 825 -sha256 -out /etc/tower/tower.cert \
-  -extfile <(printf "subjectAltName=DNS:ace-control,IP:192.168.56.10,IP:127.0.0.1")
+  -extfile /tmp/tower_ext.cnf
 
-rm /tmp/tower.csr
+sudo rm -f /tmp/tower.csr /tmp/tower_ext.cnf
 ```
 
 Install the CA into the system trust, exactly like the installer's `update-ca-trust` step:
@@ -97,24 +99,22 @@ sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage co
 # want: "... static files copied to '/var/lib/awx/public/static'"
 ```
 
-## Install nginx
+## nginx: already installed (Lab 8)
 
-Pin the module stream so readers get the same build:
+The package went in back in Lab 8 — only there so the `nginx` system user/group existed before the socket directory was created. Confirm it's still there:
 
 ```bash
-sudo dnf -y module enable nginx:1.24
-sudo dnf -y install nginx
 nginx -v    # record it
 ```
 
-## nginx.conf — written by hand, whole file
+## nginx.conf — the base file, no `user` override
 
-The installer owns the entire `nginx.conf`, so we do too. Two things to notice: **`user awx;`** — the workers must read the 660 `awx:awx` sockets and the SPA files, so they run as the service user, same as a real Tower box. And **`ssl_ciphers PROFILE=SYSTEM`** — cipher choice is delegated to Rocky's system-wide crypto policies instead of a hardcoded list.
+**Match the bundle:** the installer's generic `nginx` role writes the *whole* `nginx.conf`, but it never sets a `user` directive — nginx keeps running as its compiled-in default, which on Rocky's package is `nginx`. That's deliberate: `nginx` (not `awx`) is the one reading the sockets, and Lab 8 already set up `/var/run/tower` as `nginx:nginx` with setgid so awx's sockets land in the `nginx` group. Per-service server blocks are a **separate concern**, dropped into `conf.d/` by each component's own role — so this file only carries the shared plumbing: mime types, logging, and the `$http_upgrade` map that websocket proxying needs.
 
 ```bash
 sudo tee /etc/nginx/nginx.conf >/dev/null <<'EOF'
-user awx;
 worker_processes auto;
+error_log /var/log/nginx/error.log warn;
 pid /run/nginx.pid;
 
 events {
@@ -124,68 +124,93 @@ events {
 http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
+    server_tokens off;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                     '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
+    access_log /var/log/nginx/access.log main;
+
+    # lets a websocket Upgrade header pass through the reverse proxy
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ''      close;
+    }
+
     sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    types_hash_max_size 4096;
 
-    upstream uwsgi {
-        server unix:/var/run/tower/uwsgi.sock;
+    include /etc/nginx/conf.d/*.conf;
+}
+EOF
+```
+
+## automation-controller.nginx.conf — the controller's own snippet
+
+This is the `conf.d/` file the `automationcontroller` role would drop — everything specific to *this* service (upstreams, TLS, routes) lives here, not in the shared `nginx.conf`. **`ssl_ciphers PROFILE=SYSTEM`** delegates cipher choice to Rocky's system-wide crypto policy instead of a hardcoded list.
+
+```bash
+sudo tee /etc/nginx/conf.d/automation-controller.nginx.conf >/dev/null <<'EOF'
+upstream uwsgi {
+    server unix:/var/run/tower/uwsgi.sock;
+}
+
+upstream daphne {
+    server unix:/var/run/tower/daphne.sock;
+}
+
+# everything on 80 bounces to TLS
+server {
+    listen 80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2 default_server;
+    server_name _;
+
+    ssl_certificate     /etc/tower/tower.cert;
+    ssl_certificate_key /etc/tower/tower.key;
+    ssl_ciphers         PROFILE=SYSTEM;
+
+    add_header Strict-Transport-Security max-age=15768000;
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+
+    # big job payloads (bulk host imports, large launches)
+    client_max_body_size 100m;
+
+    # the SPA, with client-side-routing fallback
+    location / {
+        root /var/lib/awx/public/ui;
+        try_files $uri $uri/ /index.html;
     }
 
-    upstream daphne {
-        server unix:/var/run/tower/daphne.sock;
+    # Django static (browsable API)
+    location /static/ {
+        alias /var/lib/awx/public/static/;
     }
 
-    # everything on 80 bounces to TLS
-    server {
-        listen 80 default_server;
-        server_name _;
-        return 301 https://$host$request_uri;
+    # websockets → daphne (regex over both prefixes, like the bundle)
+    location ~* /(websocket|api/websocket)/ {
+        proxy_pass http://daphne;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
     }
 
-    server {
-        listen 443 ssl http2 default_server;
-        server_name _;
-
-        ssl_certificate     /etc/tower/tower.cert;
-        ssl_certificate_key /etc/tower/tower.key;
-        ssl_ciphers         PROFILE=SYSTEM;
-
-        add_header Strict-Transport-Security max-age=15768000;
-        add_header X-Frame-Options DENY;
-        add_header X-Content-Type-Options nosniff;
-
-        # big job payloads (bulk host imports, large launches)
-        client_max_body_size 100m;
-
-        # the SPA, with client-side-routing fallback
-        location / {
-            root /var/lib/awx/public/ui;
-            try_files $uri $uri/ /index.html;
-        }
-
-        # Django static (browsable API)
-        location /static/ {
-            alias /var/lib/awx/public/static/;
-        }
-
-        # websockets → daphne (regex over both prefixes, like the bundle)
-        location ~* /(websocket|api/websocket)/ {
-            proxy_pass http://daphne;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto https;
-        }
-
-        # API → uwsgi, speaking the uwsgi protocol (not HTTP proxying)
-        location /api/ {
-            include /etc/nginx/uwsgi_params;
-            uwsgi_pass uwsgi;
-            uwsgi_read_timeout 120s;    # matches harakiri in uwsgi.ini
-            uwsgi_param HTTP_X_FORWARDED_FOR $proxy_add_x_forwarded_for;
-            uwsgi_param HTTP_X_FORWARDED_PROTO https;
-        }
+    # API → uwsgi, speaking the uwsgi protocol (not HTTP proxying)
+    location /api/ {
+        include /etc/nginx/uwsgi_params;
+        uwsgi_pass uwsgi;
+        uwsgi_read_timeout 120s;    # matches harakiri in uwsgi.ini
+        uwsgi_param HTTP_X_FORWARDED_FOR $proxy_add_x_forwarded_for;
+        uwsgi_param HTTP_X_FORWARDED_PROTO https;
     }
 }
 EOF
@@ -253,6 +278,6 @@ Then the real test — browser to `https://192.168.56.10` (accept the lab-CA war
 - log in as the Lab 7 admin — a successful login proves the CSRF fragment works;
 - the dashboard renders live — no red websocket errors in the browser console proves the daphne socket routing works.
 
-**Production variant:** real installs put certs from the org's PKI (or ACME) on the front door instead of a platform-CA-signed cert; the internal CA still signs the service-to-service certs (receptor mesh, gateway). HSTS is already on — remember it pins browsers to HTTPS for six months.
+**Production variant:** real installs put certs from the org's PKI (or ACME) on the front door instead of a platform-CA-signed cert; internal CAs still sign the service-to-service certs (the web CA for components, the mesh CA for receptor). HSTS is already on — remember it pins browsers to HTTPS for six months.
 
 Next: [Receptor](11-receptor.md)

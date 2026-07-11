@@ -57,7 +57,7 @@ watch -n1 "sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman ps"
 **Terminal 2 — ace-control**, watch the work unit:
 
 ```bash
-watch -n1 "sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /var/run/receptor/receptor.sock work list --quiet"
+watch -n1 "sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /var/run/awx-receptor/receptor.sock work list --quiet"
 ```
 
 **Browser** — `https://192.168.56.10`, logged in, on the Jobs view. The live output you're about to see arrives over the websocket path: daphne, wsrelay, nginx — all yours.
@@ -95,8 +95,8 @@ curl -sk -u "admin:${AWX_PW}" https://192.168.56.10/api/v2/jobs/<JOB_ID>/ \
 
 1. **nginx** (Lab 10) accepts the launch POST, hands it to **uwsgi** (Lab 8) over the unix socket
 2. The API writes a pending job; the **dispatcher** (Lab 8) picks it up, builds the private data dir from your manual project (Lab 14), and transmits it — in-process, no container
-3. The dispatcher submits the work unit to **receptor** (Lab 11) over `/var/run/receptor/receptor.sock`, **signed** with the key from Lab 11
-4. Receptor carries it over the **TLS mesh** (Lab 12) — mutual certs from your Lab 10 CA, node IDs verified via the receptor OID
+3. The dispatcher submits the work unit to **receptor** (Lab 11) over `/var/run/awx-receptor/receptor.sock`, **signed** with the key from Lab 11
+4. Receptor carries it over the **TLS mesh** (Lab 12) — mutual certs from your Lab 11 mesh CA, node IDs verified via the receptor OID
 5. ace-exec **verifies the signature**, then its work-command runs **ansible-runner worker** (Lab 12)
 6. ansible-runner starts the **EE container** under rootless podman — the only container in the whole build, and it exists because EEs are containers by definition
 7. Events stream back over the same mesh into the **callback receiver** (Lab 8), into **postgres** (Lab 3), and out through **daphne/wsrelay** (Lab 8) to your browser
