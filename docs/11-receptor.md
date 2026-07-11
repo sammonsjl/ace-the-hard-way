@@ -63,6 +63,21 @@ awx hard nofile 8192
 EOF
 ```
 
+## podman on the control node (yes — straight from the installer)
+
+The bundle's receptor role installs **podman + crun on every node that can run work, and `control` is in that list.** Control-plane work — SCM project syncs, system jobs — executes inside the control-plane EE under podman, *on this node*. "Bare metal" in this tutorial means *what the RPM installer builds*, and the installer builds this. Same rootless setup as the execution node will get:
+
+```bash
+sudo dnf -y install podman crun
+grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
+sudo loginctl enable-linger awx
+
+cd /tmp    # sudo -u keeps your cwd, and rootless podman can't start from a 0700 home dir
+sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
+```
+
+(`quay.io/ansible/awx-ee:latest` doubles as the default job EE and the control-plane EE — Lab 7's `register_default_execution_environments` registered both.)
+
 ## The mesh root CA — receptor's own PKI
 
 Here's a genuinely undocumented corner, straight from the bundle: receptor certs are **not** made with openssl, and the mesh does **not** share the Lab 10 web CA. The `receptor` binary ships its own PKI (`--cert-init`, `--cert-makereq`, `--cert-signreq`), and the installer uses it to create a dedicated mesh root CA. Why the special tooling: receptor verifies **node IDs, not hostnames** — each cert carries the node ID in an `otherName` SAN under receptor's private OID (`1.3.6.1.4.1.2312.19.1`), and `--cert-makereq nodeid=...` is what injects it. Sign a normal web cert instead and the mesh fails TLS with errors that never mention the real cause.
@@ -181,14 +196,15 @@ EOF
 - **`work-command` (local)** is how control-plane work (project updates, system jobs) would execute *on this node* — see the warning below.
 - **`local-only`** — a war story, now bundle-verified. Without it, this config has **no backends** (no listener, no peers — those come in Lab 12), and receptor treats that as "nothing to do": it logs `WARNING Nothing to do - no backends are running` and exits cleanly, which looks like a crash loop from systemd and makes `receptorctl` throw `Connection refused`. The installer's template emits exactly `- local-only` for a single controller with no listener. It means "run as an isolated node" — remove it the moment a real peer exists (Lab 12 does). If you hit the crash loop first: fix the config, then `sudo systemctl reset-failed receptor` before restarting.
 
-> **Honest warning about `local` work:** on a real AAP control node, `local` work runs inside a control-plane EE under podman. This control plane is bare metal **by design** — no podman. The mesh, the demo job, and everything in Labs 12–14 work fine (jobs execute on ace-exec). What can't run here: SCM project updates and the built-in cleanup system jobs. Lab 14 shows the manual-project pattern that sidesteps this, and what to do about the cleanup schedules.
+> **How `local` work actually runs:** the dispatcher submits it to receptor; receptor's work-command spawns `ansible-runner worker`; ansible-runner starts the control-plane EE under the podman you just installed. Note the chain — **receptor is the parent of podman here**, which is why the unit below carries `XDG_RUNTIME_DIR` (rootless podman needs it, and system services don't get it for free).
 
 ## The unit
 
-The bundle's systemd override runs receptor as `awx` and ties it to the controller family with `PartOf` — restart `automation-controller`, receptor restarts with it:
+The bundle's systemd override runs receptor as `awx` and ties it to the controller family with `PartOf` — restart `automation-controller`, receptor restarts with it. `XDG_RUNTIME_DIR` is baked in because receptor spawns the control-plane EE (see the note above):
 
 ```bash
-sudo tee /etc/systemd/system/receptor.service >/dev/null <<'EOF'
+AWX_UID=$(id -u awx)
+sudo tee /etc/systemd/system/receptor.service >/dev/null <<EOF
 [Unit]
 Description=Receptor mesh node
 After=network-online.target
@@ -199,8 +215,9 @@ PartOf=automation-controller.service
 Type=simple
 User=awx
 Group=awx
+Environment=XDG_RUNTIME_DIR=/run/user/${AWX_UID}
 ExecStart=/usr/local/bin/receptor --config /etc/receptor/receptor.conf
-ExecReload=/bin/kill -HUP $MAINPID
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
 
 [Install]

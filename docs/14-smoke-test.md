@@ -4,55 +4,18 @@
 
 The whole point: a job launched on your hand-built control plane, dispatched over YOUR receptor mesh, executed in an EE container on the execution plane you built. Labs 1–14 = a complete, working controller.
 
-## First: the Demo Project problem — and both fixes
+## First: sync the Demo Project — the control node's sandbox at work
 
-Launching the demo kicks off a **project sync first**, and the sync runs on **ace-control**, not ace-exec. That's not a wiring mistake: SCM updates are control-plane work by definition (every node type's project updates run on the controlplane queue), and they execute inside the **control-plane EE** — a podman container. Bundle-verified: the installer's `receptor` role installs `podman` + `crun` on control nodes too (`node_type: control` is in its "workable types" list), configures rootless podman for `awx`, and registers a `control_plane_execution_environment` image. A real AAP control node runs containers for exactly this.
+Launching the demo kicks off a **project sync first**, and the sync runs on **ace-control**, not ace-exec. That's not a wiring mistake — SCM updates are control-plane work by definition, and they execute inside the **control-plane EE** under the podman you installed in Lab 11. This sync is its own smoke test: `local` work through receptor, into a container, on the controller.
 
-So there are two honest paths, and which one you take defines what this tutorial's control plane *is*:
-
-**Path A — bundle-faithful: give the control node its sandbox.** Same moves as Lab 12's podman section, run on **ace-control**:
+Watch it happen — on **ace-control**:
 
 ```bash
-sudo dnf -y install podman crun
-grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
-sudo loginctl enable-linger awx
 cd /tmp
-sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
+watch -n1 "sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman ps"
 ```
 
-Then add `XDG_RUNTIME_DIR` to the family's environment so the dispatcher's `local` work can start containers — in `/etc/tower/supervisord.conf`, extend every `environment=` line (uid from `id -u awx`):
-
-```ini
-environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx",XDG_RUNTIME_DIR="/run/user/<AWX_UID>"
-```
-
-Restart the family (`sudo systemctl restart automation-controller`) and SCM project syncs, the Demo Project included, work as shipped — and the cleanup system jobs at the end of this lab stop being a problem too.
-
-**Path B — bare-metal purist: the manual project.** No containers on control, ever. A classic Tower pattern: playbooks placed directly in `PROJECTS_ROOT`, no sync needed. The job payload is transmitted to ace-exec by the dispatcher itself (in-process, no container), so nothing else changes. The trade: no SCM projects, and the cleanup schedules keep failing.
-
-The rest of this lab works under either path; Path B's manual-project steps follow.
-
-On **ace-control**, create the project dir and write the playbook by hand — it keeps the name `hello.yml`, so the Demo Job Template needs no change:
-
-```bash
-sudo -u awx install -d /var/lib/awx/projects/ace-demo
-sudo -u awx tee /var/lib/awx/projects/ace-demo/hello.yml >/dev/null <<'EOF'
----
-- name: ACE smoke test
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: where am I actually running?
-      ansible.builtin.command: uname -n
-      register: node
-
-    - name: say hello
-      ansible.builtin.debug:
-        msg: "Hello from {{ node.stdout }} — an EE container on the execution plane."
-EOF
-```
-
-Flip the Demo Project from git to manual (empty `scm_type` = manual; `local_path` = the dir above):
+In another terminal, trigger the sync:
 
 ```bash
 read -s -p "AWX admin password: " AWX_PW; echo
@@ -61,14 +24,21 @@ curl -sk -u "admin:${AWX_PW}" \
   'https://192.168.56.10/api/v2/projects/?name=Demo%20Project' \
   | python3 -c 'import json,sys; print("project:", json.load(sys.stdin)["results"][0]["id"])'
 
-curl -sk -u "admin:${AWX_PW}" -X PATCH \
-  https://192.168.56.10/api/v2/projects/<PROJECT_ID>/ \
-  -H 'Content-Type: application/json' \
-  -d '{"scm_type": "", "local_path": "ace-demo"}' | python3 -m json.tool | grep -E 'scm_type|local_path'
-# want: "scm_type": "", "local_path": "ace-demo"
+curl -sk -u "admin:${AWX_PW}" -X POST \
+  https://192.168.56.10/api/v2/projects/<PROJECT_ID>/update/ \
+  | python3 -c 'import json,sys; print("update job:", json.load(sys.stdin)["id"])'
 ```
 
-(The Demo Inventory's `localhost` host with `ansible_connection=local` is exactly right here: "local" means *inside the EE container on ace-exec* — which is the point.)
+An EE container flashes up in the watch — that's git cloning `ansible-tower-samples` *inside the control-plane EE*. Confirm:
+
+```bash
+curl -sk -u "admin:${AWX_PW}" \
+  'https://192.168.56.10/api/v2/projects/?name=Demo%20Project' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["status"])'
+# want: successful
+```
+
+(The Demo Inventory's `localhost` host with `ansible_connection=local` is exactly right for what's next: "local" means *inside the EE container on ace-exec* — which is the point.)
 
 ## Set up the watch posts
 
@@ -119,33 +89,18 @@ curl -sk -u "admin:${AWX_PW}" https://192.168.56.10/api/v2/jobs/<JOB_ID>/ \
 ## Trace the hops — you built every one
 
 1. **nginx** (Lab 10) accepts the launch POST, hands it to **uwsgi** (Lab 8) over the unix socket
-2. The API writes a pending job; the **dispatcher** (Lab 8) picks it up, builds the private data dir from your manual project (Lab 14), and transmits it — in-process, no container
+2. The API writes a pending job; the **dispatcher** (Lab 8) picks it up, builds the private data dir from the synced project, and transmits it
 3. The dispatcher submits the work unit to **receptor** (Lab 11) over `/var/run/awx-receptor/receptor.sock`, **signed** with the key from Lab 11
 4. Receptor carries it over the **TLS mesh** (Lab 12) — mutual certs from your Lab 11 mesh CA, node IDs verified via the receptor OID
 5. ace-exec **verifies the signature**, then its work-command runs **ansible-runner worker** (Lab 12)
-6. ansible-runner starts the **EE container** under rootless podman — the only container in the whole build, and it exists because EEs are containers by definition
+6. ansible-runner starts the **EE container** under rootless podman — the job sandbox, exactly where the RPM installer puts it
 7. Events stream back over the same mesh into the **callback receiver** (Lab 8), into **postgres** (Lab 3), and out through **daphne/wsrelay** (Lab 8) to your browser
 
 That's an automation platform, by hand, from source.
 
-## Loose end: the cleanup schedules (Path B only)
+## One more thing that now Just Works
 
-On **Path A this section is moot** — system jobs run in the control-plane EE like the bundle intends. On Path B: AWX ships default system-job schedules (Cleanup Job Details, Cleanup Activity Stream, ...). System jobs are `local` work — control-plane EE, podman — so **they will fail on schedule**, loudly, in the jobs list. Three honest options:
-
-1. **Leave them failing** — harmless noise, and a permanent reminder of the trade you made
-2. **Disable the schedules** and prune by hand when needed (`awx-manage cleanup_jobs --days=90` runs natively — it's a manage command, not a system job):
-
-```bash
-curl -sk -u "admin:${AWX_PW}" \
-  'https://192.168.56.10/api/v2/schedules/?unified_job_template__job_type=cleanup_jobs' \
-  | python3 -m json.tool | grep -E '"id"|"name"'
-# then, per schedule id:
-curl -sk -u "admin:${AWX_PW}" -X PATCH \
-  https://192.168.56.10/api/v2/schedules/<ID>/ \
-  -H 'Content-Type: application/json' -d '{"enabled": false}'
-```
-
-3. **Switch to Path A** (top of this lab) — the bundle-faithful answer, and it fixes SCM projects at the same time.
+AWX ships default system-job schedules (Cleanup Job Details, Cleanup Activity Stream, ...). System jobs are `local` work — control-plane EE, podman — so with Lab 11's sandbox in place they run on schedule like the bundle intends. Nothing to configure; just know that the weekly cleanup jobs you'll see in the jobs list are these.
 
 > Milestone: **Labs 1–14 are a complete, working controller.** The gateway labs (15–16) add the single-login platform layer on top — and they're the risky tail. Ship this milestone first: commit your notes, tag your fork, take the win.
 

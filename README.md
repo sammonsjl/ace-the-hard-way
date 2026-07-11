@@ -1,6 +1,6 @@
 # ACE the Hard Way
 
-This tutorial walks you through building an open source automation platform the hard way — **from source, bare metal, no containers on the control plane** — so you understand every process, every config file, and every wire.
+This tutorial walks you through building an open source automation platform the hard way — **from source, bare metal** — so you understand every process, every config file, and every wire. "Bare metal" means exactly what the RPM installer builds: every service a real process on the box, with containers appearing only where the installer puts them (as execution-environment sandboxes for jobs).
 
 The goal is precise: **hand-build, from upstream source, the same end state that Red Hat's RPM installer produces** — same service user, same directory layout (`/etc/tower` legacy paths included, on purpose), same supervisor process family, same nginx wiring. If you administer a real AAP VM install, everything in this lab is where your production instincts expect it.
 
@@ -71,7 +71,7 @@ Gateway + controller: single login, jobs running on a hand-built execution plane
 
 ## A note on containers
 
-Everything you build and operate is bare metal. Podman appears exactly once — on the execution plane, as the job sandbox — because an execution environment *is* a container image and AWX has had no containerless execution since v18. That's how a real AAP execution plane works, not a shortcut.
+Everything you build and operate is bare metal. Podman appears only as the **execution-environment sandbox**, on every node that runs work — jobs on the execution plane, project syncs and system jobs on the controller — because an EE *is* a container image and AWX has had no containerless execution since v18. That's precisely where the RPM installer puts podman, and nowhere else: no service you build runs in a container.
 
 ## Trademark note
 

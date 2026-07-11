@@ -12,7 +12,7 @@ ace-control                              ace-exec
                                                           └── EE container under podman
 ```
 
-> **Why podman appears here and only here:** an execution environment IS a container image — since AWX 18 there is no containerless job execution. On a real AAP execution node, receptor (bare metal, yours) hands the job to ansible-runner, which runs it inside the EE under podman. You built the node; podman is just the job sandbox.
+> **Why podman is here:** an execution environment IS a container image — since AWX 18 there is no containerless job execution. Receptor (bare metal, yours) hands the job to ansible-runner, which runs it inside the EE under podman. Same pattern as the controller (Lab 11): podman is the job sandbox on every node that runs work — exactly where the RPM installer puts it, and nowhere else.
 
 Commands run on **both** nodes in this lab — each block says which.
 
