@@ -44,13 +44,18 @@ python3.12 --version        # record the exact version
 ```bash
 sudo install -d -o awx -g awx /opt/awx
 sudo -u awx git clone --branch devel https://github.com/ansible/awx.git /opt/awx
-cd /opt/awx
-git rev-parse --short HEAD  # RECORD THIS — it's the devel commit you built (moving tip)
+sudo -u awx git -C /opt/awx rev-parse --short HEAD  # RECORD THIS — it's the devel commit you built (moving tip)
 ```
 
 ## Build the venv
 
-Run the whole build inside one privilege-dropped, non-login shell as `awx`, so the environment is self-contained — activate the venv first, then build inside it:
+Create the venv first, at the same path the real installer uses (`/var/lib/awx/venv/awx`, inside the `venv/` directory from Lab 2):
+
+```bash
+sudo -u awx python3.12 -m venv /var/lib/awx/venv/awx
+```
+
+Then run the whole build inside one privilege-dropped, non-login shell as `awx`, so the environment is self-contained — activate the venv first, then build inside it:
 
 ```bash
 sudo -u awx bash <<'AWXEOF'
