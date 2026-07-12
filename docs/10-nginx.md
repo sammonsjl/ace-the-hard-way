@@ -26,7 +26,7 @@ The bundle's nginx upstreams are **both unix sockets** — `uwsgi.sock` and `dap
 sudo vim /etc/tower/supervisord.conf
 ```
 
-Change the `[program:daphne]` command line to:
+Change the `[program:awx-daphne]` command line to:
 
 ```ini
 command=/var/lib/awx/venv/awx/bin/daphne -u /var/run/tower/daphne.sock awx.asgi:channel_layer

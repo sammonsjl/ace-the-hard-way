@@ -69,7 +69,9 @@ EOF
 
 ## supervisord.conf
 
-Programs run as `awx`; supervisord itself runs as root (so it can drop privileges). The `[group:ace]` line lets you restart the whole family with `supervisorctl restart ace:*`.
+Programs run as `awx`; supervisord itself runs as root (so it can drop privileges). The `[group:tower-processes]` line lets you restart the whole family with `supervisorctl restart tower-processes:*`.
+
+> **The names are not a style choice.** AWX's own code shells out to supervisor: `awx/main/utils/reload.py` builds `supervisorctl restart tower-processes:<name>` with the group name **hardcoded**, and `run_rsyslog_configurer` restarts the program literally named `awx-rsyslogd`. Rename the group or programs and those calls fail with a `FATAL`-looping rsyslog-configurer (this lab originally used a cute `ace` group — that's exactly how it broke). Two more things the same code path needs on a from-source build: `supervisorctl` findable on the program's `PATH` (the RPM has it in `/usr/bin`; ours lives in the venv) and `SUPERVISOR_CONFIG_PATH` pointing at our non-default config location — both are baked into the `environment=` lines below.
 
 ```bash
 sudo tee /etc/tower/supervisord.conf >/dev/null <<'EOF'
@@ -90,7 +92,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 [supervisorctl]
 serverurl=unix:///var/run/tower/supervisor.sock
 
-[program:uwsgi]
+[program:awx-uwsgi]
 command=/var/lib/awx/venv/awx/bin/uwsgi /etc/tower/uwsgi.ini
 directory=/var/lib/awx
 user=awx
@@ -100,12 +102,12 @@ stopsignal=INT
 stopwaitsecs=15
 stopasgroup=true
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/uwsgi.log
+stdout_logfile=/var/log/supervisor/awx-uwsgi.log
 stdout_logfile_maxbytes=10MB
 stdout_logfile_backups=10
 environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
-[program:daphne]
+[program:awx-daphne]
 ; TCP for first bring-up (curl-able); Lab 10 moves this to the bundle's unix socket
 command=/var/lib/awx/venv/awx/bin/daphne -b 127.0.0.1 -p 8051 awx.asgi:channel_layer
 directory=/var/lib/awx
@@ -114,12 +116,12 @@ autostart=true
 autorestart=true
 stopwaitsecs=5
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/daphne.log
+stdout_logfile=/var/log/supervisor/awx-daphne.log
 stdout_logfile_maxbytes=10MB
 stdout_logfile_backups=10
 environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
-[program:dispatcher]
+[program:awx-dispatcher]
 command=/var/lib/awx/venv/awx/bin/awx-manage dispatcherd
 directory=/var/lib/awx
 user=awx
@@ -127,36 +129,36 @@ autostart=true
 autorestart=true
 stopwaitsecs=60
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/dispatcher.log
+stdout_logfile=/var/log/supervisor/awx-dispatcher.log
 stdout_logfile_maxbytes=10MB
 stdout_logfile_backups=10
-environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx",SUPERVISOR_CONFIG_PATH="/etc/tower/supervisord.conf",PATH="/var/lib/awx/venv/awx/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
 
-[program:callback-receiver]
+[program:awx-callback-receiver]
 command=/var/lib/awx/venv/awx/bin/awx-manage run_callback_receiver
 directory=/var/lib/awx
 user=awx
 autostart=true
 autorestart=true
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/callback-receiver.log
+stdout_logfile=/var/log/supervisor/awx-callback-receiver.log
 stdout_logfile_maxbytes=10MB
 stdout_logfile_backups=10
 environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
-[program:wsrelay]
+[program:awx-wsrelay]
 command=/var/lib/awx/venv/awx/bin/awx-manage run_wsrelay
 directory=/var/lib/awx
 user=awx
 autostart=true
 autorestart=true
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/wsrelay.log
+stdout_logfile=/var/log/supervisor/awx-wsrelay.log
 stdout_logfile_maxbytes=10MB
 stdout_logfile_backups=10
 environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
-[program:ws-heartbeat]
+[program:awx-ws-heartbeat]
 command=/var/lib/awx/venv/awx/bin/awx-manage run_ws_heartbeat
 directory=/var/lib/awx
 user=awx
@@ -164,17 +166,18 @@ autostart=true
 autorestart=true
 stopwaitsecs=5
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/ws-heartbeat.log
+stdout_logfile=/var/log/supervisor/awx-ws-heartbeat.log
 stdout_logfile_maxbytes=10MB
 stdout_logfile_backups=10
 environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
 
-[group:ace]
-programs=uwsgi,daphne,dispatcher,callback-receiver,wsrelay,ws-heartbeat
+[group:tower-processes]
+programs=awx-uwsgi,awx-daphne,awx-dispatcher,awx-callback-receiver,awx-wsrelay,awx-ws-heartbeat
+priority=5
 EOF
 ```
 
-Bundle deltas worth knowing (all folded in above): every program runs with `directory=/var/lib/awx` and gets `HOME`/`USER` in its environment; supervisord itself runs `umask=022 minfds=4096`; every log rotates at 10 MB × 10. Program names differ (the bundle prefixes `awx-` and groups them as `tower-processes`; we keep `ace`).
+Bundle deltas worth knowing (all folded in above): every program runs with `directory=/var/lib/awx` and gets `HOME`/`USER` in its environment; supervisord itself runs `umask=022 minfds=4096`; every log rotates at 10 MB × 10. Program names, log file names, and the `tower-processes` group (with `priority=5`) are the bundle's own — see the warning above for why they must be. Two of our deltas: `AWX_MODE=production` everywhere (war story below), and `SUPERVISOR_CONFIG_PATH` + a venv-first `PATH` on the dispatcher (it's the process that calls back into supervisorctl at runtime — e.g. reconfiguring rsyslog when you change logging settings in the API).
 
 > **Why `AWX_MODE` is on EVERY program — a war story.** The bundle doesn't set it at all, because Red Hat's package defaults to production. Our from-source build defaults to **development**, and the two modes load different settings. A single awx process that starts without `AWX_MODE=production` runs half-in, half-out: development code paths reading production config — and dies on things like `AttributeError: 'Settings' object has no attribute 'AWX_DISABLE_TASK_MANAGERS'` in the dispatcher. If you ever see an AttributeError on a settings name, check the process's environment *first*, not the settings file. The Lab 5 wrapper bakes the variable in for manual commands for the same reason.
 
@@ -230,35 +233,40 @@ sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage li
 Kill a child and watch supervisord bring it back:
 
 ```bash
-sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf restart ace:dispatcher
+sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf restart tower-processes:awx-dispatcher
 ```
 
 ## Add rsyslog (the last two programs)
 
-AWX runs on file logging without this, so add it once the core is green. The bundle's exact commands (verified):
+AWX runs on file logging without this, so add it once the core is green. The bundle's exact commands (program names verbatim — `run_rsyslog_configurer` restarts `tower-processes:awx-rsyslogd` by that literal name):
 
 ```ini
-[program:rsyslogd]
+[program:awx-rsyslogd]
 command=rsyslogd -n -i /var/run/awx-rsyslog/rsyslog.pid -f /var/lib/awx/rsyslog/rsyslog.conf
 user=awx
 autostart=true
 autorestart=true
+startsecs=0
 stopsignal=TERM
 stopasgroup=true
 killasgroup=true
-stdout_logfile=/var/log/supervisor/rsyslog.log
+stdout_logfile=/var/log/supervisor/awx-rsyslog.log
 
-[program:rsyslog-configurer]
+[program:awx-rsyslog-configurer]
 command=/var/lib/awx/venv/awx/bin/awx-manage run_rsyslog_configurer
 directory=/var/lib/awx
 user=awx
 autorestart=true
+startsecs=0
 stopasgroup=true
 killasgroup=true
-stdout_logfile=/var/log/supervisor/rsyslog-configurer.log
-environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/awx-rsyslog-configurer.log
+environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx",SUPERVISOR_CONFIG_PATH="/etc/tower/supervisord.conf",PATH="/var/lib/awx/venv/awx/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
 ```
 
-Prereqs when you do it: `dnf install rsyslog`, `install -d -o awx -g awx /var/lib/awx/rsyslog`, a tmpfiles.d entry for `/var/run/awx-rsyslog` (0750 awx awx), add both programs to the `[group:ace]` list. (The bundle also runs an `rsyslog-4xx-recovery` eventlistener from an RPM-shipped script — skipped here.) Left as the next increment.
+The configurer's `environment=` carries the two from-source extras (`SUPERVISOR_CONFIG_PATH`, venv-first `PATH`) because its whole job is calling `supervisorctl` — without them it dies with `FileNotFoundError: 'supervisorctl'`. We also add `redirect_stderr=true`, a deliberate delta from the bundle: without it the traceback from a crash goes nowhere and you stare at an empty log wondering why it's `FATAL`. `startsecs=0` is the bundle's — the configurer runs, configures, and exits by design; without it supervisor calls that "exited too quickly" and gives up in `FATAL`.
+
+Prereqs when you do it: `dnf install rsyslog`, `install -d -o awx -g awx /var/lib/awx/rsyslog`, a tmpfiles.d entry for `/var/run/awx-rsyslog` (0750 awx awx), add both programs to the `[group:tower-processes]` list. (The bundle also runs an `rsyslog-4xx-recovery` eventlistener from an RPM-shipped script — skipped here.)
 
 Next: [Building the UI](09-awx-ui.md)
