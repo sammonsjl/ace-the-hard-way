@@ -81,6 +81,24 @@ pip install -e .
 AWXEOF
 ```
 
+## Make it a release build, not a checkout — delete `devonly`
+
+This one line is the difference between a working controller and one where **every job you launch hangs in `pending` forever**, and nothing in the logs obviously says why. AWX decides development-vs-production *not* from `AWX_MODE`, but from a single marker file — `awx/__init__.py` does `import awx.devonly` and sets `MODE = 'development'` if it succeeds. That file (`awx/devonly.py`) ships in a **source checkout** and is stripped from the **release package**. Its own header says so: *"This file should only be present in a source checkout, and never in a release package."*
+
+We're replicating the release/RPM end state, so remove it — exactly what the packaging build does:
+
+```bash
+sudo rm -f /opt/awx/awx/devonly.py
+```
+
+> **Why it's fatal, and why it hides.** `MODE` gates the task manager. `awx/main/scheduler/tasks.py` runs the real scheduling only past this guard:
+> ```python
+> if MODE == 'development' and settings.AWX_DISABLE_TASK_MANAGERS:
+>     return          # skip scheduling
+> manager().schedule()
+> ```
+> With `devonly` present, `MODE` is `'development'` **even though you export `AWX_MODE=production` everywhere** — the env var picks the settings files, but `MODE` is decided by that import. So the guard evaluates `settings.AWX_DISABLE_TASK_MANAGERS`, which **doesn't exist in production settings** (it's only defined in `development_defaults.py`). The scheduled `task_manager` task raises `AttributeError` on every tick, the dispatcher swallows it as a failed task, and your jobs sit in `pending` while the rest of the stack looks perfectly healthy — API up, mesh up, `list_instances` green. Deleting `devonly` makes `MODE = 'production'`, the guard short-circuits before touching the missing setting, and `manager().schedule()` runs. (This is the same `AttributeError: ... AWX_DISABLE_TASK_MANAGERS` noted in Lab 8's war story — same root cause, and this is its real fix.)
+
 ## Verify
 
 ```bash
@@ -89,11 +107,11 @@ sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage --version  # records the devel 
 
 If `--version` prints a version string (e.g. `24.6.2.dev871+g...`), the backend is built — it imports the awx package and prints before Django fully initializes.
 
-Don't reach for `--help` yet, it tracebacks — twice over. Without `AWX_MODE=production` the source tree runs in **development** mode, whose logging config wants a dev-only package we deliberately didn't install (`ValueError: Cannot resolve 'awx.main.utils.handlers.ColorHandler': No module named 'logutils'` — it's in upstream's `requirements_dev.txt`, not the production set). And **production** mode refuses to start until Lab 6 writes `/etc/tower/settings.py` (`ImproperlyConfigured: No AWX configuration found`). The full command list works at the end of Lab 6.
+Don't reach for `--help` yet — with `devonly` gone the interpreter is in production mode, and production mode refuses to start until Lab 6 writes `/etc/tower/settings.py` (`ImproperlyConfigured: No AWX configuration found at ['/etc/tower', ...]`). That error IS the build working; the full command list runs at the end of Lab 6.
 
 ## Put `awx-manage` in the PATH — like the RPM does
 
-On a real AAP box you type `awx-manage` anywhere and it works: the RPM ships a wrapper at **`/usr/bin/awx-manage`** that execs the venv binary. The installer's own tasks call that bare `awx-manage` (always as the `awx` user — `become_user: awx` on every single task). Hand-write the same wrapper, with one upgrade for our from-source build: bake in `AWX_MODE=production`, because upstream source defaults to *development* mode and any process that loses that variable loads the wrong settings and dies in strange ways (see Lab 8's warning):
+On a real AAP box you type `awx-manage` anywhere and it works: the RPM ships a wrapper at **`/usr/bin/awx-manage`** that execs the venv binary. The installer's own tasks call that bare `awx-manage` (always as the `awx` user — `become_user: awx` on every single task). Hand-write the same wrapper, with one upgrade for our from-source build: bake in `AWX_MODE=production`. Removing `devonly` above fixed the code-path `MODE`; `AWX_MODE=production` is the *other* half — it selects which settings files load (`/etc/tower` + postgres, not the dev sqlite defaults). A process that loses it loads the wrong settings and dies in strange ways (see Lab 8's warning):
 
 ```bash
 sudo tee /usr/bin/awx-manage >/dev/null <<'EOF'
