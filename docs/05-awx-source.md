@@ -85,10 +85,11 @@ AWXEOF
 
 ```bash
 sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage --version  # records the devel version string
-sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage --help     # want: the command list, no Traceback
 ```
 
-If `--help` prints the command list, the backend is built. (It can't talk to a database yet — that's Lab 6's `/etc/tower` config and the migrate step later.)
+If `--version` prints a version string (e.g. `24.6.2.dev871+g...`), the backend is built — it imports the awx package and prints before Django fully initializes.
+
+Don't reach for `--help` yet, it tracebacks — twice over. Without `AWX_MODE=production` the source tree runs in **development** mode, whose logging config wants a dev-only package we deliberately didn't install (`ValueError: Cannot resolve 'awx.main.utils.handlers.ColorHandler': No module named 'logutils'` — it's in upstream's `requirements_dev.txt`, not the production set). And **production** mode refuses to start until Lab 6 writes `/etc/tower/settings.py` (`ImproperlyConfigured: No AWX configuration found`). The full command list works at the end of Lab 6.
 
 ## Put `awx-manage` in the PATH — like the RPM does
 
@@ -104,7 +105,10 @@ exec /var/lib/awx/venv/awx/bin/awx-manage "$@"
 EOF
 sudo chmod 0755 /usr/bin/awx-manage
 
-sudo -u awx awx-manage --version    # works from anywhere now
+sudo -u awx awx-manage --version 2>&1 | tail -1
+# want (for now): "...No AWX configuration found at ['/etc/tower', ...]"
+# That error is the wrapper WORKING: production mode reads /etc/tower, which
+# Lab 6 hasn't written yet. Re-run after Lab 6 and it prints the version.
 ```
 
 Why `/usr/bin` and not `/usr/local/bin`: `sudo`'s `secure_path` on Rocky does not include `/usr/local/bin`, so `sudo -u awx awx-manage` would fail with "command not found" — a trap you'd hit constantly. The RPM uses `/usr/bin`; so do we.
