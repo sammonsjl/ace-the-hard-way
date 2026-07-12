@@ -5,3 +5,4 @@
 
 # Local Claude settings — per-machine permission grants, not shared
 .claude/settings.local.json
+.e2e/
