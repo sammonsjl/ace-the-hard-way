@@ -202,6 +202,30 @@ Then the real test — a browser to **`https://192.168.56.10`** (accept the lab-
 The standalone AWX UI from Lab 9 is still there if you want it, on its new internal port
 `https://192.168.56.10:8043` — the same UI, now behind the gateway instead of in front of it.
 
+## Silence the false "subscription out of compliance" banner
+
+The platform console shows a red banner — *"Your subscription is out of compliance"* — and it's
+spurious on a from-source build. `PlatformApp.tsx` renders it whenever
+`!awxConfig.license_info.compliant`, reading the controller's `/api/controller/v2/config/`. But a
+source AWX (`detect_server_product_name() == 'AWX'`) uses `OpenLicense`, whose `validate()` returns
+**no `compliant` field at all** — and the UI reads missing-as-non-compliant. An open license is
+unlimited; there's nothing to be out of compliance *with*. Make it say so:
+
+```bash
+# in /opt/awx/awx/main/utils/licensing.py, OpenLicense.validate() returns a dict — add one key:
+#     valid_key=True,
+#     compliant=True,      # <-- add this line
+sudo -u awx sed -i "s/^            valid_key=True,$/            valid_key=True,\n            compliant=True,/" \
+  /opt/awx/awx/main/utils/licensing.py
+sudo systemctl restart automation-controller
+
+curl -sk -u admin:CHANGE-ME https://192.168.56.10/api/controller/v2/config/ \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["license_info"]["compliant"])'   # want: True
+```
+
+Refresh the console and the banner is gone. (This is a source patch like Lab 5's `devonly` removal —
+it doesn't survive a `git pull` of `/opt/awx`, so re-apply it if you rebuild.)
+
 > **Posture note (optional).** With the platform UI as the real front door, you can restore the
 > "proper" AAP lockdown from [Lab 16](16-service-registration.md) — un-comment the `RESOURCE_SERVER`
 > block in `/etc/tower/conf.d/gateway.py` — so the controller accepts *only* gateway-issued JWTs and
