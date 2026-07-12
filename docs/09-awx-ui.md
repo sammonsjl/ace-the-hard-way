@@ -17,6 +17,8 @@ Two consequences to know up front:
 
 > Upstream files standalone mode under "Not Recommended" (the recommended path fronts the gateway). We use it deliberately: it's the AWX UI without Jewel, which is exactly what this stage of the build needs.
 
+> **This is the modern UI, not the old one — and it's not the whole story.** `frontend/awx` is the current React/PatternFly ansible-ui (`AwxMain` bundles), the same codebase and commit as the platform console — *not* the retired AngularJS "classic" AWX UI. What makes it look plainer is only that it's the **single-service standalone** build: AWX logo, controller-only navigation, no Hub or EDA. That's by design here — there's no gateway yet, and `frontend/awx` has zero gateway awareness (it never shows the other services, even if you later served it behind the gateway). The **unified** console — one login, Controller + Hub + EDA in a single nav, Ansible branding — is a *different* build (`@ansible/platform-ui`) that requires the gateway, and it arrives in [Lab 19](19-platform-ui.md). So: this lab gives you a real browser console for the controller-only milestone; Lab 19 is the pivot to the platform UI. (After that pivot the gateway takes port 443 and this standalone UI steps back to `:8043` — see Lab 19.)
+
 All commands on **ace-control**. Assumes `git` from Lab 5 is present.
 
 ## Install Node 20

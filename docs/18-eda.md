@@ -339,4 +339,7 @@ That `shared.user` resource type is the whole platform speaking one identity: th
 proven by the gateway, accepted by the controller, the hub, and EDA alike — each built by hand
 from source.
 
-Back to the [README](../README.md) — you built an automation platform, every service, by hand.
+All three services are wired to the gateway. The last lab gives them a face: the unified,
+Ansible-branded platform console, served on 443 like a real AAP install.
+
+Next: [The platform UI](19-platform-ui.md)
