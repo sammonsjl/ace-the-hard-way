@@ -42,14 +42,33 @@ sudo -u awx wc -c /etc/tower/SECRET_KEY    # want: ~64 bytes, not 0
 
 ## Base settings file
 
-`settings.py` reads the key file into `SECRET_KEY` — the base file the installer normally generates:
+`settings.py` is the file the installer generates from its `settings.py.j2` — reproduce its shape, not just the key line. Two entries are load-bearing: `SECRET_KEY`, and **`ALLOWED_HOSTS = ['*']`** — Django in production mode rejects every request with a bare `400` when `ALLOWED_HOSTS` is empty, and AWX's `defaults.py` leaves it empty. You won't notice until Lab 10, when nginx is finally in front and every `/api/` call answers `{"detail":"The request could not be understood by the server."}` while all eight services sit there running innocently. (The wildcard is safe here for the same reason the installer uses it: nginx is the only front door, and Django still validates origins for CSRF.)
 
 ```bash
 sudo -u awx tee /etc/tower/settings.py >/dev/null <<'EOF'
-with open('/etc/tower/SECRET_KEY') as f:
-    SECRET_KEY = f.read().strip()
+# hand-written to match the installer's generated /etc/tower/settings.py
+
+STATIC_ROOT = '/var/lib/awx/public/static'
+PROJECTS_ROOT = '/var/lib/awx/projects'
+JOBOUTPUT_ROOT = '/var/lib/awx/job_status'
+
+SECRET_KEY = open('/etc/tower/SECRET_KEY', 'rb').read().strip()
+
+ALLOWED_HOSTS = ['*']
+
+# email defaults, straight from the bundle (unused until you wire notifications)
+SERVER_EMAIL = 'root@localhost'
+DEFAULT_FROM_EMAIL = 'webmaster@localhost'
+EMAIL_SUBJECT_PREFIX = '[AWX] '
+EMAIL_HOST = 'localhost'
+EMAIL_PORT = 25
+EMAIL_HOST_USER = ''
+EMAIL_HOST_PASSWORD = ''
+EMAIL_USE_TLS = False
 EOF
 ```
+
+(The three `*_ROOT` paths match AWX's production defaults today — they're pinned here because the bundle pins them, so an upstream default change can't silently move your data.)
 
 ## Database connection
 

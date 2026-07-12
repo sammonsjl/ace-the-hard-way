@@ -232,20 +232,24 @@ ls -ld /var/lib/awx    # want: 0755 (Lab 2) — nginx must TRAVERSE the path too
                        # or every file 403s with "stat() failed (13: Permission denied)"
 ```
 
-Third: the socket. **WHAT breaks:** `connect() to unix:/var/run/tower/uwsgi.sock failed (13: Permission denied)` even though classic permissions are right. **WHY:** SELinux's `connectto` check is against the *domain of the process that bound the socket* (uwsgi runs unconfined under our hand-rolled supervisord), not the socket file's label — so no boolean and no fcontext rule can allow it. The RPM ships a policy module for this; we write the minimal equivalent:
+Third: the socket. **WHAT breaks:** `connect() to unix:/var/run/tower/uwsgi.sock failed (13: Permission denied)` even though classic permissions are right. **WHY — and it's two denials, not one:** connecting to a unix socket crosses two SELinux checks. First, `write` on the **socket inode** (labeled `var_run_t` in our tmpfiles-created dir — a type `httpd_t` may not write). Second, `connectto` against the *domain of the process that bound the socket* (uwsgi runs unconfined under our hand-rolled supervisord), not the socket file's label. No boolean and no fcontext rule covers the pair. The RPM ships a policy module for this; we write the minimal equivalent:
 
 ```bash
 sudo dnf -y install policycoreutils-python-utils setools-console
 sudo tee /tmp/ace-nginx-upstream.te >/dev/null <<'EOF'
-module ace-nginx-upstream 1.0;
+module ace-nginx-upstream 1.1;
 
 require {
     type httpd_t;
     type unconfined_service_t;
+    type var_run_t;
     class unix_stream_socket connectto;
+    class sock_file write;
 }
 
-# nginx (httpd_t) may connect to sockets bound by our supervisord family
+# nginx (httpd_t) may connect to sockets bound by our supervisord family:
+# write on the socket inode, connectto on the process that bound it
+allow httpd_t var_run_t:sock_file write;
 allow httpd_t unconfined_service_t:unix_stream_socket connectto;
 EOF
 checkmodule -M -m -o /tmp/ace-nginx-upstream.mod /tmp/ace-nginx-upstream.te
@@ -253,9 +257,9 @@ semodule_package -o /tmp/ace-nginx-upstream.pp -m /tmp/ace-nginx-upstream.mod
 sudo semodule -i /tmp/ace-nginx-upstream.pp
 ```
 
-This is a one-rule module — the narrow, production-grade fix, and philosophically identical to what the RPM does. It survives reboots, relabels, and package updates (`semodule -l | grep ace` to confirm it's loaded).
+This is a two-rule module — the narrow, production-grade fix, and philosophically identical to what the RPM does. It survives reboots, relabels, and package updates (`semodule -l | grep ace` to confirm it's loaded).
 
-> **If you still get a 502:** check `sudo tail /var/log/nginx/error.log` (a `Permission denied` on a `.sock` means classic perms — is the Lab 8 setgid dir intact? `ls -ld /var/run/tower` should say `2775 nginx nginx`, sockets `awx nginx 660`) and `sudo ausearch -m avc -ts recent` for anything SELinux still blocks. Never reach for `chmod 666` on the socket — uwsgi recreates it on every restart with `chmod-socket = 660`, so live chmods silently evaporate. The dir's setgid bit + group `nginx` is the mechanism that survives restarts.
+> **If you still get a 502:** check `sudo tail /var/log/nginx/error.log` (a `Permission denied` on a `.sock` means classic perms — is the Lab 8 setgid dir intact? `ls -ld /var/run/tower` should say `2775 nginx nginx`, sockets `awx nginx 660`). Don't count on `sudo ausearch -m avc -ts recent` to show you this one: the sock_file denial hides behind a `dontaudit` rule, so the audit log stays clean *while the denial keeps happening* — auditd running, zero AVCs, still 502. The honest tools are `sudo sesearch -A -s httpd_t -t var_run_t -c sock_file` (no output = the write rule is missing) and a `setenforce 0` bisect (works permissive + fails enforcing = SELinux, whatever the log says; put it back with `setenforce 1`). Never reach for `chmod 666` on the socket — uwsgi recreates it on every restart with `chmod-socket = 660`, so live chmods silently evaporate. The dir's setgid bit + group `nginx` is the mechanism that survives restarts.
 
 ## firewalld: open the front door
 
