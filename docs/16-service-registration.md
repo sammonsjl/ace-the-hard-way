@@ -8,56 +8,90 @@ The object model, the field names, the trust sequence, and the AWX-side settings
 
 All commands on **ace-control**.
 
-## Wait for the gateway
+## Wait for the gateway, then initialize the local authenticator
 
 ```bash
 curl -s http://127.0.0.1:8080/api/gateway/v1/ping/ | python3 -m json.tool
-# want: pong — don't proceed until this answers
+# want: {"status":"good", ...} — don't proceed until this answers
 ```
 
-(The local authenticator was initialized in Lab 15's init chain — logins work.)
+Now seed the local authenticator (the bundle runs this once, after the services are up — which is exactly here). Without it there's no login backend and every credential is rejected:
+
+```bash
+sudo -u gateway aap-gateway-manage authenticators --initialize
+# want: "Created default local authenticator"
+```
+
+(The `authenticators` subcommand comes from `django-ansible-base`, not jewel's own command set — it won't show up in jewel's `management/commands/` directory, but it's there.)
 
 ## Register the registry (the rows envoy is polling for)
 
-Bundle order: HttpPort → ServiceClusters → ServiceNodes → Services. Each row becomes envoy config within 5 seconds of the POST. Names below are the installer's own:
+Bundle order: HttpPort → ServiceClusters → ServiceNodes → Services. Each row becomes envoy config within 5 seconds. The bundle drives this with the `ansible.platform` collection's modules (over this same REST API); jewel also ships an `aap-gateway-manage register_service --config` command, but it consumes an *older* config format than the current `proxy.yml`, so we go straight to the API.
 
-```bash
-read -s -p "gateway admin password: " GW_PW; echo
-GW="http://127.0.0.1:8080/api/gateway/v1"
-J='Content-Type: application/json'
+**The one thing that trips everyone up: `service_type` and `service_cluster` are foreign keys — pass the integer PK, not a name string.** The service types are seeded (`GET $GW/service_types/` → `gateway=1, controller=2, hub=3, eda=4`). Rather than hard-code PKs that could shift, resolve names to IDs as we go. Save this to `register.py` on the box and run it:
 
-# 1. HttpPort — the listener envoy will open (the bundle's "API Port")
-curl -s -u "admin:${GW_PW}" -X POST "$GW/http_ports/" -H "$J" \
-  -d '{"name": "API Port", "number": 8443, "use_https": true, "is_api_port": true}' \
-  | python3 -m json.tool
+```python
+import json, subprocess
+GW = "http://127.0.0.1:8080/api/gateway/v1"
+AUTH = "admin:CHANGE-ME"   # the gateway admin password from Lab 15
 
-# 2. ServiceClusters — named backend pools
-curl -s -u "admin:${GW_PW}" -X POST "$GW/service_clusters/" -H "$J" \
-  -d '{"name": "gateway", "service_type": "gateway"}' | python3 -m json.tool
-curl -s -u "admin:${GW_PW}" -X POST "$GW/service_clusters/" -H "$J" \
-  -d '{"name": "controller", "service_type": "controller"}' | python3 -m json.tool
+def call(method, path, data=None):
+    cmd = ["curl", "-s", "-u", AUTH, "-X", method, GW + path, "-H", "Content-Type: application/json"]
+    if data is not None:
+        cmd += ["-d", json.dumps(data)]
+    return json.loads(subprocess.check_output(cmd).decode() or "{}")
 
-# 3. ServiceNodes — endpoints in the pools (controller = our nginx front door)
-curl -s -u "admin:${GW_PW}" -X POST "$GW/service_nodes/" -H "$J" \
-  -d '{"name": "Node gateway - ace-control", "address": "127.0.0.1", "service_cluster": "gateway"}' \
-  | python3 -m json.tool
-curl -s -u "admin:${GW_PW}" -X POST "$GW/service_nodes/" -H "$J" \
-  -d '{"name": "Node controller - ace-control", "address": "192.168.56.10", "service_cluster": "controller"}' \
-  | python3 -m json.tool
+def find(path, name):
+    r = call("GET", path + "?name=" + name.replace(" ", "%20")).get("results", [])
+    return r[0]["id"] if r else None
 
-# 4. Services — URL prefix → cluster, with match priority.
-#    controller api → https to nginx:443; gateway api = catch-all at order 100, no gateway auth on itself
-curl -s -u "admin:${GW_PW}" -X POST "$GW/services/" -H "$J" \
-  -d '{"name": "controller api", "api_slug": "controller", "http_port": "API Port",
-       "service_cluster": "controller", "is_service_https": true, "service_port": 443,
-       "order": 50}' | python3 -m json.tool
-curl -s -u "admin:${GW_PW}" -X POST "$GW/services/" -H "$J" \
-  -d '{"name": "gateway api", "api_slug": "gateway", "http_port": "API Port",
-       "service_cluster": "gateway", "is_service_https": false, "service_path": "/",
-       "service_port": 8080, "order": 100, "enable_gateway_auth": false}' | python3 -m json.tool
+def ensure(path, name, body):
+    existing = find(path, name)
+    if existing:
+        print(f"  {name}: exists (id={existing})"); return existing
+    r = call("POST", path, body)
+    print(f"  {name}: created -> {r.get('id', r)}"); return r.get("id")
+
+# 0. service-type PKs, resolved by name
+st = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
+
+# 1. HttpPort — the listener envoy will open
+print("http_port:")
+hp = ensure("/http_ports/", "API Port",
+            {"name": "API Port", "number": 8443, "use_https": True, "is_api_port": True})
+
+# 2. ServiceClusters — named backend pools (service_type is a PK)
+print("clusters:")
+gw_c  = ensure("/service_clusters/", "gateway",    {"name": "gateway",    "service_type": st["gateway"]})
+ctl_c = ensure("/service_clusters/", "controller", {"name": "controller", "service_type": st["controller"]})
+
+# 3. ServiceNodes — endpoints in the pools (service_cluster is a PK; controller = our nginx)
+print("nodes:")
+ensure("/service_nodes/", "Node gateway - ace-control",
+       {"name": "Node gateway - ace-control", "address": "127.0.0.1", "service_cluster": gw_c})
+ensure("/service_nodes/", "Node controller - ace-control",
+       {"name": "Node controller - ace-control", "address": "192.168.56.10", "service_cluster": ctl_c})
+
+# 4. Services — URL slug -> cluster, with match order.
+#    gateway api  = catch-all at order 100, no gateway auth on itself, plain HTTP to uwsgi :8080
+#    controller api = order 1, HTTPS to nginx :443, served under /api/controller/
+print("services:")
+ensure("/services/", "gateway api",
+       {"name": "gateway api", "api_slug": "gateway", "http_port": hp, "service_cluster": gw_c,
+        "is_service_https": False, "service_path": "/", "service_port": 8080,
+        "order": 100, "enable_gateway_auth": False})
+ensure("/services/", "controller api",
+       {"name": "controller api", "api_slug": "controller", "http_port": hp, "service_cluster": ctl_c,
+        "is_service_https": True, "service_path": "/api/controller/", "service_port": 443,
+        "order": 1})
 ```
 
-If a POST rejects a field, `curl -s -u admin:... -X OPTIONS "$GW/services/" | python3 -m json.tool` lists what that endpoint actually wants — the API is the truth, this page is the map. (The controller cluster speaks TLS to nginx; the lab CA is in the system trust from Lab 10, so verification works.)
+```bash
+read -s -p "gateway admin password: " GW_PW; echo    # then edit AUTH in register.py
+python3 register.py
+```
+
+If a POST rejects a field, `curl -s -u admin:... -X OPTIONS "$GW/services/" | python3 -m json.tool` lists what that endpoint actually wants, including which fields are FK `"field"` types — the API is the truth, this page is the map. (The controller cluster speaks TLS to nginx; the lab CA is in the system trust from Lab 10, so verification works.)
 
 Watch envoy wake up:
 
@@ -109,12 +143,17 @@ sudo systemctl restart automation-controller
 
 (`OPTIONAL_API_URLPATTERN_PREFIX` is the quiet one that matters: without it, the gateway proxies `/api/controller/v2/...` to an AWX that only serves `/api/v2/` — 404s everywhere. The JWT key is a URL, not a key: AWX fetches the gateway's public key at runtime; rotate at the gateway and every component follows.)
 
-**3. Merge AWX's users/orgs/teams up into the platform** — the bundle's post-install step, after trust exists:
+**3. Merge AWX's users/orgs/teams up into the platform** — the bundle's post-install step, after trust exists. This one calls the controller *through the gateway* (`https://localhost:8443/api/controller/...`), so it hits the lab-CA-signed front-door cert — and Python's `requests` validates against **certifi's** bundle, not the system trust where Lab 10 installed the lab CA. Point it at the system bundle with `REQUESTS_CA_BUNDLE`:
 
 ```bash
-sudo -u gateway aap-gateway-manage migrate_service_data --username admin
-# it calls AWX as the gateway — AWX must be up and trusting, or this 401s
+sudo -u gateway bash -c 'REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
+  aap-gateway-manage migrate_service_data --username admin'
+# want: "Controller and Gateway superusers are consistent" and
+#       "Service authentication is now enabled." — it calls AWX as the gateway,
+#       so AWX must be up and trusting (step 2), or this 401s.
 ```
+
+> **Two SSL traps here, both from the self-call to `localhost:8443`.** Without `REQUESTS_CA_BUNDLE` you get `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` (certifi doesn't know the lab CA). With it, you might still get `Hostname mismatch, certificate is not valid for 'localhost'` — which is why Lab 15's gateway cert carries a `DNS:localhost` SAN. If you built that cert without `localhost`, reissue it (Lab 15) before this step.
 
 ## Verify — one login, whole platform
 
