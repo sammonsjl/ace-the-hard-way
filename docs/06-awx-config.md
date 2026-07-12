@@ -85,7 +85,14 @@ EOF
 
 ```bash
 sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage check'
-# want: "System check identified no issues" (warnings are fine)
+# want: warnings only, no errors. On a source build the healthy output is
+#   "System check identified some issues: WARNINGS: ... (staticfiles.W004) ...
+#    System check identified 1 issue (1 silenced)."
+# W004 just means the dev UI dir doesn't exist — Lab 9 builds the real UI elsewhere.
+# A database or SECRET_KEY problem would be an ERROR and a traceback, not a warning.
+
+sudo -u awx awx-manage --version
+# the Lab 5 wrapper works now that /etc/tower exists — want: the version string
 ```
 
 Next: [Database init](07-awx-init.md)
