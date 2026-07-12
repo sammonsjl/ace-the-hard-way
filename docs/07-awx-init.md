@@ -20,6 +20,12 @@ sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage cr
 # prompts for username (admin), email, and password
 ```
 
+Scripting this instead (CI, kickstarts)? Django's standard non-interactive form works too:
+
+```bash
+sudo -u awx bash -c 'DJANGO_SUPERUSER_PASSWORD=CHANGE-ME AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage createsuperuser --username admin --email admin@example.com --noinput'
+```
+
 ## Register this node
 
 `ace-control` is a **control** node — it runs the control plane; jobs execute on `ace-exec` (later labs). The `--hostname` must match `CLUSTER_HOST_ID` from Lab 6 (`ace-control`).
