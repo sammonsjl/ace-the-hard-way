@@ -176,4 +176,6 @@ That second curl is the whole platform in one line: envoy took the request on th
 
 > The unified platform UI is a separate build (the `ansible-ui` tree from Lab 9 has a platform target) — a future chapter. The API-level platform above is the real milestone.
 
-Back to the [README](../README.md) — you built an automation platform by hand.
+The controller is behind the gateway. The next two labs bring the other platform services in the same way — each built from source, each joining the same single sign-on.
+
+Next: [Automation Hub](17-hub.md)

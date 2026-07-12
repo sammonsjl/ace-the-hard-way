@@ -55,6 +55,11 @@ You run (or will run) Ansible Automation Platform, AWX, or similar, and you want
 15. [The gateway](docs/15-gateway.md)
 16. [Service registration](docs/16-service-registration.md)
 
+**The other platform services**
+
+17. [Automation Hub](docs/17-hub.md) — galaxy_ng on pulpcore from source, behind the gateway
+18. [Event-Driven Ansible](docs/18-eda.md) — eda-server from source, behind the gateway
+
 **Appendix labs — break it on purpose**
 
 - [A1: The EPEL uwsgi conflict](docs/a1-epel-uwsgi-conflict.md) — deliberately clobber your uwsgi, diagnose the ABI mismatch, armor the box with `excludepkgs`
@@ -65,9 +70,9 @@ You run (or will run) Ansible Automation Platform, AWX, or similar, and you want
 
 ## Scope (v1)
 
-Gateway + controller: single login, jobs running on a hand-built execution plane. Labs 1–14 are a complete working controller on their own; 15–16 add the platform layer.
+The whole platform behind one login: controller, hub, and EDA, each built from source and fronted by the gateway. Labs 1–14 are a complete working controller on their own; 15–16 add the gateway; 17–18 add Automation Hub and Event-Driven Ansible, each joining the same single sign-on.
 
-**Future labs (v2):** scaling the mesh — a hop node relaying to an isolated second execution node (this is AAP's real topology lesson; nothing in this architecture needs quorum, so unlike Kubernetes there's no mandatory scale-out). Also EDA, content hub, and container groups (jobs on Kubernetes). Control-plane HA (multiple AWX nodes + shared postgres behind a load balancer) is deliberately out of laptop scope — that's a "Beyond the lab" topic for real hardware.
+**Future labs (v2):** scaling the mesh — a hop node relaying to an isolated second execution node (this is AAP's real topology lesson; nothing in this architecture needs quorum, so unlike Kubernetes there's no mandatory scale-out). Also container groups (jobs on Kubernetes) and EDA rulebook activations under podman. Control-plane HA (multiple AWX nodes + shared postgres behind a load balancer) is deliberately out of laptop scope — that's a "Beyond the lab" topic for real hardware.
 
 ## A note on containers
 

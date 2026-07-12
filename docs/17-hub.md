@@ -83,8 +83,11 @@ EOF
 pulpcore reads `PULP_SETTINGS`. Write the override the bundle's `_pulp_settings_defaults` +
 galaxy_ng gateway block produce, adapted to our local postgres + unix-socket redis:
 
+First the pulp **database-fields encryption key** — a Fernet key (url-safe base64 of 32
+random bytes) that pulp uses to encrypt secret model fields; without it, `migrate` refuses
+to start:
+
 ```bash
-sudo -u pulp bash -c 'openssl rand -base64 32 | tr "+/" "-_" > /etc/pulp/certs-fernet.key'  # temp, see below
 sudo install -d -o pulp -g pulp -m 0750 /etc/pulp/certs
 sudo -u pulp bash -c 'openssl rand -base64 32 | tr "+/" "-_" > /etc/pulp/certs/database_fields.symmetric.key'
 sudo chmod 0640 /etc/pulp/certs/database_fields.symmetric.key
@@ -139,7 +142,6 @@ GALAXY_AUTHENTICATION_CLASSES = [
     "rest_framework.authentication.BasicAuthentication",
 ]
 EOF
-sudo rm -f /etc/pulp/certs-fernet.key
 sudo chown pulp:pulp /etc/pulp/settings.py
 sudo chmod 0640 /etc/pulp/settings.py
 sudo vim /etc/pulp/settings.py    # set the real DB password + a random SECRET_KEY
