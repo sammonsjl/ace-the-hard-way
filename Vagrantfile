@@ -15,7 +15,12 @@ Vagrant.configure("2") do |config|
   # The repo is shared into every VM at /vagrant (two-way sync).
   # Handy for reading the labs from inside the VM — and for editing them
   # the moment reality disagrees with the docs.
-  config.vm.synced_folder ".", "/vagrant"
+  #
+  # NFSv4 over TCP: the vagrant-libvirt default (vers=3,udp) is rejected by
+  # modern Linux guests — Rocky 9 errors with "an incorrect mount option was
+  # specified", since NFS-over-UDP is dropped on current kernels. v4/tcp also
+  # needs no rpcbind/mountd. (vmware_desktop/virtualbox ignore these nfs_* opts.)
+  config.vm.synced_folder ".", "/vagrant", type: "nfs", nfs_version: 4, nfs_udp: false
 
   config.vm.define "ace-control" do |node|
     node.vm.hostname = "ace-control"
