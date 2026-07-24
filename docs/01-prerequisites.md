@@ -8,15 +8,36 @@ A laptop ready to run the two lab VMs.
 
 Pick the track for your platform — both are fully tested end-to-end.
 
-**Linux — KVM/libvirt** (`vagrant-libvirt`, no license, all open source):
+**Linux — KVM/libvirt** (`vagrant-libvirt`, no license, all open source). Install the virtualization stack plus Vagrant for your distro, then run the common steps below.
+
+*Arch* — the host this was tested on:
 
 ```bash
-# Fedora/RHEL family
-sudo dnf -y install qemu-kvm libvirt dnsmasq ebtables dmidecode nfs-utils vagrant
-# Arch: sudo pacman -S --needed qemu-desktop libvirt dnsmasq ebtables dmidecode nfs-utils && vagrant from the AUR
-sudo systemctl enable --now libvirtd nfs-server
-sudo usermod -aG libvirt "$USER"        # log out/in for the group to take effect
-vagrant plugin install vagrant-libvirt
+sudo pacman -S --needed qemu-desktop libvirt dnsmasq ebtables dmidecode nfs-utils vagrant
+```
+
+*Fedora / RHEL family* — package names are correct, but this wasn't tested as a **host** (the guest VMs are Rocky, so the tutorial's own `dnf` commands are covered — this line is just the host prep):
+
+```bash
+sudo dnf -y install qemu-kvm libvirt virt-install dnsmasq dmidecode nfs-utils vagrant vagrant-libvirt
+```
+
+*Ubuntu / Debian* — package names are correct, untested as a host:
+
+```bash
+sudo apt update
+sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients dnsmasq \
+  dmidecode nfs-kernel-server vagrant vagrant-libvirt
+```
+
+> Distro Vagrant packages can lag; for a current release, install Vagrant from [HashiCorp's apt/dnf repo](https://developer.hashicorp.com/vagrant/install) instead of the distro package.
+
+Then, on any distro:
+
+```bash
+sudo systemctl enable --now libvirtd nfs-server   # Ubuntu/Debian: the unit is nfs-kernel-server
+sudo usermod -aG libvirt "$USER"                  # log out/in for the group to take effect
+vagrant plugin install vagrant-libvirt            # skip if you installed it from your distro repo (Fedora/Ubuntu above)
 ```
 
 **macOS (Apple Silicon or Intel) — VMware Fusion:**
@@ -33,7 +54,7 @@ VMware Fusion is a direct download from the [Broadcom support portal](https://su
 
 | Your platform | Provider | Box | Status |
 |---|---|---|---|
-| Linux (x86_64) | libvirt/KVM (`vagrant-libvirt`) | `bento/rockylinux-9` (default) | ✅ full 19-lab run, amd64 |
+| Linux (x86_64) | libvirt/KVM (`vagrant-libvirt`) | `bento/rockylinux-9` (default) | ✅ full 19-lab run, amd64 (tested on an Arch host) |
 | macOS (Apple Silicon or Intel) | VMware Fusion (`vagrant-vmware-desktop`) | `bento/rockylinux-9` | ✅ full 19-lab run, what the author develops on |
 | Windows / Linux (x86_64) | VMware Workstation Pro (`vagrant-vmware-desktop`) — free, same plugin | `bento/rockylinux-9` | untested, should work |
 | Windows / Linux (x86_64) | VirtualBox | `bento/rockylinux-9` | untested, should work |
