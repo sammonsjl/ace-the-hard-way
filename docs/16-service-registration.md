@@ -113,6 +113,8 @@ sudo -u gateway aap-gateway-manage generate_service_secret controller
 # RECORD the output secret
 ```
 
+> **If you script this instead of hand-copying:** `generate_service_secret` prints a `colorama` deprecation warning to **STDOUT**, above the token. A naive capture (`... | tr -d '\n'`) will merge the warning text into the secret — and the apostrophe in it breaks the single-quoted `SECRET_KEY` string in `gateway.py`, which surfaces later as a gateway 500 ("no python application found"). Grab only the token line: `... generate_service_secret controller | grep -E '^[A-Za-z0-9_-]{40,}$' | tail -1`.
+
 **2. Tell AWX to trust the gateway.** This is the bundle's `/etc/tower/conf.d/gateway.py`, near-verbatim:
 
 ```bash
@@ -154,6 +156,8 @@ sudo -u gateway bash -c 'REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 #       "Service authentication is now enabled." — it calls AWX as the gateway,
 #       so AWX must be up and trusting (step 2), or this 401s.
 ```
+
+> **A `503` here (not `401`) means you're racing the restart from step 2.** The gateway proxies this call to the controller upstream, and for a few seconds after `systemctl restart automation-controller` that upstream is still marked down. Wait until `curl -sk https://localhost:8443/api/controller/v2/ping/` returns `200`, then re-run — it's idempotent.
 
 > **Two SSL traps here, both from the self-call to `localhost:8443`.** Without `REQUESTS_CA_BUNDLE` you get `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` (certifi doesn't know the lab CA). With it, you might still get `Hostname mismatch, certificate is not valid for 'localhost'` — which is why Lab 15's gateway cert carries a `DNS:localhost` SAN. If you built that cert without `localhost`, reissue it (Lab 15) before this step.
 

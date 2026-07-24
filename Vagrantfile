@@ -4,10 +4,10 @@
 #   ace-control : the control plane (bare metal from source: postgres, redis, AWX, gateway)
 #   ace-exec    : the execution plane (receptor + podman for EEs)
 #
-# Box: bento/rockylinux-9 (publishes x86_64 and aarch64 — works on Intel and Apple Silicon)
-# Providers: tested with vmware_desktop (VMware Fusion). virtualbox and libvirt blocks
-# are provided untested — see Lab 1 for the provider/box matrix per platform.
-# libvirt users: the bento box may lack a libvirt build — use VAGRANT_BOX=generic/rocky9.
+# Box: bento/rockylinux-9 — publishes libvirt, vmware, and virtualbox images for both
+# x86_64 and aarch64, so this one default works on Linux/KVM, Intel, and Apple Silicon.
+# Providers: run end-to-end with libvirt (Linux, x86_64) and vmware_desktop (VMware
+# Fusion, macOS). The virtualbox block is provided untested. See Lab 1 for the matrix.
 
 Vagrant.configure("2") do |config|
   config.vm.box = ENV.fetch("VAGRANT_BOX", "bento/rockylinux-9")

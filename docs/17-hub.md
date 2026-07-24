@@ -73,10 +73,17 @@ EOF
 ```
 
 > This pulls galaxy_ng (`4.12.0.dev`), pulpcore (`3.105.x`), pulp-ansible, pulp-container, and
-> **django-ansible-base (`2025.11.dev`)** — the same DAB generation the gateway (Lab 15) built
-> against. If SSO later returns a JWT-claim error, the very first thing to check is whether the
-> hub's DAB and the gateway's DAB are the same generation (`pip show django-ansible-base` in
-> both venvs).
+> **django-ansible-base (`2025.11.dev`)** — close enough to the gateway's DAB generation to
+> share the JWT format. If SSO later returns a JWT-claim error, the very first thing to check is
+> whether the hub's DAB and the gateway's DAB are the same generation (`pip show
+> django-ansible-base` in both venvs).
+>
+> **Don't panic at a version mismatch, though.** On the amd64 run galaxy_ng `main` pinned DAB
+> `2025.11.24` while the gateway/controller/EDA venvs had already moved to `2026.7.23` — a
+> whole generation newer — and **SSO still worked**. A one-generation lag is tolerated; the
+> `Token is missing the "objects" claim` hard failure comes from the *much* older DAB the
+> `stable-4.x` branches pin, which is why `main` (above), not a stable tag, is the load-bearing
+> choice.
 
 ## Settings — `/etc/pulp/settings.py`
 

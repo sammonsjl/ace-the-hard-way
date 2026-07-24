@@ -6,7 +6,20 @@ A laptop ready to run the two lab VMs.
 
 ## Install the tools
 
-On macOS (Apple Silicon or Intel):
+Pick the track for your platform — both are fully tested end-to-end.
+
+**Linux — KVM/libvirt** (`vagrant-libvirt`, no license, all open source):
+
+```bash
+# Fedora/RHEL family
+sudo dnf -y install qemu-kvm libvirt dnsmasq ebtables dmidecode nfs-utils vagrant
+# Arch: sudo pacman -S --needed qemu-desktop libvirt dnsmasq ebtables dmidecode nfs-utils && vagrant from the AUR
+sudo systemctl enable --now libvirtd nfs-server
+sudo usermod -aG libvirt "$USER"        # log out/in for the group to take effect
+vagrant plugin install vagrant-libvirt
+```
+
+**macOS (Apple Silicon or Intel) — VMware Fusion:**
 
 ```bash
 brew install --cask vagrant
@@ -20,18 +33,27 @@ VMware Fusion is a direct download from the [Broadcom support portal](https://su
 
 | Your platform | Provider | Box | Status |
 |---|---|---|---|
-| macOS (Apple Silicon or Intel) | VMware Fusion (`vagrant-vmware-desktop`) | `bento/rockylinux-9` | ✅ what the author uses |
+| Linux (x86_64) | libvirt/KVM (`vagrant-libvirt`) | `bento/rockylinux-9` (default) | ✅ full 19-lab run, amd64 |
+| macOS (Apple Silicon or Intel) | VMware Fusion (`vagrant-vmware-desktop`) | `bento/rockylinux-9` | ✅ full 19-lab run, what the author develops on |
 | Windows / Linux (x86_64) | VMware Workstation Pro (`vagrant-vmware-desktop`) — free, same plugin | `bento/rockylinux-9` | untested, should work |
 | Windows / Linux (x86_64) | VirtualBox | `bento/rockylinux-9` | untested, should work |
-| Linux (any) | libvirt/KVM (`vagrant-libvirt`) | `generic/rocky9` — set `VAGRANT_BOX=generic/rocky9` | untested, should work |
 
-The Vagrantfile carries provider blocks for all three, and the box is overridable via the `VAGRANT_BOX` env var. Everything from Lab 2 onward happens INSIDE the Rocky VMs — identical on every platform. If a provider combination misbehaves, please open an issue.
+The Vagrantfile carries provider blocks for all of these, and the box is overridable via the `VAGRANT_BOX` env var. `bento/rockylinux-9` publishes libvirt, VMware, and VirtualBox images for both x86_64 and aarch64, so the same default box works on every tested provider. Everything from Lab 2 onward happens INSIDE the Rocky VMs — identical on every platform. If a provider combination misbehaves, please open an issue.
+
+### libvirt/KVM notes (Linux)
+
+The full tutorial was run to completion on KVM/amd64; a few host-side things are worth knowing up front (most are distro/firewall-specific — you may hit none of them):
+
+- **Synced folder is NFS.** `vagrant-libvirt` shares `/vagrant` over NFS and edits `/etc/exports` via `sudo`. The Vagrantfile already pins `nfs_version: 4, nfs_udp: false` because modern Rocky guests reject the plugin's default `vers=3,udp` ("an incorrect mount option was specified"). If Vagrant prompts for a password mid-`up`, add a scoped `/etc/sudoers.d` drop-in for the `exportfs`/`mount`/`systemctl` NFS commands it runs.
+- **The repo can't live on an NFS mount.** If your working copy is *itself* on NFS (e.g. a NAS home directory), the kernel can't re-export it (`exportfs: requires fsid=`) and Vagrant's SSH-key ownership check fails. Clone to a local disk path first.
+- **Firewall on the libvirt bridge.** If the guest gets no DHCP/DNS, a default-drop firewall (ufw, or Docker's rules) is blocking the `virbrN` bridge. Allow it: `ufw allow in on virbr0` plus `ufw route allow in on virbr0 && ufw route allow out on virbr0`.
+- **`libvirtd` won't start on a TPM box.** If `virt-secret-init-encryption.service` aborts, seal the key to the host instead of the TPM: `systemd-creds encrypt --with-key=host --name=secrets-encryption-key - /var/lib/libvirt/secrets/secrets-encryption-key`.
 
 ## Verify
 
 ```bash
 vagrant --version
-vagrant plugin list        # want: vagrant-vmware-desktop
+vagrant plugin list        # want: vagrant-libvirt (Linux) or vagrant-vmware-desktop (macOS)
 ```
 
 ## Why VMs?

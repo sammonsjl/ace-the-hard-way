@@ -22,7 +22,7 @@ You run (or will run) Ansible Automation Platform, AWX, or similar, and you want
 ## What you need
 
 - A laptop with ~16 GB RAM free for VMs
-- [Vagrant](https://developer.hashicorp.com/vagrant) with an ARM- or x86-capable provider (this tutorial uses VMware Fusion; the boxes support both architectures)
+- [Vagrant](https://developer.hashicorp.com/vagrant) with a supported provider — run end-to-end on **KVM/libvirt (Linux, x86_64)** and **VMware Fusion (macOS, Apple Silicon or Intel)**; the default box publishes both architectures. Pick your track in [Lab 1](docs/01-prerequisites.md).
 - Patience — that's the "hard way" part
 
 ## Labs
