@@ -57,9 +57,8 @@ VMware Fusion is a direct download from the [Broadcom support portal](https://su
 | Linux (x86_64) | libvirt/KVM (`vagrant-libvirt`) | `bento/rockylinux-9` (default) | ✅ full 19-lab run, amd64 (tested on an Arch host) |
 | macOS (Apple Silicon or Intel) | VMware Fusion (`vagrant-vmware-desktop`) | `bento/rockylinux-9` | ✅ full 19-lab run, what the author develops on |
 | Windows / Linux (x86_64) | VMware Workstation Pro (`vagrant-vmware-desktop`) — free, same plugin | `bento/rockylinux-9` | untested, should work |
-| Windows / Linux (x86_64) | VirtualBox | `bento/rockylinux-9` | untested, should work |
 
-The Vagrantfile carries provider blocks for all of these, and the box is overridable via the `VAGRANT_BOX` env var. `bento/rockylinux-9` publishes libvirt, VMware, and VirtualBox images for both x86_64 and aarch64, so the same default box works on every tested provider. Everything from Lab 2 onward happens INSIDE the Rocky VMs — identical on every platform. If a provider combination misbehaves, please open an issue.
+The Vagrantfile carries provider blocks for libvirt and VMware, and the box is overridable via the `VAGRANT_BOX` env var. `bento/rockylinux-9` publishes libvirt and VMware images for both x86_64 and aarch64, so the same default box works on every tested provider. Everything from Lab 2 onward happens INSIDE the Rocky VMs — identical on every platform. If a provider combination misbehaves, please open an issue.
 
 ### libvirt/KVM notes (Linux)
 
