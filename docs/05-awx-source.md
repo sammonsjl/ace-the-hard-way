@@ -2,15 +2,15 @@
 
 ## What you will have at the end
 
-The AWX source checked out from `devel`, and its Python virtualenv built at `/var/lib/awx/venv/awx` — the same tree the real installer uses — with `awx-manage` runnable inside it.
+The AWX source checked out from `devel`, and its Python virtualenv built at `/var/lib/awx/venv/awx` — inside the service user's home, alongside everything else AWX owns — with `awx-manage` runnable inside it.
 
 > Bare metal note: still no containers. The venv is a plain directory of Python packages, built by hand on the box.
 
 ## Why `devel` and not a release tag
 
-AAP 2.6 tracks AWX **`devel`**, not a tagged release — so `devel` is the faithful upstream for what we're replicating. We clone the **live tip**.
+ACE builds what upstream is actually shipping today, not a snapshot of what it shipped months ago. Release tags are cut against AWX's containerised deployment story; `devel` is where the code — and the packaging behaviour this tutorial leans on — actually lives. So we clone the **live tip**.
 
-> **Caveat — we track `devel` across the platform sources, not just here.** AAP is built from these upstreams' devel branches, so most of the source components in this tutorial (AWX now; the gateway and others later) follow the live tip rather than a pinned tag. The trade is reproducibility: `devel` moves daily, so a build that works today can break tomorrow, and two readers can end up with different source. The hedge is the commit-recording step below — note the SHA you built, so your exact build stays reproducible even as the branch keeps moving.
+> **Caveat — we track `devel` across every source component, not just here.** The gateway, hub, and EDA labs do the same, because several of them have no meaningful release tags at all. The trade is reproducibility: `devel` moves daily, so a build that works today can break tomorrow, and two readers can end up with different source. The hedge is the commit-recording step below — note the SHA you built, so your exact build stays reproducible even as the branch keeps moving.
 
 ## Building without AWX's `make` targets
 
@@ -49,7 +49,7 @@ sudo -u awx git -C /opt/awx rev-parse --short HEAD  # RECORD THIS — it's the d
 
 ## Build the venv
 
-Create the venv first, at the same path the real installer uses (`/var/lib/awx/venv/awx`, inside the `venv/` directory from Lab 2):
+Create the venv first, at the path from the Lab 2 filesystem contract (`/var/lib/awx/venv/awx`, inside the `venv/` directory):
 
 ```bash
 sudo -u awx python3.12 -m venv /var/lib/awx/venv/awx
@@ -85,7 +85,7 @@ AWXEOF
 
 This one line is the difference between a working controller and one where **every job you launch hangs in `pending` forever**, and nothing in the logs obviously says why. AWX decides development-vs-production *not* from `AWX_MODE`, but from a single marker file — `awx/__init__.py` does `import awx.devonly` and sets `MODE = 'development'` if it succeeds. That file (`awx/devonly.py`) ships in a **source checkout** and is stripped from the **release package**. Its own header says so: *"This file should only be present in a source checkout, and never in a release package."*
 
-We're replicating the release/RPM end state, so remove it — exactly what the packaging build does:
+We want the release end state, not a developer checkout, so remove it — exactly what AWX's own packaging build does:
 
 ```bash
 sudo rm -f /opt/awx/awx/devonly.py
@@ -109,14 +109,14 @@ If `--version` prints a version string (e.g. `24.6.2.dev871+g...`), the backend 
 
 Don't reach for `--help` yet — with `devonly` gone the interpreter is in production mode, and production mode refuses to start until Lab 6 writes `/etc/tower/settings.py` (`ImproperlyConfigured: No AWX configuration found at ['/etc/tower', ...]`). That error IS the build working; the full command list runs at the end of Lab 6.
 
-## Put `awx-manage` in the PATH — like the RPM does
+## Put `awx-manage` in the PATH
 
-On a real AAP box you type `awx-manage` anywhere and it works: the RPM ships a wrapper at **`/usr/bin/awx-manage`** that execs the venv binary. The installer's own tasks call that bare `awx-manage` (always as the `awx` user — `become_user: awx` on every single task). Hand-write the same wrapper, with one upgrade for our from-source build: bake in `AWX_MODE=production`. Removing `devonly` above fixed the code-path `MODE`; `AWX_MODE=production` is the *other* half — it selects which settings files load (`/etc/tower` + postgres, not the dev sqlite defaults). A process that loses it loads the wrong settings and dies in strange ways (see Lab 8's warning):
+A venv-only install means typing the full `/var/lib/awx/venv/awx/bin/awx-manage` every time, and every doc and forum answer you'll ever read just says `awx-manage`. Close the gap with a small wrapper at **`/usr/bin/awx-manage`** that execs the venv binary, and bake in `AWX_MODE=production` while we're here. Removing `devonly` above fixed the code-path `MODE`; `AWX_MODE=production` is the *other* half — it selects which settings files load (`/etc/tower` + postgres, not the dev sqlite defaults). A process that loses it loads the wrong settings and dies in strange ways (see Lab 8's warning):
 
 ```bash
 sudo tee /usr/bin/awx-manage >/dev/null <<'EOF'
 #!/bin/bash
-# hand-written stand-in for the RPM's /usr/bin/awx-manage wrapper
+# hand-written PATH wrapper for the venv's awx-manage
 export AWX_MODE=production
 export HOME=${HOME:-/var/lib/awx}
 exec /var/lib/awx/venv/awx/bin/awx-manage "$@"
@@ -129,9 +129,9 @@ sudo -u awx awx-manage --version 2>&1 | tail -1
 # Lab 6 hasn't written yet. Re-run after Lab 6 and it prints the version.
 ```
 
-Why `/usr/bin` and not `/usr/local/bin`: `sudo`'s `secure_path` on Rocky does not include `/usr/local/bin`, so `sudo -u awx awx-manage` would fail with "command not found" — a trap you'd hit constantly. The RPM uses `/usr/bin`; so do we.
+Why `/usr/bin` and not `/usr/local/bin`: `sudo`'s `secure_path` on Rocky does not include `/usr/local/bin`, so `sudo -u awx awx-manage` would fail with "command not found" — a trap you'd hit constantly.
 
-Why still `sudo -u awx`: it's in the PATH for *everyone*, but the config (`/etc/tower`, `SECRET_KEY`) is readable only by `awx` — that's deliberate. Root can read anything, so plain `sudo awx-manage` also works; what you can't do is run it as your login user. Same as a real AAP box.
+Why still `sudo -u awx`: it's in the PATH for *everyone*, but the config (`/etc/tower`, `SECRET_KEY`) is readable only by `awx` — that's deliberate. Root can read anything, so plain `sudo awx-manage` also works; what you can't do is run it as your login user.
 
 > Labs 6–14 spell out the full `sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage ...'` form so they work even without this wrapper — but with it, every one of those collapses to `sudo -u awx awx-manage ...`.
 

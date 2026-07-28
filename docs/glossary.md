@@ -31,7 +31,7 @@ Same Django app, two plugs — that's why AWX needs two web servers.
 
 | Process | What it does |
 |---|---|
-| **rsyslogd** (+ **rsyslog-configurer**) | External logging relay — ships AWX logs to outside aggregators (Splunk etc.). Runs under supervisord in the real product, with a helper that rewrites its config when settings change. |
+| **rsyslogd** (+ **rsyslog-configurer**) | External logging relay — ships AWX logs to outside aggregators (Splunk etc.). Runs under supervisord alongside the other AWX processes, with a helper that rewrites its config when settings change. |
 | **supervisord** | The process manager babysitting all of the above. systemd starts it (`automation-controller.service`); it starts everything else. |
 | **receptor** | The work mesh. A single Go binary on every node; control nodes hand it work, it moves the work (TLS, signed) to whichever node should run it. |
 

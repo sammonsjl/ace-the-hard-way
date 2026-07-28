@@ -93,14 +93,14 @@ curl -sk -u "admin:${AWX_PW}" https://192.168.56.10/api/v2/jobs/<JOB_ID>/ \
 3. The dispatcher submits the work unit to **receptor** (Lab 11) over `/var/run/awx-receptor/receptor.sock`, **signed** with the key from Lab 11
 4. Receptor carries it over the **TLS mesh** (Lab 12) — mutual certs from your Lab 11 mesh CA, node IDs verified via the receptor OID
 5. ace-exec **verifies the signature**, then its work-command runs **ansible-runner worker** (Lab 12)
-6. ansible-runner starts the **EE container** under rootless podman — the job sandbox, exactly where the RPM installer puts it
+6. ansible-runner starts the **EE container** under rootless podman — the job sandbox, and the only container in the whole picture
 7. Events stream back over the same mesh into the **callback receiver** (Lab 8), into **postgres** (Lab 3), and out through **daphne/wsrelay** (Lab 8) to your browser
 
 That's an automation platform, by hand, from source.
 
 ## One more thing that now Just Works
 
-AWX ships default system-job schedules (Cleanup Job Details, Cleanup Activity Stream, ...). System jobs are `local` work — control-plane EE, podman — so with Lab 11's sandbox in place they run on schedule like the bundle intends. Nothing to configure; just know that the weekly cleanup jobs you'll see in the jobs list are these.
+AWX ships default system-job schedules (Cleanup Job Details, Cleanup Activity Stream, ...). System jobs are `local` work — control-plane EE, podman — so with Lab 11's sandbox in place they run on schedule, unprompted. Nothing to configure; just know that the weekly cleanup jobs you'll see in the jobs list are these.
 
 > Milestone: **Labs 1–14 are a complete, working controller.** The gateway labs (15–16) add the single-login platform layer on top — and they're the risky tail. Ship this milestone first: commit your notes, tag your fork, take the win.
 

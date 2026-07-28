@@ -45,7 +45,7 @@ sudo -u postgres psql -d pulp -c "CREATE EXTENSION IF NOT EXISTS hstore;"
 
 The galaxy_ng/pulpcore stack of this era pins `setuptools<66`, and that setuptools calls
 `pkgutil.ImpImporter`, which **Python 3.12 removed**. So the hub venv is built on **Python
-3.11** — the same interpreter AAP 2.6 ships for pulp — even though the controller used 3.12.
+3.11**, even though the controller used 3.12.
 
 ```bash
 sudo dnf -y install python3.11 python3.11-devel
@@ -87,8 +87,8 @@ EOF
 
 ## Settings — `/etc/pulp/settings.py`
 
-pulpcore reads `PULP_SETTINGS`. Write the override the bundle's `_pulp_settings_defaults` +
-galaxy_ng gateway block produce, adapted to our local postgres + unix-socket redis:
+pulpcore reads `PULP_SETTINGS`. Write the override by hand — pulpcore's defaults plus the
+galaxy_ng gateway settings, adapted to our local postgres + unix-socket redis:
 
 First the pulp **database-fields encryption key** — a Fernet key (url-safe base64 of 32
 random bytes) that pulp uses to encrypt secret model fields; without it, `migrate` refuses
@@ -154,7 +154,7 @@ sudo chmod 0640 /etc/pulp/settings.py
 sudo vim /etc/pulp/settings.py    # set the real DB password + a random SECRET_KEY
 ```
 
-The RPM-style manage wrapper — `pulpcore-manager`, with `PULP_SETTINGS`, the Django settings
+The PATH wrapper — `pulpcore-manager`, with `PULP_SETTINGS`, the Django settings
 module, and `OPENSSL_armcap=0` (pulp imports `cryptography`; same Apple-Silicon SIGILL as the
 gateway):
 

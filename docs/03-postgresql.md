@@ -8,7 +8,7 @@ PostgreSQL 15 from the Rocky repos, running as a systemd service, with an `awx` 
 
 ## Why PostgreSQL 15
 
-The AAP 2.6 installer deploys PostgreSQL 15, and Rocky 9 ships it as a module stream. Pinning the same major version keeps us downstream-faithful.
+AWX's own development environment runs on PostgreSQL 15 (`quay.io/sclorg/postgresql-15-c9s` in `tools/docker-compose`), so 15 is the version its migrations and queries are actually exercised against. Rocky 9 ships 15 as a module stream, so we get it from the distro repos and pin the major version explicitly rather than inheriting whatever the default stream becomes.
 
 All commands on **ace-control**.
 
@@ -28,7 +28,7 @@ sudo systemctl enable --now postgresql
 systemctl is-active postgresql    # want: active
 ```
 
-The data directory is `/var/lib/pgsql/data` — same place the real installer expects it.
+The data directory is `/var/lib/pgsql/data` — the distro package's default, and what the backup lab (A3) will come looking for.
 
 ## Authentication: scram-sha-256
 
@@ -84,15 +84,15 @@ CREATE DATABASE awx OWNER awx;
 SQL
 ```
 
-## Tuning (what the real installer does)
+## Tuning
 
-The installer templates `postgresql.conf` with values sized from RAM: `max_connections`, `shared_buffers`, `work_mem`, `maintenance_work_mem`, and `listen_addresses = '*'` (because production DBs usually serve remote nodes).
+A production deployment sizes `postgresql.conf` from the box's RAM — `max_connections`, `shared_buffers`, `work_mem`, `maintenance_work_mem` — and sets `listen_addresses = '*'`, because production DBs usually serve remote nodes.
 
 For our single-node lab, two changes in `/var/lib/pgsql/data/postgresql.conf` are worth making; the rest of Rocky's defaults are fine at this scale:
 
 ```
-max_connections = 1024          # installer default — AWX's process family opens many connections
-shared_buffers = 1GB            # installer sizes this from RAM; ~1/8 of our 8 GB VM
+max_connections = 1024          # AWX's process family opens many connections
+shared_buffers = 1GB            # size from RAM; ~1/8 of our 8 GB VM
 ```
 
 We deliberately keep `listen_addresses` at its localhost default — our DB serves only this box. **Production variant:** on a real multi-node install, the DB is a separate host with `listen_addresses = '*'`, firewalled to the platform nodes, and pg_hba rules per node.

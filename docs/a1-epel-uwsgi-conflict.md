@@ -18,7 +18,7 @@ A platform that survives `dnf update` with EPEL enabled — and a deep understan
 
 - [ ] `dnf install epel-release`
 - [ ] `dnf install uwsgi uwsgi-plugin-python3` — note what lands in `/usr/sbin/uwsgi`
-- [ ] Simulate the RPM-based failure: point a copy of `awx-uwsgi.service` at `/usr/sbin/uwsgi` (PATH-resolution stand-in) and start it
+- [ ] Simulate the failure a PATH-resolved uwsgi would cause: point a copy of `awx-uwsgi.service` at `/usr/sbin/uwsgi` and start it
 - [ ] Collect the evidence: journal errors, the ImportError/ABI failure
 
 ### Part 2 — Diagnose like it's production
@@ -85,20 +85,20 @@ Run these in order — each one narrows it down:
    grep -rn excludepkgs /etc/yum.repos.d/epel*.repo   # empty = unprotected
    ```
 
-**Recovery:** `dnf history undo <id>` (or `dnf downgrade`/`reinstall` the AAP package), add `excludepkgs`, restart the controller service, THEN re-run whatever update started it.
+**Recovery:** `dnf history undo <id>` (or `dnf downgrade`/`reinstall` the clobbered package), add `excludepkgs`, restart the controller service, THEN re-run whatever update started it.
 
-## Evidence from the real installer (2.6 RPM bundle)
+## This is not a hypothetical
 
-Red Hat's own repo template proves this failure mode is real — they armor against it themselves:
+Packaged automation platforms armor against this exact failure, which is the strongest evidence that it's real:
 
-- The AAP "dependencies" repo baseurl ends in `.../dependencies/2.6/epel-9-$basearch` — it is literally **Red Hat's private EPEL rebuild**. Packages like `supervisor` exist under the SAME NAME in this repo and in real EPEL.
-- Their repo file sets `priority=1`, `module_hotfixes=1`, and an `exclude=` list of the controller packages — cross-repo version races are expected and defended against.
-- uwsgi itself ships INSIDE the venv (`automation-controller-venv-tower` RPM → `/var/lib/awx/venv/awx/bin/uwsgi`), married to the bundled interpreter.
+- They ship their **own private EPEL rebuild** as a dependencies repo, rather than pointing at EPEL proper. Packages like `supervisor` then exist under the SAME NAME in two repos, and which one you get is a version race.
+- Their repo files set `priority=1`, `module_hotfixes=1`, and an `exclude=` list covering the platform's own packages — cross-repo races are expected and defended against by default.
+- uwsgi is deliberately kept INSIDE the venv, married to the interpreter it was compiled against, precisely so a system-wide uwsgi can never be substituted for it.
 
-So the lab's `excludepkgs` fix on the EPEL side is the mirror image of what Red Hat already does on theirs. Enabling EPEL on an AAP box without excludes is playing version-number roulette with same-name packages.
+Our `excludepkgs` fix on the EPEL side is the same defence, applied from the other direction. Enabling EPEL on a box like this without excludes is playing version-number roulette with same-name packages.
 
 ## Production note
 
-This exact failure happens on RPM-based AAP installs when EPEL is enabled for "one little package." The armor is the same: per-repo `excludepkgs` on day one.
+This failure is common wherever EPEL gets enabled for "one little package" on a host running a Python application out of a venv. The armor is the same: per-repo `excludepkgs` on day one.
 
 Back to the [README](../README.md)

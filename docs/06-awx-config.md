@@ -8,7 +8,7 @@ AWX's settings written by hand under `/etc/tower` — `SECRET_KEY`, the postgres
 
 AWX loads its `defaults.py`, then everything in `/etc/tower/conf.d/*.py` and `/etc/tower/settings.py`. A source checkout runs in **development** mode by default, so every `awx-manage` call from here on is prefixed `AWX_MODE=production` — that's what makes it read `/etc/tower` and use postgres instead of the dev sqlite.
 
-Layout we build (mirrors the AAP 2.6 bundle):
+Layout we build:
 
 ```
 /etc/tower/
@@ -42,11 +42,11 @@ sudo -u awx wc -c /etc/tower/SECRET_KEY    # want: ~64 bytes, not 0
 
 ## Base settings file
 
-`settings.py` is the file the installer generates from its `settings.py.j2` — reproduce its shape, not just the key line. Two entries are load-bearing: `SECRET_KEY`, and **`ALLOWED_HOSTS = ['*']`** — Django in production mode rejects every request with a bare `400` when `ALLOWED_HOSTS` is empty, and AWX's `defaults.py` leaves it empty. You won't notice until Lab 10, when nginx is finally in front and every `/api/` call answers `{"detail":"The request could not be understood by the server."}` while all eight services sit there running innocently. (The wildcard is safe here for the same reason the installer uses it: nginx is the only front door, and Django still validates origins for CSRF.)
+This is the file that turns a bare production-mode checkout into a configured one. Write the whole shape, not just the one key line — the extras below are the settings AWX's `defaults.py` leaves you to supply. Two entries are load-bearing: `SECRET_KEY`, and **`ALLOWED_HOSTS = ['*']`** — Django in production mode rejects every request with a bare `400` when `ALLOWED_HOSTS` is empty, and AWX's `defaults.py` leaves it empty. You won't notice until Lab 10, when nginx is finally in front and every `/api/` call answers `{"detail":"The request could not be understood by the server."}` while all eight services sit there running innocently. (The wildcard is safe here because nginx is the only front door, and Django still validates origins for CSRF.)
 
 ```bash
 sudo -u awx tee /etc/tower/settings.py >/dev/null <<'EOF'
-# hand-written to match the installer's generated /etc/tower/settings.py
+# hand-written /etc/tower/settings.py
 
 STATIC_ROOT = '/var/lib/awx/public/static'
 PROJECTS_ROOT = '/var/lib/awx/projects'
@@ -56,7 +56,7 @@ SECRET_KEY = open('/etc/tower/SECRET_KEY', 'rb').read().strip()
 
 ALLOWED_HOSTS = ['*']
 
-# email defaults, straight from the bundle (unused until you wire notifications)
+# email defaults (unused until you wire notifications)
 SERVER_EMAIL = 'root@localhost'
 DEFAULT_FROM_EMAIL = 'webmaster@localhost'
 EMAIL_SUBJECT_PREFIX = '[AWX] '
@@ -68,7 +68,7 @@ EMAIL_USE_TLS = False
 EOF
 ```
 
-(The three `*_ROOT` paths match AWX's production defaults today — they're pinned here because the bundle pins them, so an upstream default change can't silently move your data.)
+(The three `*_ROOT` paths match AWX's production defaults today — we set them explicitly anyway, so an upstream default change can't silently move your data.)
 
 ## Database connection
 

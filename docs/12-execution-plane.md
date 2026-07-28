@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-The execution plane's first node: **ace-exec** running receptor from the release binary, TLS-peered to the control node with certs from the Lab 11 **mesh CA**, verifying signed work, with podman ready to sandbox jobs. Verified against the 2.6 bundle's `receptor` and `podman` roles. (Same plane, different members later: Kubernetes via container groups — a future chapter.)
+The execution plane's first node: **ace-exec** running receptor from the release binary, TLS-peered to the control node with certs from the Lab 11 **mesh CA**, verifying signed work, with podman ready to sandbox jobs. (Same plane, different members later: Kubernetes via container groups — a future chapter.)
 
 ```
 ace-control                              ace-exec
@@ -12,13 +12,13 @@ ace-control                              ace-exec
                                                           └── EE container under podman
 ```
 
-> **Why podman is here:** an execution environment IS a container image — since AWX 18 there is no containerless job execution. Receptor (bare metal, yours) hands the job to ansible-runner, which runs it inside the EE under podman. Same pattern as the controller (Lab 11): podman is the job sandbox on every node that runs work — exactly where the RPM installer puts it, and nowhere else.
+> **Why podman is here:** an execution environment IS a container image — since AWX 18 there is no containerless job execution. Receptor (bare metal, yours) hands the job to ansible-runner, which runs it inside the EE under podman. Same pattern as the controller (Lab 11): podman is the job sandbox on every node that runs work, and nowhere else.
 
 Commands run on **both** nodes in this lab — each block says which.
 
 ## Names must resolve (both nodes)
 
-The installer's preflight requires peer names to be DNS-resolvable, and the mesh certs carry DNS names. Two `/etc/hosts` lines stand in for DNS:
+Peer names must be resolvable — the mesh certs carry DNS names, and receptor dials peers by name. Two `/etc/hosts` lines stand in for DNS:
 
 ```bash
 # on ace-control:
@@ -46,10 +46,10 @@ sudo tee /etc/tmpfiles.d/awx-receptor.conf >/dev/null <<'EOF'
 D /var/run/awx-receptor 0750 awx awx -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/awx-receptor.conf
-df --output=fstype /var/lib/receptor | tail -1    # want: NOT tmpfs (installer preflight)
+df --output=fstype /var/lib/receptor | tail -1    # want: NOT tmpfs — work units must survive a reboot
 ```
 
-And the installer's nofile limits for the work user:
+And raised nofile limits for the work user, same as the control node:
 
 ```bash
 sudo tee /etc/security/limits.d/awx.conf >/dev/null <<'EOF'
@@ -61,7 +61,7 @@ EOF
 
 ## The mesh cert — CSR here, signed by the CA host
 
-Same PKI as Lab 11 (receptor's own — `nodeid=` bakes the node ID into the cert's `otherName` SAN). The installer's flow: the key is born on the node and never leaves; the CSR travels to the CA host (ace-control), comes back as a cert. Our courier is `/vagrant` — only public material crosses it.
+Same PKI as Lab 11 (receptor's own — `nodeid=` bakes the node ID into the cert's `otherName` SAN). The flow is the one any CA should use: the key is born on the node and never leaves; the CSR travels to the CA host (ace-control), comes back as a cert. Our courier is `/vagrant` — only public material crosses it.
 
 **On ace-exec — key and CSR:**
 
@@ -107,7 +107,7 @@ rm -f /vagrant/ace-exec.csr /vagrant/ace-exec.crt /vagrant/mesh-CA.crt /vagrant/
 
 ## ansible-runner and podman (ace-exec)
 
-The bundle installs exactly this trio on execution nodes: `ansible-runner`, `podman`, `crun`. Their runner comes as an RPM from RH repos; upstream, pip is the way — pinned to the 2.4 series, record what you get:
+An execution node needs exactly this trio: `ansible-runner`, `podman`, `crun`. podman and crun come from the distro repos; ansible-runner comes from pip — pinned to the 2.4 series, record what you get:
 
 ```bash
 sudo dnf -y install python3.12 python3.12-pip podman crun
@@ -115,7 +115,7 @@ sudo pip3.12 install 'ansible-runner==2.4.*'
 ansible-runner --version    # RECORD THIS
 ```
 
-Rootless podman as `awx` needs two things (the bundle's `podman` role does both). Subordinate UID/GID ranges — **`useradd --system` (Lab 2) does not create them**, and without them every pull fails with a user-namespace error:
+Rootless podman as `awx` needs two things. Subordinate UID/GID ranges — **`useradd --system` (Lab 2) does not create them**, and without them every pull fails with a user-namespace error:
 
 ```bash
 grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
@@ -137,7 +137,7 @@ sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman images --digests    # 
 
 ## receptor.conf on ace-exec
 
-The bundle shape for an execution node — verification but no signing, a TLS listener, no local work type:
+The shape of an execution node — verification but no signing, a TLS listener, no local work type:
 
 ```bash
 sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
@@ -184,10 +184,10 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 EOF
 ```
 
-- **`worktype: ansible-runner`** — exactly this string; it's what AWX submits for execution nodes. (The bundle writes a bare `ansible-runner` and relies on PATH; we spell out the pip-installed path.)
+- **`worktype: ansible-runner`** — exactly this string; it's what AWX submits for execution nodes. (A bare `ansible-runner` here would rely on PATH; we spell out the pip-installed path instead.)
 - **`requireclientcert: true`** — mutual TLS: the control node must present a mesh-CA-signed cert too, not just encrypt.
 - **`verifysignature: true`** + `work-verification` — only work signed by the control node's private key runs here. An attacker on the network segment can't feed this node jobs.
-- The `tls-client` section is unused today (this node dials nobody) but it's part of the bundle's end state on every mesh node — and the v2 mesh-scaling chapter will want it.
+- The `tls-client` section is unused today (this node dials nobody), but every mesh node should carry one — and the v2 mesh-scaling chapter will want it.
 - The local `control-service` socket is for on-box `receptorctl` debugging — the mesh can't reach it.
 
 ## The unit (ace-exec)
@@ -221,7 +221,7 @@ sudo systemctl enable --now receptor
 
 ## firewalld (ace-exec)
 
-The receptor listener is `27199/tcp` — the installer's firewall role opens it on execution nodes, and without it **the mesh times out silently** (no error, just a peer that never appears):
+The receptor listener is `27199/tcp` and it has to be open on execution nodes. Without it **the mesh times out silently** (no error, just a peer that never appears):
 
 ```bash
 sudo dnf -y install firewalld
@@ -233,7 +233,7 @@ sudo firewall-cmd --list-ports    # want: 27199/tcp
 
 ## Peer the control node (ace-control)
 
-The mesh direction matches the bundle's example inventory (`[automationcontroller:vars] peers=execution_nodes`): **controllers dial out, execution nodes listen.** Edit `/etc/receptor/receptor.conf` — the `tls_client` section from Lab 11 does the identity, `redial` keeps the link self-healing:
+The mesh has a direction, and it's worth being explicit about: **controllers dial out, execution nodes listen.** That way an execution node needs no outbound reach into the control plane, and adding one is a firewall change on the new node only. Edit `/etc/receptor/receptor.conf` — the `tls_client` section from Lab 11 does the identity, `redial` keeps the link self-healing:
 
 ```bash
 sudo vim /etc/receptor/receptor.conf
@@ -254,7 +254,7 @@ sudo systemctl restart receptor
 
 ## Verify (ace-control)
 
-The bundle validates the mesh exactly this way — `receptorctl ping` as the service user:
+`receptorctl ping`, as the service user — this is the check that proves the mesh, not just the process:
 
 ```bash
 sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl \

@@ -1,11 +1,11 @@
-# Lab 19 — The platform UI (and the real-AAP 443 pivot)
+# Lab 19 — The platform UI (and the 443 pivot)
 
 ## What you will have at the end
 
-The **unified platform UI** — `@ansible/platform-ui`, Ansible-branded, one login, Controller +
-Hub + EDA in a single navigation — served by the gateway on **port 443**, exactly where a real
-AAP install puts it. This is the pivot the whole tutorial has been building toward: the gateway
-becomes the front door, and the controller steps back behind it.
+The **unified platform UI** — `@ansible/platform-ui`, one login, Controller +
+Hub + EDA in a single navigation — served by the gateway on **port 443**. This is the pivot
+the whole tutorial has been building toward: the gateway becomes the front door, and the
+controller steps back behind it.
 
 ```
 browser ── https://192.168.56.10  (443)
@@ -25,14 +25,13 @@ browser ── https://192.168.56.10  (443)
 
 All commands on **ace-control**. Assumes Labs 15–18 (gateway + hub + EDA, all on :8443).
 
-## Why 443, and what the bundle says
+## Why 443
 
-In a real AAP install the public front door is **envoy on 443** (`_automationgatewayproxy_https_port: 443`
-in the installer's `collection_global_vars.yml`); the gateway's own uwsgi sits behind it on 8443, and
-the controller, hub, and EDA each run nginx on 443 **on their own hosts**. We've been bringing the
-gateway up on 8443 to keep it side-by-side with the controller (which took 443 back in Lab 10) — easy
-to test both. Now we do what the installer does: give envoy 443, and move the controller to an internal
-port behind it. (On one box the three services can't all be 443, so the controller lands on 8043, hub
+The design the whole platform layer assumes: **envoy on 443** as the single public front door, the
+gateway's own uwsgi behind it on 8443, and the controller, hub, and EDA each on 443 **on their own
+hosts**. We've been bringing the gateway up on 8443 to keep it side-by-side with the controller
+(which took 443 back in Lab 10) — easy to test both. Now we commit: give envoy 443, and move the
+controller to an internal port behind it. (On one box the three services can't all be 443, so the controller lands on 8043, hub
 stays 8444, EDA 8445 — the single-box tax on a design meant for separate hosts.)
 
 ## Build the platform UI
@@ -52,7 +51,7 @@ git -C /opt/ansible-ui rev-parse --short HEAD        # RECORD — same commit as
 EOF
 ```
 
-Stage it where the gateway serves the UI (the bundle's path). The directory is `root:nginx` from
+Stage it where the gateway serves the UI — the `STATIC_ROOT` from Lab 15. The directory is `root:nginx` from
 Lab 15's `collectstatic`, so copy as root:
 
 ```bash
@@ -65,8 +64,8 @@ sudo -u awx ls /var/lib/ansible-automation-platform/platform/ui/index.html   # w
 
 The gateway's catch-all "gateway api" service currently sends `/` straight to the gateway's uwsgi
 (which returns the API, not a UI). Put a small nginx in front of the uwsgi that serves the SPA at
-`/` and proxies the gateway's own API paths back to uwsgi. (In the bundle this *is* the gateway's
-nginx; we add it now because we simplified it away in Lab 15.)
+`/` and proxies the gateway's own API paths back to uwsgi. (This is the nginx layer we deliberately
+simplified away in Lab 15 — now there's a UI to serve, it earns its place.)
 
 ```bash
 sudo tee /etc/nginx/conf.d/automation-gateway-ui.nginx.conf >/dev/null <<'EOF'
@@ -179,7 +178,7 @@ sudo systemctl restart automation-gateway automation-controller \
 > the gateway's JWT **public key** at runtime. If it still says `:8443` after the pivot, that fetch
 > fails and every proxied call comes back `403` — the tell that one of these URLs got missed.
 
-## Verify — the platform on 443, like real AAP
+## Verify — the whole platform on 443
 
 ```bash
 curl -sk https://192.168.56.10/ | grep -o 'PlatformMain-[^"]*\.js' | head -1   # the SPA is the platform build
@@ -227,7 +226,7 @@ Refresh the console and the banner is gone. (This is a source patch like Lab 5's
 it doesn't survive a `git pull` of `/opt/awx`, so re-apply it if you rebuild.)
 
 > **Posture note (optional).** With the platform UI as the real front door, you can restore the
-> "proper" AAP lockdown from [Lab 16](16-service-registration.md) — un-comment the `RESOURCE_SERVER`
+> full lockdown from [Lab 16](16-service-registration.md) — un-comment the `RESOURCE_SERVER`
 > block in `/etc/tower/conf.d/gateway.py` — so the controller accepts *only* gateway-issued JWTs and
 > there's no direct login bypassing the platform. Leave it commented if you'd rather keep the
 > standalone :8043 UI usable for debugging.

@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-A migrated database, an admin user, and this node registered as a **control** instance in the `controlplane` group — the same init chain the real installer runs.
+A migrated database, an admin user, and this node registered as a **control** instance in the `controlplane` group — the init chain every AWX deployment has to run, done by hand.
 
 Every command runs as `awx` with `AWX_MODE=production` (production mode, `/etc/tower` config, postgres). All on **ace-control**.
 

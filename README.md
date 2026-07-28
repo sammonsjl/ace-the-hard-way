@@ -1,12 +1,12 @@
 # ACE the Hard Way
 
-This tutorial walks you through building an open source automation platform the hard way — **from source, bare metal** — so you understand every process, every config file, and every wire. "Bare metal" means exactly what the RPM installer builds: every service a real process on the box, with containers appearing only where the installer puts them (as execution-environment sandboxes for jobs).
+This tutorial walks you through building an open source automation platform the hard way — **from source, bare metal** — so you understand every process, every config file, and every wire. "Bare metal" means literally that: every service is a real process on the box, and containers appear in exactly one role — as execution-environment sandboxes for jobs.
 
-The goal is precise: **hand-build, from upstream source, the same end state that Red Hat's RPM installer produces** — same service user, same directory layout (`/etc/tower` legacy paths included, on purpose), same supervisor process family, same nginx wiring. If you administer a real AAP VM install, everything in this lab is where your production instincts expect it.
+The goal is precise: **hand-build a complete automation platform from upstream source** — a dedicated service user, a deliberate directory layout (AWX's historical `/etc/tower` paths included, on purpose), a supervisor process family you write yourself, and nginx wiring you can read end to end. Every piece is a real process you can inspect, restart, and break.
 
 It builds that architecture from upstream community projects:
 
-- **Control node** — built by hand on a Linux VM: PostgreSQL, Redis, [AWX](https://github.com/ansible/awx) built from source into a virtualenv, its UI built from source, every process (uwsgi, daphne, dispatcher, callback receiver, wsrelay) running under **supervisord configs you wrote** — the same topology as a real AAP VM deployment — plus receptor from the release binary, behind nginx. Then the platform gateway on top.
+- **Control node** — built by hand on a Linux VM: PostgreSQL, Redis, [AWX](https://github.com/ansible/awx) built from source into a virtualenv, its UI built from source, every process (uwsgi, daphne, dispatcher, callback receiver, wsrelay) running under **supervisord configs you wrote** — the same process topology a real production deployment runs — plus receptor from the release binary, behind nginx. Then the platform gateway on top.
 - **Execution plane** — a second VM (its first node) joined over a **receptor mesh you build yourself**: release binary, hand-made TLS certs, work signing. Jobs dispatch across the mesh and run there in execution environments. Later, the same plane concept extends to Kubernetes via container groups — the control plane never knows the difference.
 
 No installer. No operator. No docker-compose. No Kubernetes.
@@ -17,7 +17,7 @@ No installer. No operator. No docker-compose. No Kubernetes.
 
 ## Who this is for
 
-You run (or will run) Ansible Automation Platform, AWX, or similar, and you want to know what's actually inside — not just what the installer prints. Bare-metal AWX hasn't been officially supported since v18; this is the map nobody publishes anymore.
+You run (or will run) AWX or a similar automation platform, and you want to know what's actually inside — not just what an install script prints at you. Bare-metal AWX hasn't been officially supported since v18; this is the map nobody publishes anymore.
 
 ## What you need
 
@@ -59,7 +59,7 @@ You run (or will run) Ansible Automation Platform, AWX, or similar, and you want
 
 17. [Automation Hub](docs/17-hub.md) — galaxy_ng on pulpcore from source, behind the gateway
 18. [Event-Driven Ansible](docs/18-eda.md) — eda-server from source, behind the gateway
-19. [The platform UI](docs/19-platform-ui.md) — the unified Ansible console (`@ansible/platform-ui`), served by the gateway on 443 like a real AAP install
+19. [The platform UI](docs/19-platform-ui.md) — the unified Ansible console (`@ansible/platform-ui`), served by the gateway on 443
 
 **Appendix labs — break it on purpose**
 
@@ -71,17 +71,15 @@ You run (or will run) Ansible Automation Platform, AWX, or similar, and you want
 
 ## Scope (v1)
 
-The whole platform behind one login: controller, hub, and EDA, each built from source and fronted by the gateway, with the unified Ansible console on 443. Labs 1–14 are a complete working controller on their own; 15–16 add the gateway; 17–18 add Automation Hub and Event-Driven Ansible, each joining the same single sign-on; 19 builds the platform UI and pivots the front door to 443 like a real AAP install.
+The whole platform behind one login: controller, hub, and EDA, each built from source and fronted by the gateway, with the unified Ansible console on 443. Labs 1–14 are a complete working controller on their own; 15–16 add the gateway; 17–18 add Automation Hub and Event-Driven Ansible, each joining the same single sign-on; 19 builds the platform UI and pivots the front door to 443, the way a production deployment fronts the whole platform.
 
-**Future labs (v2):** scaling the mesh — a hop node relaying to an isolated second execution node (this is AAP's real topology lesson; nothing in this architecture needs quorum, so unlike Kubernetes there's no mandatory scale-out). Also container groups (jobs on Kubernetes) and EDA rulebook activations under podman. Control-plane HA (multiple AWX nodes + shared postgres behind a load balancer) is deliberately out of laptop scope — that's a "Beyond the lab" topic for real hardware.
+**Future labs (v2):** scaling the mesh — a hop node relaying to an isolated second execution node (this is the topology lesson that matters most in the real world; nothing in this architecture needs quorum, so unlike Kubernetes there's no mandatory scale-out). Also container groups (jobs on Kubernetes) and EDA rulebook activations under podman. Control-plane HA (multiple AWX nodes + shared postgres behind a load balancer) is deliberately out of laptop scope — that's a "Beyond the lab" topic for real hardware.
 
 ## A note on containers
 
-Everything you build and operate is bare metal. Podman appears only as the **execution-environment sandbox**, on every node that runs work — jobs on the execution plane, project syncs and system jobs on the controller — because an EE *is* a container image and AWX has had no containerless execution since v18. That's precisely where the RPM installer puts podman, and nowhere else: no service you build runs in a container.
+Everything you build and operate is bare metal. Podman appears only as the **execution-environment sandbox**, on every node that runs work — jobs on the execution plane, project syncs and system jobs on the controller — because an EE *is* a container image and AWX has had no containerless execution since v18. That is the only place podman appears: no service you build runs in a container.
 
-## Trademark note
-
-This project is not affiliated with or endorsed by Red Hat. "Ansible Automation Platform" and "AAP" are Red Hat trademarks; this tutorial assembles independent upstream community projects (AWX, Receptor, etc.) into a similar architecture, referred to here as **ACE**.
+ACE is an independent assembly of upstream community projects — [AWX](https://github.com/ansible/awx), [receptor](https://github.com/ansible/receptor), [jewel](https://github.com/ansible/jewel), [galaxy_ng](https://github.com/ansible/galaxy_ng), and [eda-server](https://github.com/ansible/eda-server) — wired together by hand.
 
 ## License
 

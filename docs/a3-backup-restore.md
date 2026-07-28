@@ -1,6 +1,6 @@
 # Appendix Lab A3 — Backup and restore
 
-> The real installer ships whole `backup` and `restore` roles — day-two operations are part of the product. Do this after Lab 14.
+> Day-two operations are part of running a platform, not an afterthought — and you can't claim you have a backup until you've restored from it. Do this after Lab 14.
 
 ## What you will have at the end
 

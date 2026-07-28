@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-Receptor running on **ace-control** from the official release binary — true kubernetes-the-hard-way style, finally a real tar file — with the control socket AWX's dispatcher talks to, the **mesh root CA** and this node's mesh cert, work-signing keys, and the `local` work type advertised. Everything below is verified against the 2.6 bundle's `receptor` role.
+Receptor running on **ace-control** from the official release binary — true kubernetes-the-hard-way style, finally a real tar file — with the control socket AWX's dispatcher talks to, the **mesh root CA** and this node's mesh cert, work-signing keys, and the `local` work type advertised.
 
 All commands on **ace-control**.
 
@@ -28,11 +28,11 @@ sudo tar -xzf /tmp/receptor.tgz -C /usr/local/bin receptor
 receptor --version    # want: 1.6.5
 ```
 
-> `/usr/local/bin` gets the SELinux `bin_t` label by default — no relabel dance like Lab 8's venv. One ownership note: the bundle's RPM install creates a `receptor` system user that owns `/etc/receptor` (group `awx`, 0750) while the **daemon itself runs as `awx`** via a systemd override. With no RPM, we skip the file-owner user and just use `awx` — same effective access, one less account.
+> `/usr/local/bin` gets the SELinux `bin_t` label by default — no relabel dance like Lab 8's venv. One ownership note: a packaged receptor typically creates a separate `receptor` system user to own `/etc/receptor` (group `awx`, 0750) while the **daemon itself runs as `awx`**. We skip the extra file-owner account and use `awx` for both — same effective access, one less user to reason about.
 
 ## Directories
 
-Two receptor-related runtime dirs exist in a real install: `/var/run/receptor` (the RPM's default) and **`/var/run/awx-receptor`** — the one AAP actually points the control socket at. We create both, use `awx-receptor`, and give the datadir a real home (the bundle validates a configured datadir is writable and not on tmpfs — work units must survive a restart):
+Two runtime dirs are in play: `/var/run/receptor`, receptor's own default, and **`/var/run/awx-receptor`**, which is where we point the control socket so it's unambiguous that this daemon belongs to the AWX side of the box. We create both, use `awx-receptor`, and give the datadir a real home — it must be writable and **not** on tmpfs, because work units have to survive a restart:
 
 ```bash
 sudo install -d -o awx -g awx -m 0750 /etc/receptor /etc/receptor/tls /etc/receptor/tls/ca
@@ -49,9 +49,9 @@ sudo systemd-tmpfiles --create /etc/tmpfiles.d/receptor.conf /etc/tmpfiles.d/awx
 df --output=fstype /var/lib/receptor | tail -1    # want: xfs (or ext4) — NOT tmpfs
 ```
 
-> Datadir note: the bundle leaves `datadir` unset by default (receptor falls back to `/tmp/receptor`), but supports configuring it and then gives it a 0700 tmpfiles entry. We configure `/var/lib/receptor` deliberately — surviving reboots beats matching a default.
+> Datadir note: left unset, receptor falls back to `/tmp/receptor` — a directory that gets periodically swept, and on some hosts is tmpfs-backed and vanishes entirely at reboot, taking in-flight work units with it. We configure `/var/lib/receptor` deliberately and give it a 0700 tmpfiles entry; surviving reboots beats accepting the default.
 
-## File descriptor limits (from the installer)
+## File descriptor limits
 
 Every node that runs work gets raised nofile limits for the service user — jobs open a lot of files:
 
@@ -63,9 +63,9 @@ awx hard nofile 8192
 EOF
 ```
 
-## podman on the control node (yes — straight from the installer)
+## podman on the control node (yes, really)
 
-The bundle's receptor role installs **podman + crun on every node that can run work, and `control` is in that list.** Control-plane work — SCM project syncs, system jobs — executes inside the control-plane EE under podman, *on this node*. "Bare metal" in this tutorial means *what the RPM installer builds*, and the installer builds this. Same rootless setup as the execution node will get:
+**podman + crun belong on every node that can run work — and the control node is one of them.** Control-plane work — SCM project syncs, system jobs — executes inside the control-plane EE under podman, *on this node*. That isn't a compromise of the bare-metal rule; it's the rule: an EE is a container image, so anything that runs an EE needs a container runtime. Nothing you *build* runs in a container. Same rootless setup as the execution node will get:
 
 ```bash
 sudo dnf -y install podman crun
@@ -99,9 +99,9 @@ echo $?    # want: 0 — if you get 132, read on
 
 ## The mesh root CA — receptor's own PKI
 
-Here's a genuinely undocumented corner, straight from the bundle: receptor certs are **not** made with openssl, and the mesh does **not** share the Lab 10 web CA. The `receptor` binary ships its own PKI (`--cert-init`, `--cert-makereq`, `--cert-signreq`), and the installer uses it to create a dedicated mesh root CA. Why the special tooling: receptor verifies **node IDs, not hostnames** — each cert carries the node ID in an `otherName` SAN under receptor's private OID (`1.3.6.1.4.1.2312.19.1`), and `--cert-makereq nodeid=...` is what injects it. Sign a normal web cert instead and the mesh fails TLS with errors that never mention the real cause.
+Here's a genuinely under-documented corner: receptor certs are **not** made with openssl, and the mesh does **not** share the Lab 10 web CA. The `receptor` binary ships its own PKI (`--cert-init`, `--cert-makereq`, `--cert-signreq`), and that's what creates the dedicated mesh root CA. Why the special tooling: receptor verifies **node IDs, not hostnames** — each cert carries the node ID in an `otherName` SAN under receptor's private OID (`1.3.6.1.4.1.2312.19.1`), and `--cert-makereq nodeid=...` is what injects it. Sign a normal web cert instead and the mesh fails TLS with errors that never mention the real cause.
 
-Create the CA (the bundle's CN is "Ansible Automation Controller Nodes Mesh ROOT CA"; ours keeps the shape without the trademark):
+Create the CA — the CN is free-form, since receptor authenticates on node IDs rather than names:
 
 ```bash
 sudo /usr/local/bin/receptor --cert-init commonname="ACE Nodes Mesh ROOT CA" bits=4096 \
@@ -111,9 +111,9 @@ sudo chown awx:awx /etc/receptor/tls/ca/mesh-CA.crt /etc/receptor/tls/ca/mesh-CA
 sudo chmod 0640 /etc/receptor/tls/ca/mesh-CA.crt /etc/receptor/tls/ca/mesh-CA.key
 ```
 
-> Files are listed explicitly — no `mesh-CA.*` — because **wildcards expand in YOUR shell, before sudo runs**. `/etc/receptor/tls` is 0750 awx-owned; your login shell can't read it, the glob matches nothing, and the command fails with a baffling "No such file or directory". (The installer never hits this: Ansible's `file` module takes literal paths.)
+> Files are listed explicitly — no `mesh-CA.*` — because **wildcards expand in YOUR shell, before sudo runs**. `/etc/receptor/tls` is 0750 awx-owned; your login shell can't read it, the glob matches nothing, and the command fails with a baffling "No such file or directory". (Automating this with Ansible never hits it — the `file` module takes literal paths.)
 
-Then this node's mesh cert — request and sign, both on this box (it's the CA host). Cert files are named after the node, matching the bundle (`/etc/receptor/tls/<node>.crt`):
+Then this node's mesh cert — request and sign, both on this box (it's the CA host). Cert files are named after the node (`/etc/receptor/tls/<node>.crt`), so the mesh stays readable as it grows:
 
 ```bash
 sudo /usr/local/bin/receptor --cert-makereq bits=4096 commonname=ace-control nodeid=ace-control \
@@ -139,7 +139,7 @@ sudo openssl x509 -in /etc/receptor/tls/ace-control.crt -noout -text | grep -A2 
 
 ## Work-signing keypair
 
-Control signs, execution verifies. RSA 4096 (pkcs1), and — bundle detail — owned `root:awx` 0640: root writes it, awx (receptorctl, doing the signing) reads it, nobody else:
+Control signs, execution verifies. RSA 4096 (pkcs1), owned `root:awx` 0640: root writes it, awx (receptorctl, doing the signing) reads it, nobody else:
 
 ```bash
 sudo openssl genrsa -out /etc/receptor/work_private_key.pem 4096
@@ -151,9 +151,9 @@ sudo chmod 0640 /etc/receptor/work_private_key.pem /etc/receptor/work_public_key
 
 The **public** key travels to ace-exec in Lab 12; the private key never leaves this box.
 
-## receptor.conf — written by hand, bundle shape
+## receptor.conf — written by hand
 
-The format is a YAML **list** of single-key sections. This mirrors what the installer's template renders for a control node:
+The format is a YAML **list** of single-key sections, not a mapping — an easy thing to get wrong. This is the full shape for a control node:
 
 ```bash
 sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
@@ -210,16 +210,16 @@ EOF
 - **`node.id`** must equal `CLUSTER_HOST_ID` from Lab 6 — AWX addresses work by node ID.
 - **`firewallrules`** is a receptor-level rule (not firewalld): reject any traffic *from the mesh* aimed at this node's control service. Only local socket clients (the dispatcher) issue control commands.
 - **Both `work-signing` and `work-verification`** live on the control node — it signs what it sends AND verifies what it runs. `verifysignature: true` on the local work-command closes that loop.
-- **`control-service`** at the AAP socket path, `0660`, with `tls: tls_server` — TLS applies when the control service is reached over the network; local unix-socket clients like `receptorctl` and the dispatcher connect plain.
-- **`tls_server` / `tls_client`** are the bundle's section names. AWX discovers the `tls-client` section by scanning the config — the name itself just has to be referenced consistently (Lab 12's `tcp-peer` uses it).
+- **`control-service`** at the socket path from the Directories section above, `0660`, with `tls: tls_server` — TLS applies when the control service is reached over the network; local unix-socket clients like `receptorctl` and the dispatcher connect plain.
+- **`tls_server` / `tls_client`** are just the names we give these sections. AWX discovers the `tls-client` section by scanning the config — the name itself just has to be referenced consistently (Lab 12's `tcp-peer` uses it).
 - **`work-command` (local)** is how control-plane work (project updates, system jobs) would execute *on this node* — see the warning below.
-- **`local-only`** — a war story, now bundle-verified. Without it, this config has **no backends** (no listener, no peers — those come in Lab 12), and receptor treats that as "nothing to do": it logs `WARNING Nothing to do - no backends are running` and exits cleanly, which looks like a crash loop from systemd and makes `receptorctl` throw `Connection refused`. The installer's template emits exactly `- local-only` for a single controller with no listener. It means "run as an isolated node" — remove it the moment a real peer exists (Lab 12 does). If you hit the crash loop first: fix the config, then `sudo systemctl reset-failed receptor` before restarting.
+- **`local-only`** — a war story. Without it, this config has **no backends** (no listener, no peers — those come in Lab 12), and receptor treats that as "nothing to do": it logs `WARNING Nothing to do - no backends are running` and exits cleanly, which looks like a crash loop from systemd and makes `receptorctl` throw `Connection refused`. `- local-only` is exactly what a single controller with no listener needs: it means "run as an isolated node" — remove it the moment a real peer exists (Lab 12 does). If you hit the crash loop first: fix the config, then `sudo systemctl reset-failed receptor` before restarting.
 
 > **How `local` work actually runs:** the dispatcher submits it to receptor; receptor's work-command spawns `ansible-runner worker`; ansible-runner starts the control-plane EE under the podman you just installed. Note the chain — **receptor is the parent of podman here**, which is why the unit below carries `XDG_RUNTIME_DIR` (rootless podman needs it, and system services don't get it for free).
 
 ## The unit
 
-The bundle's systemd override runs receptor as `awx` and ties it to the controller family with `PartOf` — restart `automation-controller`, receptor restarts with it. `XDG_RUNTIME_DIR` is baked in because receptor spawns the control-plane EE (see the note above):
+The unit runs receptor as `awx` and ties it to the controller family with `PartOf` — restart `automation-controller`, receptor restarts with it. `XDG_RUNTIME_DIR` is baked in because receptor spawns the control-plane EE (see the note above):
 
 ```bash
 AWX_UID=$(id -u awx)

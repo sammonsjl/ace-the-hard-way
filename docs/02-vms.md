@@ -2,7 +2,7 @@
 
 ## What you'll have at the end
 
-Two Rocky Linux 9 VMs that can see each other, both passing the installer-grade preflight checks, with the `awx` service user on both and the full filesystem contract laid down on the control node.
+Two Rocky Linux 9 VMs that can see each other, both passing the preflight checks, with the `awx` service user on both and the full filesystem contract laid down on the control node.
 
 ## Bring them up
 
@@ -22,7 +22,7 @@ vagrant status    # both running
 vagrant ssh ace-control
 ```
 
-Create the dedicated `awx` service user everything will run under (no service runs as root). Home is `/var/lib/awx`, matching the RPM install; it gets a real shell because init commands run as this user (`sudo -u awx awx-manage ...`):
+Create the dedicated `awx` service user everything will run under (no service runs as root). Home is `/var/lib/awx`, which is where AWX expects to find its projects, job output, and venv; it gets a real shell because init commands run as this user (`sudo -u awx awx-manage ...`):
 
 ```bash
 sudo useradd --system --home-dir /var/lib/awx --create-home --shell /bin/bash awx
@@ -43,7 +43,7 @@ sudo mkdir -p /var/log/tower /var/log/supervisor
 sudo chown -R awx:awx /var/lib/awx /etc/tower /var/log/tower
 sudo chmod 0750 /var/log/tower
 
-# the bundle sets the home dir to 0755 — nginx must traverse it to serve
+# the home dir must be 0755 — nginx must traverse it to serve
 # /var/lib/awx/public later. useradd created it 0700; fix that now or Lab 10
 # ends in "stat() failed (13: Permission denied)" on every static file.
 sudo chmod 0755 /var/lib/awx
@@ -78,7 +78,7 @@ sudo reboot                         # ssh session drops; that's expected
 
 ## Prep the execution plane node
 
-`ace-exec` needs exactly one thing today — the same service user (on a real RPM install, receptor runs as `awx` on execution nodes too). Everything else (receptor, podman, TLS) is Lab 12's job:
+`ace-exec` needs exactly one thing today — the same service user, because receptor runs as `awx` on execution nodes too. Everything else (receptor, podman, TLS) is Lab 12's job:
 
 ```bash
 vagrant ssh ace-exec
@@ -97,9 +97,9 @@ sudo reboot
 
 Both VMs verified and rebooted = Lab 2 done.
 
-## The filesystem contract (matches the real RPM install exactly)
+## The filesystem contract
 
-One user, five directories — identical to production AAP, so everything you learn here transfers:
+One user, five directories. Lay it down once here and every later lab has a home for its files:
 
 | Path | Owner | Purpose |
 |---|---|---|
@@ -111,9 +111,9 @@ One user, five directories — identical to production AAP, so everything you le
 
 (Commands for all of this are in "Prep the control node" above.)
 
-## Preflight checks (adopted from the real installer)
+## Preflight checks
 
-The real installer refuses to proceed if any of these fail. Run them all on BOTH VMs:
+Each of these is a precondition the rest of the tutorial silently assumes. Run them all on BOTH VMs:
 
 ```bash
 # 1. Time sync — clock skew breaks TLS handshakes and job timestamps
@@ -123,7 +123,7 @@ chronyc tracking | head -3         # want: a real reference ID, small offset
 # 2. UTF-8 locale — non-UTF-8 breaks Django and postgres init
 locale | grep -c 'UTF-8'           # want: > 0, no errors printed
 
-# 3. Enough RAM — the installer enforces a minimum
+# 3. Enough RAM — the process family below is memory-hungry
 awk '/MemTotal/ {printf "%.1f GB\n", $2/1024/1024}' /proc/meminfo
                                    # want: ~8 GB on ace-control, ~4 GB on ace-exec
 
@@ -139,6 +139,6 @@ done; echo "check done (silence above = OK)"
 stat -c '%a %U %n' /var/log        # want: 755 root /var/log
 ```
 
-All six pass = the box is installer-grade. Any fail = fix it now; every one of these produces a confusing failure five labs later if ignored.
+All six pass = the box is ready. Any fail = fix it now; every one of these produces a confusing failure five labs later if ignored.
 
 Next: [PostgreSQL](03-postgresql.md)

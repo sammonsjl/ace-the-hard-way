@@ -15,7 +15,7 @@ redis-server --version    # record the version (Rocky 9 ships 6.2.x — fine; AW
 
 ## Configure the Unix socket
 
-AWX talks to redis over a Unix socket — that's how the real installer wires it too (socket shared between the redis and awx services). Edit the config — on Rocky 9 it's `/etc/redis/redis.conf`:
+AWX talks to redis over a Unix socket rather than TCP — the socket is shared between the redis and awx services, and there's nothing listening on the network to firewall. Edit the config — on Rocky 9 it's `/etc/redis/redis.conf`:
 
 ```bash
 sudo vim /etc/redis/redis.conf
@@ -33,7 +33,7 @@ unixsocketperm 770
 
 ## Let the awx user in
 
-Socket perm 770 means owner (`redis`) and group (`redis`) only. The awx user joins the group — exactly the installer's approach:
+Socket perm 770 means owner (`redis`) and group (`redis`) only. The awx user joins the group — group membership, not a loosened socket mode:
 
 ```bash
 sudo usermod -aG redis awx
@@ -62,6 +62,6 @@ ss -tlnp | grep 6379 || echo "no TCP listener — good"
 
 ## Optional hardening (not v1)
 
-The real installer can also wrap redis in TLS with certs from its internal platform CA. Socket-only with group permissions is already a tighter posture for a single box; TLS-on-redis matters when redis serves remote nodes (the gateway's clustered redis in multi-node AAP). Noted for the future-labs pile.
+Redis can also be wrapped in TLS with certs from an internal CA. Socket-only with group permissions is already a tighter posture for a single box; TLS-on-redis matters when redis serves remote nodes, which is what a clustered multi-node deployment needs. Noted for the future-labs pile.
 
 Next: [AWX from source](05-awx-source.md)

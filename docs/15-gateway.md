@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-The platform gateway (**jewel**) built from source, running the bundle's exact process topology — supervisord with **two programs**: uwsgi (REST, :8080) and the **gRPC control plane** (:50051) — plus **envoy** from the release binary with the bundle's bootstrap config, polling the gateway for routes via xDS. No routes exist yet; that's Lab 16.
+The platform gateway (**jewel**) built from source, running under supervisord as **two programs**: uwsgi (REST, :8080) and the **gRPC control plane** (:50051) — plus **envoy** from the release binary with a hand-written bootstrap config, polling the gateway for routes via xDS. No routes exist yet; that's Lab 16.
 
 ```
 (Lab 16 opens :8443) ── envoy ──┬── xDS REST poll, 5s ──► gateway uwsgi :8080
@@ -10,15 +10,15 @@ The platform gateway (**jewel**) built from source, running the bundle's exact p
                                      both clusters static; listeners/routes arrive as DB rows
 ```
 
-This lab's *shape* is now **verified against the 2.6 bundle's `automationgateway` role** — paths, ports, process model, init order. What remains unverifiable ahead of time is the jewel *source build* itself:
+The *shape* below — paths, ports, process model, init order — is settled. What can shift under you is the jewel *source build* itself:
 
-> **Here be dragons — still.** Jewel lives at [ansible/jewel](https://github.com/ansible/jewel): no releases, moving daily. The bundle installs RPMs of this same app, so the end state below is right, but requirements layout and module paths in the source tree may drift. When the repo disagrees with a build step, the repo wins — note the difference. And remember: Labs 1–14 already work. If jewel turns to quicksand, stop and ship.
+> **Here be dragons — still.** Jewel lives at [ansible/jewel](https://github.com/ansible/jewel): no releases, moving daily. The end state below is right, but requirements layout and module paths in the source tree may drift. When the repo disagrees with a build step, the repo wins — note the difference. And remember: Labs 1–14 already work. If jewel turns to quicksand, stop and ship.
 
 All commands on **ace-control**.
 
-## Layout (bundle paths, our build)
+## Layout
 
-Verified: the gateway runs as its own **`gateway`** user (not `awx`), config lives in **`/etc/ansible-automation-platform/gateway/`**, uwsgi on **8080**, gRPC on **50051**, envoy fronting on 443 in production — **8443 here**, because nginx owns 443 on this shared box (real installs put the gateway on its own machine). We keep the real config path for downstream fidelity, same reasoning as `/etc/tower`:
+The gateway runs as its own **`gateway`** user (not `awx`), config lives in **`/etc/ansible-automation-platform/gateway/`**, uwsgi on **8080**, gRPC on **50051**, envoy fronting on 443 in production — **8443 here**, because nginx owns 443 on this shared box (a production deployment gives the gateway its own machine). The config path is the one jewel's own `settings.py` looks for, so we keep it as-is — same reasoning as AWX's `/etc/tower`:
 
 ```bash
 sudo useradd --system --home-dir /var/lib/ansible-automation-platform --create-home --shell /bin/bash gateway
@@ -69,13 +69,13 @@ pip install uwsgi supervisor
 EOF
 ```
 
-The manage entrypoint is **`aap-gateway-manage`** — both the bundle and the gateway operator call exactly that. Give it the RPM-style PATH wrapper (same trick as Lab 5's `awx-manage`), and bake in `OPENSSL_armcap=0`:
+The manage entrypoint jewel installs is **`aap-gateway-manage`** — that's the console script name in its own packaging, so it's what every command below calls. Give it a `/usr/bin` PATH wrapper (same trick as Lab 5's `awx-manage`), and bake in `OPENSSL_armcap=0`:
 
 ```bash
 ls /var/lib/ansible-automation-platform/venv/gateway/bin/ | grep -i manage   # confirm the name
 sudo tee /usr/bin/aap-gateway-manage >/dev/null <<'EOF'
 #!/bin/bash
-# hand-written stand-in for the RPM's /usr/bin/aap-gateway-manage wrapper.
+# hand-written PATH wrapper for the venv's aap-gateway-manage.
 # OPENSSL_armcap=0: the gateway imports cryptography at startup; on an aarch64 VM
 # under a hypervisor OpenSSL takes an accelerated code path that SIGILLs (exit 132) —
 # the same trap as Lab 11's EEs, but here in a bare-metal process. Harmless on x86_64.
@@ -87,7 +87,7 @@ sudo chmod 0755 /usr/bin/aap-gateway-manage
 
 > **Apple Silicon war story, reprise.** On an aarch64 VM the very first `aap-gateway-manage` command you run (the migrate below) exits **132** with no traceback — `rc=132`, silence. It's Lab 11's `OPENSSL_armcap` SIGILL again: the gateway imports `cryptography` (for JWT/SAML) before it prints anything, OpenSSL autodetects CPU crypto features that trap under the hypervisor, and the process dies. Unlike Lab 11 (where the trap was inside an EE *container*, fixed via `AWX_TASK_ENV`), here it's the gateway's own Python process — so the variable has to be in the wrapper (above), in `uwsgi.ini`, and in each supervisord program's `environment=` (all done below). x86_64 readers never see this and the variable is a no-op for them.
 
-## Settings — the bundle's override file
+## Settings — the override file
 
 Jewel loads `/etc/ansible-automation-platform/gateway/settings.py` automatically — `settings.py` in the source calls `load_python_file_with_injected_context('{etc}/settings.py')`, and `{etc}` is `/etc/ansible-automation-platform/gateway/`. So an override file at that path is picked up with no settings-module env var. The one we write carries the database, the redis cache, `STATIC_ROOT`, the gRPC port, and the trusted origin:
 
@@ -96,8 +96,8 @@ sudo -u gateway bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/
 sudo chmod 0400 /etc/ansible-automation-platform/gateway/SECRET_KEY
 
 sudo -u gateway tee /etc/ansible-automation-platform/gateway/settings.py >/dev/null <<'EOF'
-# Gateway override settings (hand-written; mirrors the bundle settings.py.j2 shape,
-# adapted to this lab: local postgres + unix-socket redis, no TLS on redis)
+# Gateway override settings (hand-written for this lab:
+# local postgres + unix-socket redis, no TLS on redis)
 
 DATABASES = {
     'default': {
@@ -113,7 +113,8 @@ DATABASES = {
 # Jewel's default cache already points at a unix socket (db 4). Its 'primary'
 # cache, though, uses a DAB redis client that assumes TLS + a dedicated redis
 # host — wrong for our single-box socket. Replace it with a plain django_redis
-# client on the same socket. (The bundle sets rediss:// + client certs here.)
+# client on the same socket. (A multi-host deployment would use rediss:// +
+# client certs here instead.)
 CACHES['primary'] = {
     'BACKEND': 'django_redis.cache.RedisCache',
     'LOCATION': 'unix:///var/run/redis/redis.sock?db=4',
@@ -121,8 +122,8 @@ CACHES['primary'] = {
     'OPTIONS': {'CLIENT_CLASS': 'django_redis.client.DefaultClient'},
 }
 
-# jewel's default STATIC_ROOT is an unwritable /opt path; point it where the
-# bundle does (nginx serves this dir; collectstatic writes it below).
+# jewel's default STATIC_ROOT is an unwritable /opt path; point it at the
+# platform UI dir (nginx serves this dir; collectstatic writes it below).
 STATIC_ROOT = '/var/lib/ansible-automation-platform/platform/ui/static'
 
 GRPC_SERVER_PORT = '50051'
@@ -133,13 +134,13 @@ EOF
 sudo vim /etc/ansible-automation-platform/gateway/settings.py   # real DB password
 ```
 
-> The gateway user needs to reach the Lab 4 redis socket: `sudo usermod -aG redis gateway` (the bundle does the same group trick for awx).
+> The gateway user needs to reach the Lab 4 redis socket: `sudo usermod -aG redis gateway` — the same group trick Lab 4 used for awx.
 >
-> The SECRET_KEY needs no setting line — jewel's `set_secret_key` defaults `SECRET_KEY_FILE` to exactly `{etc}/SECRET_KEY`, which is where we just wrote it. (The bundle sets `GATEWAY_SECRET_KEY_FILE` explicitly; the default already matches, so we skip it.)
+> The SECRET_KEY needs no setting line — jewel's `set_secret_key` defaults `SECRET_KEY_FILE` to exactly `{etc}/SECRET_KEY`, which is where we just wrote it. (You *can* set `GATEWAY_SECRET_KEY_FILE` explicitly, but the default already matches, so we skip it.)
 
-## Init chain (the bundle's order)
+## Init chain
 
-Migrate → superuser → collectstatic. The `authenticators --initialize` step comes *later*, after the services are up (the bundle runs it post-start; we follow suit below). The superuser password rides an env var, exactly like the installer:
+Migrate → superuser → collectstatic. The `authenticators --initialize` step comes *later*, after the services are up — it needs a running gateway, so it's below. The superuser password rides an env var rather than a prompt, so the step is scriptable:
 
 ```bash
 sudo -u gateway aap-gateway-manage migrate
@@ -147,20 +148,20 @@ sudo -u gateway aap-gateway-manage migrate
 sudo -u gateway bash -c 'DJANGO_SUPERUSER_PASSWORD=CHANGE-ME aap-gateway-manage createsuperuser --username=admin --email=admin@example.com --noinput'
 ```
 
-Now the static files. The bundle owns `STATIC_ROOT` as **root:nginx** and runs `collectstatic` as **root** (not `gateway`) — the `gateway` user can't write a root-owned tree. Create the directory, then collect as root (the wrapper still supplies `OPENSSL_armcap=0`):
+Now the static files. `STATIC_ROOT` is owned **root:nginx** and `collectstatic` runs as **root** (not `gateway`) — nginx only ever *reads* this tree, so nothing needs write access at runtime. Create the directory, then collect as root (the wrapper still supplies `OPENSSL_armcap=0`):
 
 ```bash
 sudo install -d -o root -g nginx -m 0755 /var/lib/ansible-automation-platform/platform/ui/static
 sudo bash -c 'umask 022 && aap-gateway-manage collectstatic --noinput --clear'
 ```
 
-> Run `collectstatic` as `gateway` and it dies with `PermissionError: [Errno 13] Permission denied: '.../static/admin'` the moment it tries to write into the root-owned tree. The bundle sidesteps this by running the whole step as root; so do we. (nginx only ever *reads* this directory, so root-owned files are fine.)
+> Run `collectstatic` as `gateway` and it dies with `PermissionError: [Errno 13] Permission denied: '.../static/admin'` the moment it tries to write into the root-owned tree. Running the whole step as root sidesteps it.
 
 ## Run it: supervisord, two programs
 
-Verified: the gateway is another supervisord family — `uwsgi` plus `aap-gateway-manage start_grpc_server`, both as `gateway`, one systemd unit on top (`automation-gateway.service`):
+The gateway is another supervisord family — `uwsgi` plus `aap-gateway-manage start_grpc_server`, both as `gateway`, one systemd unit on top (`automation-gateway.service`):
 
-The uwsgi config is the bundle's shape: it binds **two** sockets — the bundle's uwsgi protocol socket on `8050` (for an nginx front, as in the bundle) and an `http-socket` on `8080` that envoy talks to directly (our simplification — envoy speaks HTTP, so we skip the extra nginx layer for the gateway). `DJANGO_SETTINGS_MODULE` and `mount` are how the bundle wires the WSGI app, and `OPENSSL_armcap=0` is the SIGILL fix inside the worker:
+The uwsgi config binds **two** sockets: a uwsgi-protocol socket on `8050` (there for an nginx front, if you ever want one) and an `http-socket` on `8080` that envoy talks to directly — envoy speaks HTTP, so we skip the extra nginx layer for the gateway entirely. `DJANGO_SETTINGS_MODULE` and `mount` wire up the WSGI app, and `OPENSSL_armcap=0` is the SIGILL fix inside the worker:
 
 ```bash
 sudo -u gateway tee /etc/ansible-automation-platform/gateway/uwsgi.ini >/dev/null <<'EOF'
@@ -294,9 +295,9 @@ sudo install -m 0755 /tmp/envoy /usr/local/bin/envoy
 envoy --version    # want: 1.38.3
 ```
 
-## envoy bootstrap — the bundle's, by hand
+## envoy bootstrap — by hand
 
-Verified against `envoy.yaml.j2`: **two static clusters** — the REST control plane (HTTP/1, where LDS/CDS poll every 5s) and the **gRPC control plane** (HTTP/2, :50051 — jewel authenticates proxied requests through it). Everything else arrives via xDS from database rows:
+The bootstrap needs **two static clusters** — the REST control plane (HTTP/1, where LDS/CDS poll every 5s) and the **gRPC control plane** (HTTP/2, :50051 — jewel authenticates proxied requests through it). Everything else arrives via xDS from database rows:
 
 ```bash
 sudo install -d -m 0755 /etc/envoy
@@ -372,7 +373,7 @@ sudo cp /opt/jewel/tools/scripts/envoy-path-rewrite.lua /etc/envoy/envoy-path-re
 sudo chmod 0644 /etc/envoy/envoy-path-rewrite.lua
 ```
 
-The bundle runs envoy as its own service, `automation-gateway-proxy`:
+envoy gets its own service, `automation-gateway-proxy` — separate from the gateway itself, so you can restart the proxy without bouncing the app:
 
 ```bash
 sudo tee /etc/systemd/system/automation-gateway-proxy.service >/dev/null <<'EOF'

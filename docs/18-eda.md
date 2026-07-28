@@ -59,9 +59,10 @@ EOF
 > `shutil.which(...)` for external executables *as their modules load* — miss them and even
 > `migrate` dies with `ExecutableNotFoundError: Cannot find ansible-runner executable`
 > (then `ansible-vault`, from ansible-core; then `ansible-rulebook` for activations). They
-> aren't in eda-server's own dependency set because the RPM delivers them as sibling packages.
+> aren't in eda-server's own dependency set because a packaged install delivers them as
+> sibling packages; from source, you install them yourself.
 
-The RPM-style wrapper — `aap-eda-manage`, carrying `EDA_SETTINGS_FILE`, `OPENSSL_armcap=0`
+The PATH wrapper — `aap-eda-manage`, carrying `EDA_SETTINGS_FILE`, `OPENSSL_armcap=0`
 (same Apple-Silicon SIGILL as the gateway/hub), and a **venv-first `PATH`** so those
 `shutil.which` lookups resolve inside the exec'd process:
 
@@ -339,7 +340,7 @@ That `shared.user` resource type is the whole platform speaking one identity: th
 proven by the gateway, accepted by the controller, the hub, and EDA alike — each built by hand
 from source.
 
-All three services are wired to the gateway. The last lab gives them a face: the unified,
-Ansible-branded platform console, served on 443 like a real AAP install.
+All three services are wired to the gateway. The last lab gives them a face: the unified
+platform console, served on 443.
 
 Next: [The platform UI](19-platform-ui.md)

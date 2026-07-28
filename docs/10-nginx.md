@@ -14,13 +14,13 @@ laptop ── https://192.168.56.10 (lab-CA-signed cert)
             └── /api/        → unix:/var/run/tower/uwsgi.sock   (uwsgi protocol)
 ```
 
-**Decision (documented):** TLS from day one, not plain HTTP. The bundle never ships HTTP-only, and the web CA built here signs the gateway's front door later (Lab 15) — skipping it now just moves the work. (The receptor mesh gets its **own** root CA in Lab 11, exactly like the bundle.)
+**Decision (documented):** TLS from day one, not plain HTTP. Every later lab assumes an HTTPS front door, and the web CA built here signs the gateway's front door later (Lab 15) — skipping it now just moves the work. (The receptor mesh gets its **own** root CA in Lab 11, deliberately separate from this one.)
 
 All commands on **ace-control**.
 
-## Match the bundle: daphne moves to a unix socket
+## Daphne moves to a unix socket
 
-The bundle's nginx upstreams are **both unix sockets** — `uwsgi.sock` and `daphne.sock`, no TCP. Lab 8 ran daphne on `127.0.0.1:8051` to keep first bring-up debuggable with curl; now that it's proven, switch it to the socket:
+Both nginx upstreams should be **unix sockets** — `uwsgi.sock` and `daphne.sock`, no TCP. There's nothing for a remote client to reach, so there's nothing to firewall, and the socket permissions do the access control. Lab 8 ran daphne on `127.0.0.1:8051` to keep first bring-up debuggable with curl; now that it's proven, switch it to the socket:
 
 ```bash
 sudo vim /etc/tower/supervisord.conf
@@ -53,7 +53,7 @@ ls -l /var/run/tower/daphne.sock    # want: srw------- (or similar) owned awx ng
 
 ## The lab CA
 
-The installer's `certificate_authority` role generates a CA for the platform's **web certs** and installs it into the system trust store. Hand-roll the same — this CA signs nginx today and the gateway's front in Lab 15. (One correction from reading the actual bundle: the receptor mesh is NOT signed by this CA — the `receptor` role creates its own dedicated root CA with `receptor --cert-init`. Lab 11 does the same.)
+The platform needs a CA for its **web certs**, trusted by the system trust store. Hand-roll one — it signs nginx today and the gateway's front door in Lab 15. (Worth stating plainly, because it trips people up: the receptor mesh is NOT signed by this CA. Receptor ships its own PKI and gets its own dedicated root CA in Lab 11.)
 
 ```bash
 sudo install -d -m 0700 /etc/tower/ca
@@ -62,7 +62,7 @@ sudo openssl req -x509 -new -key /etc/tower/ca/ca.key -sha256 -days 3650 \
   -subj "/CN=ACE Lab CA" -out /etc/tower/ca/ca.crt
 ```
 
-Sign the web cert into the bundle's paths (`/etc/tower/tower.cert` + `tower.key` — tower legacy, kept deliberately). The SANs cover every name this box answers to:
+Sign the web cert into `/etc/tower/tower.cert` + `tower.key` — AWX's historical `tower` naming, kept deliberately, because that's what the codebase and its docs still call these files. The SANs cover every name this box answers to:
 
 ```bash
 sudo openssl genrsa -out /etc/tower/tower.key 2048
@@ -81,7 +81,7 @@ sudo openssl x509 -req -in /tmp/tower.csr \
 sudo rm -f /tmp/tower.csr /tmp/tower_ext.cnf
 ```
 
-Install the CA into the system trust, exactly like the installer's `update-ca-trust` step:
+Install the CA into the system trust, so `curl` and the Python clients in later labs accept it without `-k`:
 
 ```bash
 sudo cp /etc/tower/ca/ca.crt /etc/pki/ca-trust/source/anchors/ace-lab-ca.crt
@@ -92,7 +92,7 @@ Now `curl` **on the VM** trusts the platform without `-k`. Your laptop doesn't k
 
 ## Collect Django's static files
 
-The SPA is self-contained, but the browsable API (`/api/v2/` in a browser) needs Django's static assets. The bundle serves them straight from disk, so populate `STATIC_ROOT` (defaults to `/var/lib/awx/public/static`):
+The SPA is self-contained, but the browsable API (`/api/v2/` in a browser) needs Django's static assets. nginx serves them straight from disk, so populate `STATIC_ROOT` (defaults to `/var/lib/awx/public/static`):
 
 ```bash
 sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage collectstatic --noinput'
@@ -109,7 +109,7 @@ nginx -v    # record it
 
 ## nginx.conf — the base file, no `user` override
 
-**Match the bundle:** the installer's generic `nginx` role writes the *whole* `nginx.conf`, but it never sets a `user` directive — nginx keeps running as its compiled-in default, which on Rocky's package is `nginx`. That's deliberate: `nginx` (not `awx`) is the one reading the sockets, and Lab 8 already set up `/var/run/tower` as `nginx:nginx` with setgid so awx's sockets land in the `nginx` group. Per-service server blocks are a **separate concern**, dropped into `conf.d/` by each component's own role — so this file only carries the shared plumbing: mime types, logging, and the `$http_upgrade` map that websocket proxying needs.
+We write the *whole* `nginx.conf`, but deliberately never set a `user` directive — nginx keeps running as its compiled-in default, which on Rocky's package is `nginx`. That's what we want: `nginx` (not `awx`) is the one reading the sockets, and Lab 8 already set up `/var/run/tower` as `nginx:nginx` with setgid so awx's sockets land in the `nginx` group. Per-service server blocks are a **separate concern**, dropped into `conf.d/` by each component's own lab — so this file only carries the shared plumbing: mime types, logging, and the `$http_upgrade` map that websocket proxying needs.
 
 ```bash
 sudo tee /etc/nginx/nginx.conf >/dev/null <<'EOF'
@@ -193,7 +193,7 @@ server {
         alias /var/lib/awx/public/static/;
     }
 
-    # websockets → daphne (regex over both prefixes, like the bundle)
+    # websockets → daphne (regex over both prefixes)
     location ~* /(websocket|api/websocket)/ {
         proxy_pass http://daphne;
         proxy_http_version 1.1;
@@ -218,21 +218,21 @@ EOF
 
 ## SELinux: handled, not disabled
 
-Verified against the bundle, and the split matters: the installer's `nginx` role sets exactly **one** thing — the `httpd_can_network_connect` boolean. Everything else (socket `connectto` allowances, file contexts for `/var/lib/awx`) comes from the **automation-controller RPM's own SELinux policy module**, which a from-source build doesn't have. So on this box, three denials are *expected*, and we replace the RPM policy by hand:
+Here's the thing a from-source build has to reckon with: a *packaged* AWX ships its own SELinux policy module, and that module quietly grants the socket `connectto` allowances and the file contexts under `/var/lib/awx`. Install from source and you get none of it — only the one boolean anybody ever documents. So on this box, three denials are *expected*, and we write the missing policy by hand:
 
 ```bash
-# 1. the exact boolean the installer sets
+# 1. let nginx talk to upstreams over the network
 sudo setsebool -P httpd_can_network_connect on
 
 # 2. the SPA and static files live under /var/lib — label them web content
-#    (this is the RPM policy's file-context equivalent)
+#    (the file-context half of the missing policy)
 sudo semanage fcontext -a -t httpd_sys_content_t '/var/lib/awx/public(/.*)?'
 sudo restorecon -Rv /var/lib/awx/public
 ls -ld /var/lib/awx    # want: 0755 (Lab 2) — nginx must TRAVERSE the path too,
                        # or every file 403s with "stat() failed (13: Permission denied)"
 ```
 
-Third: the socket. **WHAT breaks:** `connect() to unix:/var/run/tower/uwsgi.sock failed (13: Permission denied)` even though classic permissions are right. **WHY — and it's two denials, not one:** connecting to a unix socket crosses two SELinux checks. First, `write` on the **socket inode** (labeled `var_run_t` in our tmpfiles-created dir — a type `httpd_t` may not write). Second, `connectto` against the *domain of the process that bound the socket* (uwsgi runs unconfined under our hand-rolled supervisord), not the socket file's label. No boolean and no fcontext rule covers the pair. The RPM ships a policy module for this; we write the minimal equivalent:
+Third: the socket. **WHAT breaks:** `connect() to unix:/var/run/tower/uwsgi.sock failed (13: Permission denied)` even though classic permissions are right. **WHY — and it's two denials, not one:** connecting to a unix socket crosses two SELinux checks. First, `write` on the **socket inode** (labeled `var_run_t` in our tmpfiles-created dir — a type `httpd_t` may not write). Second, `connectto` against the *domain of the process that bound the socket* (uwsgi runs unconfined under our hand-rolled supervisord), not the socket file's label. No boolean and no fcontext rule covers the pair — a policy module is the only thing that does, so we write the minimal one:
 
 ```bash
 sudo dnf -y install policycoreutils-python-utils setools-console
@@ -257,13 +257,13 @@ semodule_package -o /tmp/ace-nginx-upstream.pp -m /tmp/ace-nginx-upstream.mod
 sudo semodule -i /tmp/ace-nginx-upstream.pp
 ```
 
-This is a two-rule module — the narrow, production-grade fix, and philosophically identical to what the RPM does. It survives reboots, relabels, and package updates (`semodule -l | grep ace` to confirm it's loaded).
+This is a two-rule module — the narrow, production-grade fix, and exactly the kind of thing a packaged install would have handed you. It survives reboots, relabels, and package updates (`semodule -l | grep ace` to confirm it's loaded).
 
 > **If you still get a 502:** check `sudo tail /var/log/nginx/error.log` (a `Permission denied` on a `.sock` means classic perms — is the Lab 8 setgid dir intact? `ls -ld /var/run/tower` should say `2775 nginx nginx`, sockets `awx nginx 660`). Don't count on `sudo ausearch -m avc -ts recent` to show you this one: the sock_file denial hides behind a `dontaudit` rule, so the audit log stays clean *while the denial keeps happening* — auditd running, zero AVCs, still 502. The honest tools are `sudo sesearch -A -s httpd_t -t var_run_t -c sock_file` (no output = the write rule is missing) and a `setenforce 0` bisect (works permissive + fails enforcing = SELinux, whatever the log says; put it back with `setenforce 1`). Never reach for `chmod 666` on the socket — uwsgi recreates it on every restart with `chmod-socket = 660`, so live chmods silently evaporate. The dir's setgid bit + group `nginx` is the mechanism that survives restarts.
 
 ## firewalld: open the front door
 
-The installer's `firewall` role opens 80 + 443 on controller nodes. The bento box may ship without firewalld running — install and enable it, then open the ports:
+The control node needs 80 + 443 open. The bento box may ship without firewalld running — install and enable it, then open the ports:
 
 ```bash
 sudo dnf -y install firewalld
