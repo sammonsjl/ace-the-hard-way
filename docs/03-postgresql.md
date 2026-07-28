@@ -35,7 +35,7 @@ The data directory is `/var/lib/pgsql/data` — the distro package's default, an
 PostgreSQL 15 defaults to scram-sha-256 for password hashing — confirm rather than assume:
 
 ```bash
-sudo -u postgres psql -c "SHOW password_encryption;"   # want: scram-sha-256
+sudo -iu postgres psql -c "SHOW password_encryption;"   # want: scram-sha-256
 ```
 
 Now make the client-connection rules use it. Edit `/var/lib/pgsql/data/pg_hba.conf` and look at the `host` lines near the bottom. **Rocky's stock `initdb` ships them as `ident`, not `scram-sha-256`** — so you will actually see this:
@@ -78,7 +78,7 @@ sudo systemctl reload postgresql
 Pick a real password and stash it somewhere you'll find in Lab 6 (it goes into `/etc/tower/conf.d/postgres.py`):
 
 ```bash
-sudo -u postgres psql <<'SQL'
+sudo -iu postgres psql <<'SQL'
 CREATE USER awx WITH PASSWORD 'CHANGE-ME';
 CREATE DATABASE awx OWNER awx;
 SQL
@@ -118,7 +118,7 @@ sudo systemctl restart postgresql
 ```bash
 psql -U awx -h localhost -d awx -c '\conninfo'
 # want: "You are connected to database "awx" as user "awx" ..." after the password prompt
-sudo -u postgres psql -c "SHOW max_connections;"    # want: 1024
+sudo -iu postgres psql -c "SHOW max_connections;"    # want: 1024
 systemctl is-enabled postgresql                     # want: enabled (survives reboot)
 ```
 
