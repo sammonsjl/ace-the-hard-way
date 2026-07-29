@@ -4,8 +4,6 @@
 
 The AWX source checked out from `devel`, and its Python virtualenv built at `/var/lib/awx/venv/awx` — inside the service user's home, alongside everything else AWX owns — with `awx-manage` runnable inside it.
 
-> Bare metal note: still no containers. The venv is a plain directory of Python packages, built by hand on the box.
-
 ## Why `devel` and not a release tag
 
 ACE builds what upstream is actually shipping today, not a snapshot of what it shipped months ago. Release tags are cut against AWX's containerised deployment story; `devel` is where the code — and the packaging behaviour this tutorial leans on — actually lives. So we clone the **live tip**.
@@ -101,13 +99,25 @@ sudo rm -f /opt/awx/awx/devonly.py
 
 ## Verify
 
+Confirm the build with a **settings-free** check — reading the installed package metadata, which touches nothing under `/etc/tower`:
+
 ```bash
-sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage --version  # records the devel version string
+sudo -u awx /var/lib/awx/venv/awx/bin/pip show awx   # record the Version line
+# Version: 24.6.2.dev881+gf1a3e13df   <- the +g<sha> is the devel commit you cloned
 ```
 
-If `--version` prints a version string (e.g. `24.6.2.dev871+g...`), the backend is built — it imports the awx package and prints before Django fully initializes.
+(Equivalently, `sudo -u awx /var/lib/awx/venv/awx/bin/python -c "import awx; print(awx.__version__)"` — same string, and importing `awx` doesn't load Django settings.)
 
-Don't reach for `--help` yet — with `devonly` gone the interpreter is in production mode, and production mode refuses to start until Lab 6 writes `/etc/tower/settings.py` (`ImproperlyConfigured: No AWX configuration found at ['/etc/tower', ...]`). That error IS the build working; the full command list runs at the end of Lab 6.
+**Don't try `awx-manage` yet — not even `--version`.** With `devonly` gone the interpreter is in production mode, and *every* `awx-manage` invocation dies until Lab 6 writes `/etc/tower/settings.py`:
+
+```
+django.core.exceptions.ImproperlyConfigured: No AWX configuration found at
+['/etc/tower', '/etc/ansible-automation-platform/', '/etc/tower/conf.d/'].
+```
+
+The reason it catches even `--version`: `awx-manage`'s entry point calls `prepare_env()` *first*, and current `devel`'s `prepare_env()` reads `settings.DEBUG` (`awx/__init__.py`) — which forces the settings module to import and raise, before the `--version` fast-path in `manage()` is ever reached. That error IS the build working; the full command list runs at the end of Lab 6.
+
+> **Devel caveat, live.** This very step used to be `awx-manage --version`, which printed the version before Django initialized — until upstream added that `settings.DEBUG` read to `prepare_env()` and it started failing. Exactly the "`devel` moves daily" risk from the top of this lab, which is why you recorded the commit SHA above — your build is pinned even though the branch isn't.
 
 ## Put `awx-manage` in the PATH
 
