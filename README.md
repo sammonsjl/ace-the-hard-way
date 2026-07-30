@@ -17,29 +17,22 @@ No installer. No operator. No docker-compose. No Kubernetes.
 
 ## What you end up with
 
-Two VMs, nineteen labs later. Every box below is a process you started by hand, from a config file you wrote:
+Two VMs, nineteen labs later. Every box below is a process you started by hand, from a config file you wrote. The service columns, the port-labelled link colours, and the mesh box follow the [supported RPM topology diagram](https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.6/html/tested_deployment_models/rpm-topologies) — so you can hold the two side by side and see exactly which pieces we collapsed onto one box:
 
 ```mermaid
-flowchart TD
+flowchart TB
     browser(["browser"])
 
-    subgraph CONTROL["ace-control · 192.168.56.10 — control plane"]
+    subgraph CONTROL["ace-control · 192.168.56.10 — every service the RPM installer spreads across four VM pairs, on one box"]
         envoy["envoy :443<br/>the single front door · TLS ends here"]
 
-        subgraph GATEWAY["gateway (jewel) — the integrator"]
+        subgraph GATEWAY["Platform gateway (jewel) — the integrator"]
             gwgrpc["gRPC control plane :50051<br/>authenticates every proxied request"]
             gwuwsgi["uwsgi :8080<br/>REST API + the service registry"]
             gwnginx["nginx :8446<br/>serves the platform UI SPA"]
         end
 
-        subgraph CONTROLLER["controller — and the execution path"]
-            ctlnginx["nginx :8043"]
-            ctlsup["automation-controller.service → supervisord<br/>awx-uwsgi · awx-daphne · awx-dispatcher<br/>awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat<br/>awx-rsyslogd · awx-rsyslog-configurer"]
-            rcontrol["receptor · control node<br/>control socket + local work type"]
-            podmanc["podman — EE sandbox<br/>project syncs · system jobs"]
-        end
-
-        subgraph HUB["Automation Hub"]
+        subgraph HUB["Automation hub"]
             hubnginx["nginx :8444"]
             hubproc["pulpcore-api · pulpcore-content<br/>pulpcore-worker@1 · @2"]
         end
@@ -49,50 +42,96 @@ flowchart TD
             edaproc["eda api · websockets · scheduler · worker"]
         end
 
-        state[("shared state — every service above uses both<br/>PostgreSQL :5432 local only · awx · gateway · pulp · eda<br/>Redis unix socket, plus loopback :6379 for EDA")]
+        subgraph CONTROLLER["Automation controller"]
+            ctlnginx["nginx :8043"]
+            ctlsup["automation-controller.service → supervisord<br/>awx-uwsgi · awx-daphne · awx-dispatcher<br/>awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat<br/>awx-rsyslogd · awx-rsyslog-configurer"]
+            rcontrol["receptor · control node<br/>control socket + local work type"]
+            podmanc["podman — EE sandbox<br/>project syncs · system jobs"]
+        end
+
+        pg[("PostgreSQL :5432<br/>local, not external<br/>awx · gateway · pulp · eda")]
+        redis[("Redis — one instance, not one per service<br/>unix socket, plus loopback :6379 for EDA")]
     end
 
-    subgraph EXEC["ace-exec · 192.168.56.20 — execution plane"]
+    subgraph MESH["Automation mesh — ace-exec · 192.168.56.20 (one execution node, no hop node)"]
         rexec["receptor :27199 · tcp-listener"]
         podmane["podman — EE containers<br/>where your jobs actually run"]
     end
 
-    browser -->|"HTTPS to 192.168.56.10 on 443"| envoy
-
+    browser -->|"80/443"| envoy
     envoy -->|"/"| gwnginx
-    envoy -->|"/api/controller/"| ctlnginx
     envoy -->|"/api/galaxy/"| hubnginx
     envoy -->|"/api/eda/"| edanginx
-
-    gwuwsgi -.->|"xDS: routes from the registry, polled every 5s"| envoy
-    envoy -.->|"is this request allowed? who is it?"| gwgrpc
+    envoy -->|"/api/controller/"| ctlnginx
     gwnginx -->|"/api/gateway/"| gwuwsgi
+    hubnginx -->|"pulpcore-api.sock · pulpcore-content.sock"| hubproc
+    edanginx -->|"eda-api.sock"| edaproc
+    ctlnginx -->|"uwsgi.sock · daphne.sock"| ctlsup
 
+    gwuwsgi -.->|"xDS: routes from the registry, every 5s"| envoy
+    envoy -.->|"is this request allowed? who is it?"| gwgrpc
     gwuwsgi -.->|"JWT public key — one identity<br/>for all three services"| ctlsup
     gwuwsgi -.-> hubproc
     gwuwsgi -.-> edaproc
 
-    ctlnginx -->|"uwsgi.sock · daphne.sock"| ctlsup
-    hubnginx -->|"pulpcore-api.sock · pulpcore-content.sock"| hubproc
-    edanginx -->|"eda-api.sock"| edaproc
+    gwuwsgi -.->|"5432"| pg
+    hubproc -.->|"5432"| pg
+    edaproc -.->|"5432"| pg
+    ctlsup -.->|"5432"| pg
 
-    ctlsup -.-> state
-    gwuwsgi -.-> state
-    hubproc -.-> state
-    edaproc -.-> state
+    gwuwsgi -.->|"6379"| redis
+    hubproc -.->|"6379 · db 2"| redis
+    edaproc -.->|"6379"| redis
+    ctlsup -.->|"6379"| redis
 
-    ctlsup -->|"work units over the control socket"| rcontrol
+    ctlsup -->|"work units, control socket"| rcontrol
     rcontrol -->|"local work-command → ansible-runner"| podmanc
-    rcontrol ==>|"mutual TLS, your own CA<br/>+ work signing"| rexec
+    rcontrol ==>|"27199 · mutual TLS, your own CA<br/>+ work signing"| rexec
     rexec -->|"work-command → ansible-runner"| podmane
+
+    subgraph LEGEND["reading the links"]
+        direction LR
+        i1(( )) --->|"80/443 http(s) ingress"| i2(( ))
+        g1(( )) -.->|"gateway control plane — xDS, gRPC auth, JWT"| g2(( ))
+        p1(( )) -.->|"5432 PostgreSQL"| p2(( ))
+        r1(( )) -.->|"6379 Redis — job control + caching"| r2(( ))
+        m1(( )) ===>|"27199 receptor — work/job execution"| m2(( ))
+    end
+
+    linkStyle 0,1,2,3,4,5,6,7,8 stroke:#24292f,stroke-width:1.5px
+    linkStyle 9,10,11,12,13 stroke:#bf8700,stroke-width:1.5px
+    linkStyle 14,15,16,17 stroke:#0969da,stroke-width:1.5px
+    linkStyle 18,19,20,21 stroke:#1a7f37,stroke-width:1.5px
+    linkStyle 22,23,24,25 stroke:#cf222e,stroke-width:1.5px
+    linkStyle 26 stroke:#24292f,stroke-width:1.5px
+    linkStyle 27 stroke:#bf8700,stroke-width:1.5px
+    linkStyle 28 stroke:#0969da,stroke-width:1.5px
+    linkStyle 29 stroke:#1a7f37,stroke-width:1.5px
+    linkStyle 30 stroke:#cf222e,stroke-width:1.5px
 
     classDef door fill:#1f6feb,stroke:#0b3d8f,color:#ffffff
     classDef ee fill:#8250df,stroke:#4c2889,color:#ffffff
     classDef store fill:#57606a,stroke:#32383f,color:#ffffff
+    classDef dot fill:none,stroke:none
     class envoy door
     class podmanc,podmane ee
-    class state store
+    class pg,redis store
+    class i1,i2,g1,g2,p1,p2,r1,r2,m1,m2 dot
 ```
+
+### Where this differs from the supported topology
+
+Held against Red Hat's RPM diagram, the shape is the same and the shortcuts are all deliberate — worth knowing which is which:
+
+| Supported RPM topology | What we build | Why |
+|---|---|---|
+| Four services on VM **pairs** (VM1 + VM2), behind an HA proxy / load balancer | One VM, one of each, envoy as the front door | HA is replication, not architecture — it teaches you nothing new the second time |
+| **External** PostgreSQL | Local PostgreSQL, four databases on one instance | Same clients, same ports; a separate DB host is a network detail |
+| A **redis per service**, plus a `16379` cluster bus between gateway VMs | One redis, shared by all four | The cluster bus only exists to join redis instances we don't have |
+| Each service on **443 on its own host** | Internal ports `8043`/`8444`/`8445`/`8446` behind envoy on 443 | One box can only have one 443 — this is the single-box tax ([Lab 19](docs/19-platform-ui.md)) |
+| Mesh with **hop nodes** in front of execution nodes | One execution node, peered directly | A hop node is the same receptor config with no work types; add one as an exercise |
+
+Everything else — the ports, the direction of each connection, which process talks to which — is meant to match. Nothing from the installer is copied into this repo; the reference is a diagram to check our work against, not a source to lift from.
 
 A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches; the four services behind it sit on internal ports (8043/8444/8445/8446). **But envoy is only the data plane — the gateway is what actually assembles the platform.** Envoy knows nothing on its own: every route it serves is a row in the gateway's service registry, fetched over xDS every five seconds; every request it proxies is checked against the gateway's gRPC control plane; and the identity that comes back is a JWT signed by the gateway, which the controller, hub, and EDA each validate against a public key they fetch from it at runtime (`ANSIBLE_BASE_JWT_KEY`). That is what "one login for the whole platform" means mechanically — three independently built services trusting one issuer. Rotate the key at the gateway and all three follow. **The ports are a single-box tax:** the real design gives the controller, hub, and EDA each their own host on 443 — here they share one VM, so they move aside ([Lab 19](docs/19-platform-ui.md) does that pivot). **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear twice, both times as EE sandboxes** (purple) — never as a service. **Receptor is the parent of podman on both nodes:** the dispatcher never launches a container itself, it submits a signed work unit to receptor, and receptor's work-command spawns `ansible-runner`, which starts the EE. Control-plane work (project syncs, system jobs) takes that path locally through `ace-control`'s own receptor; job work takes the identical path across the mesh on `ace-exec`. And the two VMs are joined by exactly one thing: that mesh, with a CA, certs, and work-signing keys you generated yourself.
 
