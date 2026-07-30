@@ -15,6 +15,56 @@ No installer. No operator. No docker-compose. No Kubernetes.
 >
 > The results are not production-ready. The *understanding* is the product.
 
+## What you end up with
+
+Two VMs, nineteen labs later. Every box below is a process you started by hand, from a config file you wrote:
+
+```
+                                 browser
+                                    │  https://192.168.56.10   (443)
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ace-control  192.168.56.10                                                  │
+│                                                                             │
+│  envoy :443  ◄── the single front door; TLS terminates here                 │
+│    │   routes and auth checks arrive from the gateway itself,               │
+│    │   by xDS poll (:8080) and gRPC (:50051)                                │
+│                                                                             │
+│    ├── /                ──► gateway nginx :8446 ──► platform UI SPA         │
+│    │                          └── /api/gateway/ ──► gateway uwsgi :8080     │
+│    ├── /api/controller/ ──► controller nginx :8043 ─┬─ uwsgi.sock           │
+│    │                                               └─ daphne.sock           │
+│    ├── /api/galaxy/     ──► hub nginx :8444 ─┬─ pulpcore-api.sock           │
+│    │                                         └─ pulpcore-content.sock       │
+│    └── /api/eda/        ──► eda nginx :8445 ─── eda-api.sock                │
+│                                                                             │
+│  ─── the processes behind those sockets — every one bare metal ───          │
+│                                                                             │
+│  controller   automation-controller.service ─► supervisord ─► 8 programs:   │
+│               awx-uwsgi · awx-daphne · awx-dispatcher                       │
+│               awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat        │
+│               awx-rsyslogd · awx-rsyslog-configurer                         │
+│  gateway      uwsgi + gRPC control plane (supervisord), envoy alongside     │
+│  hub          pulpcore-api · pulpcore-content · pulpcore-worker@1,@2        │
+│  eda          api · websockets · scheduler · worker                         │
+│                                                                             │
+│  PostgreSQL :5432, local only ── databases: awx · gateway · pulp · eda      │
+│  Redis ── unix:/var/run/redis/redis.sock, no TCP listener at all            │
+│                                                                             │
+│  receptor (control node)   podman ─ EE sandbox: project syncs, system jobs  │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │  receptor mesh — mutual TLS, your own CA
+                                   │  + work signing;  tcp-peer ──► :27199
+┌──────────────────────────────────▼──────────────────────────────────────────┐
+│ ace-exec  192.168.56.20                                                     │
+│                                                                             │
+│  receptor :27199 (tcp-listener)                                             │
+│    └── podman ─ EE containers: where your jobs actually run                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches; the four services behind it sit on internal ports (8043/8444/8445/8446) and every request carries the gateway's JWT. **The ports are a single-box tax:** the real design gives the controller, hub, and EDA each their own host on 443 — here they share one VM, so they move aside ([Lab 19](docs/19-platform-ui.md) does that pivot). **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear twice, both times as EE sandboxes** — never as a service. And the two VMs are joined by exactly one thing: a receptor mesh whose CA, certs, and work-signing keys you generated yourself.
+
 ## Who this is for
 
 You run (or will run) AWX or a similar automation platform, and you want to know what's actually inside — not just what an install script prints at you. Bare-metal AWX hasn't been officially supported since v18; this is the map nobody publishes anymore.
@@ -68,12 +118,6 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 - [A3: Backup and restore](docs/a3-backup-restore.md) — what actually holds state, and proving you can get it back
 
 — [Glossary](docs/glossary.md) · [Cleanup](docs/99-cleanup.md)
-
-## Scope (v1)
-
-The whole platform behind one login: controller, hub, and EDA, each built from source and fronted by the gateway, with the unified Ansible console on 443. Labs 1–14 are a complete working controller on their own; 15–16 add the gateway; 17–18 add Automation Hub and Event-Driven Ansible, each joining the same single sign-on; 19 builds the platform UI and pivots the front door to 443, the way a production deployment fronts the whole platform.
-
-**Future labs (v2):** scaling the mesh — a hop node relaying to an isolated second execution node (this is the topology lesson that matters most in the real world; nothing in this architecture needs quorum, so unlike Kubernetes there's no mandatory scale-out). Also container groups (jobs on Kubernetes) and EDA rulebook activations under podman. Control-plane HA (multiple AWX nodes + shared postgres behind a load balancer) is deliberately out of laptop scope — that's a "Beyond the lab" topic for real hardware.
 
 ## A note on containers
 
