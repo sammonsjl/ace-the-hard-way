@@ -300,14 +300,16 @@ If `status` prints the node and `work list` answers, receptor itself is healthy 
 **Now check the other consumer.** `receptorctl` talking to the socket proves nothing about whether *AWX* can read `receptor.conf`; the two use different parsers, and only AWX's is strict (war story 2 above). Ask AWX directly, using its own functions:
 
 ```bash
-sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/python -c "
+sudo -u awx awx-manage shell -c "
 from awx.main.tasks.receptor import read_receptor_config, get_receptor_sockfile, get_tls_client
 c = read_receptor_config()
-print(\"sockfile:\", get_receptor_sockfile(c))
-print(\"tls-client:\", get_tls_client(c, True))"'
+print('sockfile:', get_receptor_sockfile(c))
+print('tls-client:', get_tls_client(c, True))"
 # want: sockfile: /var/run/awx-receptor/receptor.sock
 #       tls-client: tls_client
 ```
+
+(It has to be `awx-manage shell`, not the venv's bare `python` — importing that module pulls in Django models, so the settings have to be loaded first. Plain `python -c` dies with `ImproperlyConfigured: Requested setting INSTALLED_APPS`, which tells you nothing about your receptor config.)
 
 An `AttributeError: 'str' object has no attribute 'items'` here means a bare directive somewhere in the file — fix it before moving on, or the failure resurfaces as a broken project sync with a traceback that looks nothing like a config problem.
 
