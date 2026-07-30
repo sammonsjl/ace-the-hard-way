@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-The execution plane's first node: **ace-exec** running receptor from the release binary, TLS-peered to the control node with certs from the Lab 11 **mesh CA**, verifying signed work, with podman ready to sandbox jobs. (Same plane, different members later: Kubernetes via container groups — a future chapter.)
+The execution plane's first node: **ace-exec** running receptor from the release binary, TLS-peered to the control node with certs from the Lab 11 **mesh CA**, verifying signed work, with podman ready to sandbox jobs.
 
 ```
 ace-control                              ace-exec

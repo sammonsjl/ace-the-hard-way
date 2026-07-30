@@ -60,8 +60,4 @@ sudo -u awx redis-cli -s /var/run/redis/redis.sock ping    # want: PONG
 ss -tlnp | grep 6379 || echo "no TCP listener — good"
 ```
 
-## Optional hardening (not v1)
-
-Redis can also be wrapped in TLS with certs from an internal CA. Socket-only with group permissions is already a tighter posture for a single box; TLS-on-redis matters when redis serves remote nodes, which is what a clustered multi-node deployment needs. Noted for the future-labs pile.
-
 Next: [AWX from source](05-awx-source.md)

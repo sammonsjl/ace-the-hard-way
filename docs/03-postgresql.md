@@ -4,8 +4,6 @@
 
 PostgreSQL 15 from the Rocky repos, running as a systemd service, with an `awx` database and user that authenticate over scram-sha-256.
 
-> Bare metal note: no containers anywhere in this tutorial. Every service is a real systemd unit you can `systemctl status`.
-
 ## Why PostgreSQL 15
 
 AWX's own development environment runs on PostgreSQL 15 (`quay.io/sclorg/postgresql-15-c9s` in `tools/docker-compose`), so 15 is the version its migrations and queries are actually exercised against. Rocky 9 ships 15 as a module stream, so we get it from the distro repos and pin the major version explicitly rather than inheriting whatever the default stream becomes.
