@@ -125,7 +125,10 @@ And lingering, so `/run/user/<uid>` exists for `awx` without an interactive logi
 
 ```bash
 sudo loginctl enable-linger awx
+loginctl show-user awx --property=Linger        # want: Linger=yes
 ```
+
+> Same trap as the control node, and it matters just as much here — this is the node where jobs actually run. If you skipped it, see [Lab 11's linger note](11-receptor.md#podman-on-the-control-node-yes-really) for what logind is doing and why a missing `/run/user/<uid>` looks like an EE failure instead of a session one.
 
 Pre-pull the default EE (the one Lab 7's `register_default_execution_environments` registered), so the first job doesn't pay the download. **Change directory first** — `sudo -u` keeps your current working directory, and `/home/vagrant` is 0700, so rootless podman invoked from there dies with `cannot chdir to /home/vagrant: Permission denied`. Run all `sudo -u awx podman ...` commands from a world-readable directory:
 

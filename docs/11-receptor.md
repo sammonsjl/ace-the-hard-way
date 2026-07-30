@@ -71,10 +71,29 @@ EOF
 sudo dnf -y install podman crun
 grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
 sudo loginctl enable-linger awx
+loginctl show-user awx --property=Linger        # want: Linger=yes
 
 cd /tmp    # sudo -u keeps your cwd, and rootless podman can't start from a 0700 home dir
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
 ```
+
+> **Don't skip `enable-linger` — and know how it works, because this one bites in production too.**
+>
+> **What linger changes.** `/run/user/<uid>` is created by `systemd-logind`, not by the kernel and not by tmpfiles. Normally it appears when a user gets their **first login session** and is **destroyed when their last session exits**. The `awx` user never logs in — it runs services — so on a freshly booted box that directory does not exist at all. `loginctl enable-linger awx` tells logind to treat `awx` as if it were always logged in: it creates `/run/user/<uid>` at boot and keeps it for the life of the machine, no session required. The flag is persistent state on disk (`/var/lib/systemd/linger/awx`), so it survives reboots — and it's equally easy to lose if the user is recreated or the box is rebuilt from an image that never had it.
+>
+> **Why podman cares.** Rootless podman keeps all its per-user runtime state under `XDG_RUNTIME_DIR` — container state, the conmon pid files, and the pause process that holds the user namespace open. Point it at a directory that doesn't exist and it cannot start a container. The receptor unit below hardcodes `XDG_RUNTIME_DIR=/run/user/${AWX_UID}`; linger is what guarantees the target actually exists.
+>
+> **WHAT breaks:** jobs and project updates fail at container start, and the failure tends to look like an EE or image problem rather than a session problem. **The tell is timing:** it works while you're still SSH'd in testing (your own `sudo` may have caused a session to exist), then fails after a reboot — or worse, works for days and breaks the moment the last session on the box closes and logind tears the directory down under a running service.
+>
+> **How to check, in this order:**
+>
+> ```bash
+> loginctl show-user awx --property=Linger      # want: Linger=yes
+> ls -ld /run/user/$(id -u awx)                 # want: exists, owned by awx
+> ls -l /var/lib/systemd/linger/                # the persistent flag itself
+> ```
+>
+> If `Linger=no` and the directory is missing, that's your bug: `sudo loginctl enable-linger awx`, then restart receptor so the EE gets a runtime dir that exists. Nothing about receptor's own config is wrong in this failure mode, which is exactly why it costs so much time.
 
 (`quay.io/ansible/awx-ee:latest` doubles as the default job EE and the control-plane EE — Lab 7's `register_default_execution_environments` registered both.)
 
