@@ -6,3 +6,12 @@
 # Local Claude settings — per-machine permission grants, not shared
 .claude/settings.local.json
 .e2e/
+
+# Lab 12 mesh-cert courier files. /vagrant IS this directory, so anything the
+# labs hand between the nodes through it lands right here. Root-anchored on
+# purpose — per-deployment key material must never be committed, and a reader
+# must never inherit someone else's CA or work-signing keys from the repo.
+/*.crt
+/*.csr
+/*.key
+/*.pem
