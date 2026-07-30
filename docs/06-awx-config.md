@@ -16,7 +16,7 @@ Layout we build:
 ├── settings.py             # reads SECRET_KEY from the file above
 └── conf.d/
     ├── postgres.py          # database connection (Lab 3)
-    ├── websocket.py         # broadcast-websocket secret
+    ├── channels.py          # broadcast-websocket secret
     └── cluster_host_id.py   # this node's cluster id
 ```
 
@@ -93,7 +93,7 @@ sudo vim /etc/tower/conf.d/postgres.py    # replace CHANGE-ME with the real pass
 ## Websocket secret and cluster id
 
 ```bash
-sudo -u awx bash -c 'echo "BROADCAST_WEBSOCKET_SECRET = \"$(openssl rand -base64 32)\"" > /etc/tower/conf.d/websocket.py'
+sudo -u awx bash -c 'echo "BROADCAST_WEBSOCKET_SECRET = \"$(openssl rand -base64 32)\"" > /etc/tower/conf.d/channels.py'
 
 sudo -u awx tee /etc/tower/conf.d/cluster_host_id.py >/dev/null <<'EOF'
 CLUSTER_HOST_ID = "ace-control"
