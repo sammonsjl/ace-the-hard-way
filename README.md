@@ -19,51 +19,72 @@ No installer. No operator. No docker-compose. No Kubernetes.
 
 Two VMs, nineteen labs later. Every box below is a process you started by hand, from a config file you wrote:
 
-```
-                                 browser
-                                    │  https://192.168.56.10   (443)
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ ace-control  192.168.56.10                                                  │
-│                                                                             │
-│  envoy :443  ◄── the single front door; TLS terminates here                 │
-│    │   routes and auth checks arrive from the gateway itself,               │
-│    │   by xDS poll (:8080) and gRPC (:50051)                                │
-│                                                                             │
-│    ├── /                ──► gateway nginx :8446 ──► platform UI SPA         │
-│    │                          └── /api/gateway/ ──► gateway uwsgi :8080     │
-│    ├── /api/controller/ ──► controller nginx :8043 ─┬─ uwsgi.sock           │
-│    │                                               └─ daphne.sock           │
-│    ├── /api/galaxy/     ──► hub nginx :8444 ─┬─ pulpcore-api.sock           │
-│    │                                         └─ pulpcore-content.sock       │
-│    └── /api/eda/        ──► eda nginx :8445 ─── eda-api.sock                │
-│                                                                             │
-│  ─── the processes behind those sockets — every one bare metal ───          │
-│                                                                             │
-│  controller   automation-controller.service ─► supervisord ─► 8 programs:   │
-│               awx-uwsgi · awx-daphne · awx-dispatcher                       │
-│               awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat        │
-│               awx-rsyslogd · awx-rsyslog-configurer                         │
-│  gateway      uwsgi + gRPC control plane (supervisord), envoy alongside     │
-│  hub          pulpcore-api · pulpcore-content · pulpcore-worker@1,@2        │
-│  eda          api · websockets · scheduler · worker                         │
-│                                                                             │
-│  PostgreSQL :5432, local only ── databases: awx · gateway · pulp · eda      │
-│  Redis ── unix:/var/run/redis/redis.sock, no TCP listener at all            │
-│                                                                             │
-│  receptor (control node)   podman ─ EE sandbox: project syncs, system jobs  │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   │  receptor mesh — mutual TLS, your own CA
-                                   │  + work signing;  tcp-peer ──► :27199
-┌──────────────────────────────────▼──────────────────────────────────────────┐
-│ ace-exec  192.168.56.20                                                     │
-│                                                                             │
-│  receptor :27199 (tcp-listener)                                             │
-│    └── podman ─ EE containers: where your jobs actually run                 │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    browser(["browser · https://192.168.56.10"])
+
+    subgraph CONTROL["ace-control · 192.168.56.10 — control plane"]
+        envoy["envoy :443<br/>the single front door · TLS ends here"]
+
+        gwnginx["gateway nginx :8446<br/>serves the platform UI SPA"]
+        gwuwsgi["gateway uwsgi :8080"]
+        gwgrpc["gateway gRPC control plane :50051"]
+
+        ctlnginx["controller nginx :8043"]
+        ctlsock["uwsgi.sock · daphne.sock"]
+        ctlsup["automation-controller.service → supervisord<br/>awx-uwsgi · awx-daphne · awx-dispatcher<br/>awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat<br/>awx-rsyslogd · awx-rsyslog-configurer"]
+
+        hubnginx["hub nginx :8444"]
+        hubsock["pulpcore-api.sock · pulpcore-content.sock"]
+        hubproc["pulpcore-api · pulpcore-content<br/>pulpcore-worker@1 · @2"]
+
+        edanginx["eda nginx :8445"]
+        edasock["eda-api.sock"]
+        edaproc["eda api · websockets · scheduler · worker"]
+
+        state[("shared state — every service above uses both<br/>PostgreSQL :5432 local only · awx · gateway · pulp · eda<br/>Redis unix socket, plus loopback :6379 for EDA")]
+
+        rcontrol["receptor · control node"]
+        podmanc["podman — EE sandbox<br/>project syncs · system jobs"]
+    end
+
+    subgraph EXEC["ace-exec · 192.168.56.20 — execution plane"]
+        rexec["receptor :27199 · tcp-listener"]
+        podmane["podman — EE containers<br/>where your jobs actually run"]
+    end
+
+    browser -->|"HTTPS 443"| envoy
+
+    envoy -->|"/"| gwnginx
+    envoy -->|"/api/controller/"| ctlnginx
+    envoy -->|"/api/galaxy/"| hubnginx
+    envoy -->|"/api/eda/"| edanginx
+    envoy -.->|"xDS routes :8080 · gRPC auth :50051"| gwgrpc
+
+    gwnginx -->|"/api/gateway/"| gwuwsgi
+    ctlnginx --> ctlsock --> ctlsup
+    hubnginx --> hubsock --> hubproc
+    edanginx --> edasock --> edaproc
+
+    gwuwsgi -.-> state
+    ctlsup -.-> state
+    hubproc -.-> state
+    edaproc -.-> state
+
+    ctlsup --> podmanc
+    ctlsup --> rcontrol
+    rcontrol ==>|"mutual TLS, your own CA<br/>+ work signing"| rexec
+    rexec --> podmane
+
+    classDef door fill:#1f6feb,stroke:#0b3d8f,color:#ffffff
+    classDef ee fill:#8250df,stroke:#4c2889,color:#ffffff
+    classDef store fill:#57606a,stroke:#32383f,color:#ffffff
+    class envoy door
+    class podmanc,podmane ee
+    class state store
 ```
 
-A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches; the four services behind it sit on internal ports (8043/8444/8445/8446) and every request carries the gateway's JWT. **The ports are a single-box tax:** the real design gives the controller, hub, and EDA each their own host on 443 — here they share one VM, so they move aside ([Lab 19](docs/19-platform-ui.md) does that pivot). **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear twice, both times as EE sandboxes** — never as a service. And the two VMs are joined by exactly one thing: a receptor mesh whose CA, certs, and work-signing keys you generated yourself.
+A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches; the four services behind it sit on internal ports (8043/8444/8445/8446) and every request carries the gateway's JWT. **The ports are a single-box tax:** the real design gives the controller, hub, and EDA each their own host on 443 — here they share one VM, so they move aside ([Lab 19](docs/19-platform-ui.md) does that pivot). **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear twice, both times as EE sandboxes** (purple) — never as a service. And the two VMs are joined by exactly one thing: a receptor mesh whose CA, certs, and work-signing keys you generated yourself.
 
 ## Who this is for
 
