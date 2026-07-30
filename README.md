@@ -21,7 +21,7 @@ Two VMs, nineteen labs later. Every box below is a process you started by hand, 
 
 ```mermaid
 flowchart TD
-    browser(["browser · https://192.168.56.10"])
+    browser(["browser"])
 
     subgraph CONTROL["ace-control · 192.168.56.10 — control plane"]
         envoy["envoy :443<br/>the single front door · TLS ends here"]
@@ -53,7 +53,7 @@ flowchart TD
         podmane["podman — EE containers<br/>where your jobs actually run"]
     end
 
-    browser -->|"HTTPS 443"| envoy
+    browser -->|"HTTPS to 192.168.56.10 on 443"| envoy
 
     envoy -->|"/"| gwnginx
     envoy -->|"/api/controller/"| ctlnginx
