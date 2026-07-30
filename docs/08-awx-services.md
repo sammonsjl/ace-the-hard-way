@@ -238,7 +238,40 @@ sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf rest
 
 ## Add rsyslog (the last two programs)
 
-AWX runs on file logging without this, so add it once the core is green. Program names verbatim, again — `run_rsyslog_configurer` restarts `tower-processes:awx-rsyslogd` by that literal name:
+AWX runs on file logging without this, so add it once the core is green.
+
+### Prereqs
+
+First the daemon itself — Rocky's minimal install doesn't ship it:
+
+```bash
+sudo dnf -y install rsyslog
+rsyslogd -v | head -1        # record the version
+```
+
+Then the config directory the configurer writes into. It lives under the service user's home, like everything else AWX owns:
+
+```bash
+sudo install -d -o awx -g awx -m 0750 /var/lib/awx/rsyslog
+```
+
+And the runtime directory for the pid file. `/var/run` is a tmpfs, so this needs a tmpfiles.d entry to survive a reboot — the same pattern as `/var/run/tower` in Lab 2:
+
+```bash
+sudo tee /etc/tmpfiles.d/awx-rsyslog.conf >/dev/null <<'TMPEOF'
+d /var/run/awx-rsyslog 0750 awx awx -
+TMPEOF
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/awx-rsyslog.conf
+ls -ld /var/run/awx-rsyslog        # want: awx:awx 0750
+```
+
+### The two programs
+
+Program names verbatim, again — `run_rsyslog_configurer` restarts `tower-processes:awx-rsyslogd` by that literal name. Append both blocks to `/etc/tower/supervisord.conf`:
+
+```bash
+sudo vim /etc/tower/supervisord.conf
+```
 
 ```ini
 [program:awx-rsyslogd]
@@ -267,6 +300,31 @@ environment=AWX_MODE="production",HOME="/var/lib/awx",USER="awx",SUPERVISOR_CONF
 
 The configurer's `environment=` carries the two from-source extras (`SUPERVISOR_CONFIG_PATH`, venv-first `PATH`) because its whole job is calling `supervisorctl` — without them it dies with `FileNotFoundError: 'supervisorctl'`. We also add `redirect_stderr=true`: without it the traceback from a crash goes nowhere and you stare at an empty log wondering why it's `FATAL`. `startsecs=0` is required — the configurer runs, configures, and exits by design; without it supervisor calls that "exited too quickly" and gives up in `FATAL`.
 
-Prereqs when you do it: `dnf install rsyslog`, `install -d -o awx -g awx /var/lib/awx/rsyslog`, a tmpfiles.d entry for `/var/run/awx-rsyslog` (0750 awx awx), add both programs to the `[group:tower-processes]` list.
+### Add them to the group
+
+Both programs must join `[group:tower-processes]` — that's the group name AWX's code restarts by. In the same file, extend the `programs=` line to all eight:
+
+```ini
+[group:tower-processes]
+programs=awx-uwsgi,awx-daphne,awx-dispatcher,awx-callback-receiver,awx-wsrelay,awx-ws-heartbeat,awx-rsyslogd,awx-rsyslog-configurer
+priority=5
+```
+
+### Load and verify
+
+`reread` picks up the new config, `update` starts only what changed — no need to bounce the running core:
+
+```bash
+sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf reread
+sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf update
+sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf status
+# want: all eight programs listed; awx-rsyslogd RUNNING
+```
+
+`awx-rsyslog-configurer` is expected to show `EXITED` (it configures and exits by design — that's what `startsecs=0` is for). If `awx-rsyslogd` flaps briefly on first start, that's the chicken-and-egg: it's launched with `-f /var/lib/awx/rsyslog/rsyslog.conf`, which the configurer writes. `autorestart=true` brings it back once the file exists — confirm the file landed:
+
+```bash
+sudo ls -l /var/lib/awx/rsyslog/rsyslog.conf
+```
 
 Next: [Building the UI](09-awx-ui.md)
