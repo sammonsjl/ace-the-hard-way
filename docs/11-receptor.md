@@ -311,6 +311,60 @@ print('tls-client:', get_tls_client(c, True))"
 
 (It has to be `awx-manage shell`, not the venv's bare `python` — importing that module pulls in Django models, so the settings have to be loaded first. Plain `python -c` dies with `ImproperlyConfigured: Requested setting INSTALLED_APPS`, which tells you nothing about your receptor config.)
 
+A blunter check that no entry is a bare directive — worth running any time you hand-edit this file, because it catches the whole class of problem in one line:
+
+```bash
+sudo python3 -c "
+import yaml
+d = yaml.safe_load(open('/etc/receptor/receptor.conf'))
+bad = [x for x in d if not isinstance(x, dict)]
+print('non-mapping entries:', bad if bad else 'none')"
+# want: none   — anything listed here will crash AWX's parser
+```
+
+## Prove `local` work actually runs
+
+Everything above tests plumbing. This tests the thing the plumbing exists for — and it's the first point in the tutorial where a real job runs, so don't move on until it passes. A project sync is control-plane work: it runs *here*, on ace-control, inside the control-plane EE.
+
+Launch one against the demo project Lab 7 preloaded, straight from the ORM (no admin password needed):
+
+```bash
+sudo -u awx awx-manage shell -c "
+from awx.main.models import Project
+u = Project.objects.get(name='Demo Project').update()
+print('project update id:', u.id, '| status:', u.status)"
+# want: an id, and status: pending — the dispatcher takes it from here
+```
+
+Watch it land, in another shell — the container appears for a few seconds and exits:
+
+```bash
+cd /tmp    # rootless podman can't start from the 0700 vagrant home
+watch -n1 "sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman ps"
+```
+
+Then confirm the outcome (substitute the id from above):
+
+```bash
+sudo -u awx awx-manage shell -c "
+from awx.main.models import ProjectUpdate
+u = ProjectUpdate.objects.get(id=3)
+print('status        :', u.status)
+print('execution node:', u.execution_node)
+print('traceback     :', (u.result_traceback or '')[:400])"
+# want: status: successful | execution node: ace-control | traceback empty
+```
+
+`successful` on `ace-control` means the whole chain worked: dispatcher → receptor control socket → signed `local` work unit → `ansible-runner worker` → control-plane EE under rootless podman → stdout streamed back into job events. Ours took ~7 seconds.
+
+Three failure modes, and they're distinguishable at a glance:
+
+| Symptom | Cause | Where it's covered |
+|---|---|---|
+| `AttributeError: 'str' object has no attribute 'items'` | bare directive in `receptor.conf` | war story 2 above |
+| Sits in `pending` forever, nothing in podman | task manager not scheduling — `devonly`/`AWX_MODE` | [Lab 5](05-awx-source.md), Lab 8's `AWX_MODE` war story |
+| Fails at container start, or exit 132 with an empty traceback | missing linger, or aarch64 SIGILL | the linger note and exit-132 war story above |
+
 An `AttributeError: 'str' object has no attribute 'items'` here means a bare directive somewhere in the file — fix it before moving on, or the failure resurfaces as a broken project sync with a traceback that looks nothing like a config problem.
 
 Next: [The execution plane](12-execution-plane.md)
