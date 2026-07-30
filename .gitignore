@@ -3,9 +3,10 @@
 *.vmdk
 *.log
 
-# Local Claude settings — per-machine permission grants, not shared
+# Local Claude settings and context — not part of the tutorial
 .claude/settings.local.json
 .e2e/
+CLAUDE.md
 
 # Working notes from test runs — version pins and war stories for the author,
 # not part of the tutorial. Contains throwaway lab credentials.
