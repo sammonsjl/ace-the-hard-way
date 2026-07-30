@@ -170,7 +170,7 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 **Appendix labs — break it on purpose**
 
 - [A1: The EPEL uwsgi conflict](docs/a1-epel-uwsgi-conflict.md) — deliberately clobber your uwsgi, diagnose the ABI mismatch, armor the box with `excludepkgs`
-- [A3: Backup and restore](docs/a3-backup-restore.md) — what actually holds state, and proving you can get it back
+- [A2: Backup and restore](docs/a2-backup-restore.md) — what actually holds state, and proving you can get it back
 
 — [Glossary](docs/glossary.md) · [Cleanup](docs/99-cleanup.md)
 

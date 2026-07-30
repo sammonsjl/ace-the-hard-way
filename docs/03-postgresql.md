@@ -26,7 +26,7 @@ sudo systemctl enable --now postgresql
 systemctl is-active postgresql    # want: active
 ```
 
-The data directory is `/var/lib/pgsql/data` — the distro package's default, and what the backup lab (A3) will come looking for.
+The data directory is `/var/lib/pgsql/data` — the distro package's default, and what the backup lab (A2) will come looking for.
 
 ## Authentication: scram-sha-256
 

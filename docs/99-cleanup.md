@@ -14,7 +14,7 @@ Everything you built lives inside the two VMs — destroying them destroys the p
 # If you kept them in the repo or your notes, you're done. If they're in
 # shell history on the VMs, copy them out now.
 
-# optional: a Lab A3-style backup (SECRET_KEY + pg_dump) if you might resurrect
+# optional: a Lab A2-style backup (SECRET_KEY + pg_dump) if you might resurrect
 # this build later instead of rebuilding from Lab 1
 ```
 
