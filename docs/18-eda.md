@@ -28,8 +28,8 @@ sudo useradd --system --home-dir /var/lib/eda --create-home --shell /bin/bash ed
 sudo install -d -o eda -g eda /var/lib/eda /var/lib/eda/media /var/lib/eda/static /etc/eda
 sudo usermod -aG redis eda
 
-sudo -u postgres psql -c "CREATE USER eda WITH PASSWORD 'CHANGE-ME';"
-sudo -u postgres psql -c "CREATE DATABASE eda OWNER eda;"
+sudo -iu postgres psql -c "CREATE USER eda WITH PASSWORD 'CHANGE-ME';"
+sudo -iu postgres psql -c "CREATE DATABASE eda OWNER eda;"
 ```
 
 ## Clone and build

@@ -29,8 +29,8 @@ sudo useradd --system --home-dir /var/lib/pulp --create-home --shell /bin/bash p
 sudo install -d -o pulp -g pulp /var/lib/pulp /var/lib/pulp/assets /var/lib/pulp/media /var/lib/pulp/tmp /etc/pulp
 sudo usermod -aG redis pulp     # Lab 4 redis socket (hub uses db 2)
 
-sudo -u postgres psql -c "CREATE USER pulp WITH PASSWORD 'CHANGE-ME';"
-sudo -u postgres psql -c "CREATE DATABASE pulp OWNER pulp;"
+sudo -iu postgres psql -c "CREATE USER pulp WITH PASSWORD 'CHANGE-ME';"
+sudo -iu postgres psql -c "CREATE DATABASE pulp OWNER pulp;"
 ```
 
 Pulp stores encrypted fields, so it needs the postgres **`hstore`** extension — which lives
@@ -38,7 +38,7 @@ in `postgresql-contrib` and must be created *in the pulp database* by a superuse
 
 ```bash
 sudo dnf -y install postgresql-contrib
-sudo -u postgres psql -d pulp -c "CREATE EXTENSION IF NOT EXISTS hstore;"
+sudo -iu postgres psql -d pulp -c "CREATE EXTENSION IF NOT EXISTS hstore;"
 ```
 
 ## Python 3.11, not 3.12

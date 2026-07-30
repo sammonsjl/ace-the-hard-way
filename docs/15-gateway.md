@@ -32,9 +32,9 @@ sudo chmod 0755 /var/lib/ansible-automation-platform
 Same moves as Lab 3 — a role and a database:
 
 ```bash
-sudo -u postgres createuser --pwprompt gateway     # pick a password, record it
-sudo -u postgres createdb --owner=gateway gateway
-sudo -u postgres psql -c '\l gateway'              # want: gateway | gateway
+sudo -iu postgres createuser --pwprompt gateway     # pick a password, record it
+sudo -iu postgres createdb --owner=gateway gateway
+sudo -iu postgres psql -c '\l gateway'              # want: gateway | gateway
 ```
 
 ## Extra build toolchain (the gateway needs more than the controller)
