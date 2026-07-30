@@ -15,6 +15,25 @@ systemd ── automation-controller.service ── supervisord ──┬── 
 
 rsyslog (two more programs) is added at the end, once the core is proven. All commands on **ace-control**.
 
+## Why supervisord, and not eight systemd units
+
+The obvious objection: this is a modern systemd box, so why run a process manager *under* systemd instead of writing one unit per process? Native units would give you per-process `systemctl status`, journald, and real `After=`/`Requires=` — genuinely nicer than what we're about to build.
+
+Two reasons we don't.
+
+**Fidelity.** The RPM install runs supervisord with a single `automation-controller.service` on top, and this tutorial's whole premise is reproducing that end state by hand. Writing units instead would build something *better* and less true.
+
+**AWX won't let you.** This is the part that actually settles it: AWX restarts its own processes by shelling out to supervisord, with both the binary and the group name hardcoded. From `awx/main/utils/reload.py`:
+
+```python
+args = ['supervisorctl']
+args.extend([command, ':'.join(['tower-processes', service])])
+```
+
+`run_rsyslog_configurer` does the same to restart `tower-processes:awx-rsyslogd` by that literal name. Remove supervisord and those calls have nothing to talk to — change a logging setting in the API and the reconfiguration fails, quietly, while everything *looks* healthy. You could stub a fake `supervisorctl` that translates to `systemctl`, which is a fun exercise, but it isn't "native systemd" any more and it isn't what the installer builds.
+
+So: supervisord manages the processes, systemd manages supervisord, and the program and group names are dictated by AWX rather than chosen by us — see the warning below.
+
 ## Install supervisor + uwsgi in the venv
 
 Both must live in the AWX venv, married to our interpreter — never EPEL builds (see [Appendix A1](a1-epel-uwsgi-conflict.md)):
