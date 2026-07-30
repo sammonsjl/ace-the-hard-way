@@ -2,93 +2,66 @@
 
 ## What you will have at the end
 
-The whole point: a job launched on your hand-built control plane, dispatched over YOUR receptor mesh, executed in an EE container on the execution plane you built. Labs 1–14 = a complete, working controller.
+The whole point: a job launched **from the web UI you built**, dispatched over YOUR receptor mesh, executed in an EE container on the execution plane you built. Labs 1–14 = a complete, working controller.
 
-## First: sync the Demo Project — the control node's sandbox at work
+This lab is deliberately click-driven. Everything up to now has been command line; the test of a platform is whether a person can use it. Every button press below travels through nginx → uwsgi → the dispatcher → receptor → podman, and the live output comes back through daphne and wsrelay — all yours.
 
-Launching the demo kicks off a **project sync first**, and the sync runs on **ace-control**, not ace-exec. That's not a wiring mistake — SCM updates are control-plane work by definition, and they execute inside the **control-plane EE** under the podman you installed in Lab 11. This sync is its own smoke test: `local` work through receptor, into a container, on the controller.
+## Log in
 
-Watch it happen — on **ace-control**:
+Open **`https://192.168.56.10`** and log in as `admin` with the password from Lab 7.
 
-```bash
-cd /tmp
-watch -n1 "sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman ps"
-```
+> Accept the browser warning about the self-signed cert from Lab 10 — that's expected. If the login page renders but the login *does nothing*, and you've already done Lab 16, that's the `RESOURCE_SERVER` JWT lockout described there, not a broken password.
 
-In another terminal, trigger the sync:
+## Sync the Demo Project
 
-```bash
-read -s -p "AWX admin password: " AWX_PW; echo
+`Resources → Projects → Demo Project`, then click the **sync** button (the circular-arrows icon on the project's row or its detail page).
 
-curl -sk -u "admin:${AWX_PW}" \
-  'https://192.168.56.10/api/v2/projects/?name=Demo%20Project' \
-  | python3 -c 'import json,sys; print("project:", json.load(sys.stdin)["results"][0]["id"])'
+Watch the status go `Pending → Running → Successful`, live — no page refresh. That live update is your websocket stack working.
 
-curl -sk -u "admin:${AWX_PW}" -X POST \
-  https://192.168.56.10/api/v2/projects/<PROJECT_ID>/update/ \
-  | python3 -c 'import json,sys; print("update job:", json.load(sys.stdin)["id"])'
-```
-
-An EE container flashes up in the watch — that's git cloning `ansible-tower-samples` *inside the control-plane EE*. Confirm:
-
-```bash
-curl -sk -u "admin:${AWX_PW}" \
-  'https://192.168.56.10/api/v2/projects/?name=Demo%20Project' \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["status"])'
-# want: successful
-```
+**What just happened, and where:** the sync ran on **ace-control**, not ace-exec. That's not a wiring mistake — SCM updates are control-plane work by definition, so they execute in the **control-plane EE** under the podman from Lab 11. You already proved this path in [Lab 11's local-work check](11-receptor.md#prove-local-work-actually-runs); this time you did it as a user, and the job about to run needs the project on disk.
 
 (The Demo Inventory's `localhost` host with `ansible_connection=local` is exactly right for what's next: "local" means *inside the EE container on ace-exec* — which is the point.)
 
-## Set up the watch posts
+## Launch the Demo Job Template
 
-**Terminal 1 — ace-exec**, watch for the EE container to appear (`cd /tmp` first — rootless podman can't start from the 0700 vagrant home):
+`Resources → Templates → Demo Job Template`, then **Launch**.
+
+The job's output view opens and stdout streams in line by line. That stream is not polling — it's the websocket path (daphne, wsrelay, nginx), and the events reaching it came back over the receptor mesh from another machine.
+
+Expect: the `Hello World!` debug task, then `PLAY RECAP` with `ok=2 changed=1 failed=0`, and a green **Successful**.
+
+## Confirm it ran on the execution plane
+
+This is the assertion that matters — the job must not have run on the controller. On the job's **Details** tab, check:
+
+- **Execution Node** — `ace-exec`
+- **Execution Environment** — the default EE
+- **Instance Group** — the group Lab 13 registered
+
+`Execution Node: ace-exec` is the proof: your control plane handed real work across a TLS mesh you built to a machine that has no database, no redis, and no credentials of its own.
+
+## Optional — watch the machinery while it runs
+
+Skip this if you just want the win. But the labs exist to make the invisible visible, so it's worth launching the job a second time with these two running.
+
+**On ace-exec** — the EE container appearing and exiting (`cd /tmp` first; rootless podman can't start from the 0700 vagrant home):
 
 ```bash
 cd /tmp
 watch -n1 "sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman ps"
 ```
 
-**Terminal 2 — ace-control**, watch the work unit:
+**On ace-control** — the work unit's lifecycle:
 
 ```bash
 watch -n1 "sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /var/run/awx-receptor/receptor.sock work list --quiet"
 ```
 
-**Browser** — `https://192.168.56.10`, logged in, on the Jobs view. The live output you're about to see arrives over the websocket path: daphne, wsrelay, nginx — all yours.
-
-## Launch
-
-**Terminal 3 — ace-control:**
-
-```bash
-curl -sk -u "admin:${AWX_PW}" \
-  'https://192.168.56.10/api/v2/job_templates/?name=Demo%20Job%20Template' \
-  | python3 -c 'import json,sys; print("jt:", json.load(sys.stdin)["results"][0]["id"])'
-
-curl -sk -u "admin:${AWX_PW}" -X POST \
-  https://192.168.56.10/api/v2/job_templates/<JT_ID>/launch/ \
-  | python3 -c 'import json,sys; print("job:", json.load(sys.stdin)["job"])'
-```
-
-Watch all three posts at once:
-
-- Terminal 2: a work unit appears, state `Running`
-- Terminal 1: a container flashes up running `quay.io/ansible/awx-ee` — that's your job
-- Browser: stdout streams live; the debug task prints its hello from a container hostname
-- Terminal 2: work unit goes `Succeeded` and is released
-
-Confirm from the API:
-
-```bash
-curl -sk -u "admin:${AWX_PW}" https://192.168.56.10/api/v2/jobs/<JOB_ID>/ \
-  | python3 -c 'import json,sys; j=json.load(sys.stdin); print(j["status"], "on", j["execution_node"])'
-# want: successful on ace-exec
-```
+Hit Launch again and watch all three surfaces at once: a work unit appears and goes `Running`, a container flashes up running `quay.io/ansible/awx-ee` on ace-exec, stdout streams in the browser, then the work unit goes `Succeeded` and is released.
 
 ## Trace the hops — you built every one
 
-1. **nginx** (Lab 10) accepts the launch POST, hands it to **uwsgi** (Lab 8) over the unix socket
+1. **nginx** (Lab 10) accepts the launch request, hands it to **uwsgi** (Lab 8) over the unix socket
 2. The API writes a pending job; the **dispatcher** (Lab 8) picks it up, builds the private data dir from the synced project, and transmits it
 3. The dispatcher submits the work unit to **receptor** (Lab 11) over `/var/run/awx-receptor/receptor.sock`, **signed** with the key from Lab 11
 4. Receptor carries it over the **TLS mesh** (Lab 12) — mutual certs from your Lab 11 mesh CA, node IDs verified via the receptor OID
@@ -97,6 +70,15 @@ curl -sk -u "admin:${AWX_PW}" https://192.168.56.10/api/v2/jobs/<JOB_ID>/ \
 7. Events stream back over the same mesh into the **callback receiver** (Lab 8), into **postgres** (Lab 3), and out through **daphne/wsrelay** (Lab 8) to your browser
 
 That's an automation platform, by hand, from source.
+
+## If it doesn't go green
+
+| What you see | Where to look |
+|---|---|
+| Stuck in `Pending`, nothing on either node | Task manager isn't scheduling — the `devonly`/`AWX_MODE` pair ([Lab 5](05-awx-source.md), Lab 8) |
+| `Running` forever, no container on ace-exec | Mesh — check `receptorctl status` on both nodes; peer, firewalld `27199`, node-ID SAN, clock skew ([Lab 12](12-execution-plane.md)) |
+| Fails instantly, empty `result_traceback` | EE can't start: linger, or exit 132 on Apple Silicon ([Lab 11](11-receptor.md)) |
+| `Execution Node: ace-control` | Instance/queue registration — the job never left the control plane ([Lab 13](13-instance-registration.md)) |
 
 ## One more thing that now Just Works
 
