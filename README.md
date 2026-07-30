@@ -26,26 +26,30 @@ flowchart TD
     subgraph CONTROL["ace-control · 192.168.56.10 — control plane"]
         envoy["envoy :443<br/>the single front door · TLS ends here"]
 
-        gwnginx["gateway nginx :8446<br/>serves the platform UI SPA"]
-        gwuwsgi["gateway uwsgi :8080"]
-        gwgrpc["gateway gRPC control plane :50051"]
+        subgraph GATEWAY["gateway (jewel) — the integrator"]
+            gwgrpc["gRPC control plane :50051<br/>authenticates every proxied request"]
+            gwuwsgi["uwsgi :8080<br/>REST API + the service registry"]
+            gwnginx["nginx :8446<br/>serves the platform UI SPA"]
+        end
 
-        ctlnginx["controller nginx :8043"]
-        ctlsock["uwsgi.sock · daphne.sock"]
-        ctlsup["automation-controller.service → supervisord<br/>awx-uwsgi · awx-daphne · awx-dispatcher<br/>awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat<br/>awx-rsyslogd · awx-rsyslog-configurer"]
+        subgraph CONTROLLER["controller — and the execution path"]
+            ctlnginx["nginx :8043"]
+            ctlsup["automation-controller.service → supervisord<br/>awx-uwsgi · awx-daphne · awx-dispatcher<br/>awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat<br/>awx-rsyslogd · awx-rsyslog-configurer"]
+            rcontrol["receptor · control node<br/>control socket + local work type"]
+            podmanc["podman — EE sandbox<br/>project syncs · system jobs"]
+        end
 
-        hubnginx["hub nginx :8444"]
-        hubsock["pulpcore-api.sock · pulpcore-content.sock"]
-        hubproc["pulpcore-api · pulpcore-content<br/>pulpcore-worker@1 · @2"]
+        subgraph HUB["Automation Hub"]
+            hubnginx["nginx :8444"]
+            hubproc["pulpcore-api · pulpcore-content<br/>pulpcore-worker@1 · @2"]
+        end
 
-        edanginx["eda nginx :8445"]
-        edasock["eda-api.sock"]
-        edaproc["eda api · websockets · scheduler · worker"]
+        subgraph EDA["Event-Driven Ansible"]
+            edanginx["nginx :8445"]
+            edaproc["eda api · websockets · scheduler · worker"]
+        end
 
         state[("shared state — every service above uses both<br/>PostgreSQL :5432 local only · awx · gateway · pulp · eda<br/>Redis unix socket, plus loopback :6379 for EDA")]
-
-        rcontrol["receptor · control node<br/>control socket + local work type"]
-        podmanc["podman — EE sandbox<br/>project syncs · system jobs"]
     end
 
     subgraph EXEC["ace-exec · 192.168.56.20 — execution plane"]
@@ -59,15 +63,21 @@ flowchart TD
     envoy -->|"/api/controller/"| ctlnginx
     envoy -->|"/api/galaxy/"| hubnginx
     envoy -->|"/api/eda/"| edanginx
-    envoy -.->|"xDS routes :8080 · gRPC auth :50051"| gwgrpc
 
+    gwuwsgi -.->|"xDS: routes from the registry, polled every 5s"| envoy
+    envoy -.->|"is this request allowed? who is it?"| gwgrpc
     gwnginx -->|"/api/gateway/"| gwuwsgi
-    ctlnginx --> ctlsock --> ctlsup
-    hubnginx --> hubsock --> hubproc
-    edanginx --> edasock --> edaproc
 
-    gwuwsgi -.-> state
+    gwuwsgi -.->|"JWT public key — one identity<br/>for all three services"| ctlsup
+    gwuwsgi -.-> hubproc
+    gwuwsgi -.-> edaproc
+
+    ctlnginx -->|"uwsgi.sock · daphne.sock"| ctlsup
+    hubnginx -->|"pulpcore-api.sock · pulpcore-content.sock"| hubproc
+    edanginx -->|"eda-api.sock"| edaproc
+
     ctlsup -.-> state
+    gwuwsgi -.-> state
     hubproc -.-> state
     edaproc -.-> state
 
@@ -84,7 +94,7 @@ flowchart TD
     class state store
 ```
 
-A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches; the four services behind it sit on internal ports (8043/8444/8445/8446) and every request carries the gateway's JWT. **The ports are a single-box tax:** the real design gives the controller, hub, and EDA each their own host on 443 — here they share one VM, so they move aside ([Lab 19](docs/19-platform-ui.md) does that pivot). **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear twice, both times as EE sandboxes** (purple) — never as a service. **Receptor is the parent of podman on both nodes:** the dispatcher never launches a container itself, it submits a signed work unit to receptor, and receptor's work-command spawns `ansible-runner`, which starts the EE. Control-plane work (project syncs, system jobs) takes that path locally through `ace-control`'s own receptor; job work takes the identical path across the mesh on `ace-exec`. And the two VMs are joined by exactly one thing: that mesh, with a CA, certs, and work-signing keys you generated yourself.
+A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches; the four services behind it sit on internal ports (8043/8444/8445/8446). **But envoy is only the data plane — the gateway is what actually assembles the platform.** Envoy knows nothing on its own: every route it serves is a row in the gateway's service registry, fetched over xDS every five seconds; every request it proxies is checked against the gateway's gRPC control plane; and the identity that comes back is a JWT signed by the gateway, which the controller, hub, and EDA each validate against a public key they fetch from it at runtime (`ANSIBLE_BASE_JWT_KEY`). That is what "one login for the whole platform" means mechanically — three independently built services trusting one issuer. Rotate the key at the gateway and all three follow. **The ports are a single-box tax:** the real design gives the controller, hub, and EDA each their own host on 443 — here they share one VM, so they move aside ([Lab 19](docs/19-platform-ui.md) does that pivot). **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear twice, both times as EE sandboxes** (purple) — never as a service. **Receptor is the parent of podman on both nodes:** the dispatcher never launches a container itself, it submits a signed work unit to receptor, and receptor's work-command spawns `ansible-runner`, which starts the EE. Control-plane work (project syncs, system jobs) takes that path locally through `ace-control`'s own receptor; job work takes the identical path across the mesh on `ace-exec`. And the two VMs are joined by exactly one thing: that mesh, with a CA, certs, and work-signing keys you generated yourself.
 
 ## Who this is for
 
