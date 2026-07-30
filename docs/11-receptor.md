@@ -195,7 +195,8 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 - log-level: info
 
 # no mesh peers yet — see the note below; Lab 12 REPLACES this with the tcp-peer
-- local-only
+# the `: null` is load-bearing — see the war story below
+- local-only: null
 
 - control-service:
     service: control
@@ -232,7 +233,21 @@ EOF
 - **`control-service`** at the socket path from the Directories section above, `0660`, with `tls: tls_server` — TLS applies when the control service is reached over the network; local unix-socket clients like `receptorctl` and the dispatcher connect plain.
 - **`tls_server` / `tls_client`** are just the names we give these sections. AWX discovers the `tls-client` section by scanning the config — the name itself just has to be referenced consistently (Lab 12's `tcp-peer` uses it).
 - **`work-command` (local)** is how control-plane work (project updates, system jobs) would execute *on this node* — see the warning below.
-- **`local-only`** — a war story. Without it, this config has **no backends** (no listener, no peers — those come in Lab 12), and receptor treats that as "nothing to do": it logs `WARNING Nothing to do - no backends are running` and exits cleanly, which looks like a crash loop from systemd and makes `receptorctl` throw `Connection refused`. `- local-only` is exactly what a single controller with no listener needs: it means "run as an isolated node" — remove it the moment a real peer exists (Lab 12 does). If you hit the crash loop first: fix the config, then `sudo systemctl reset-failed receptor` before restarting.
+- **`local-only: null`** — two war stories in one line, and they pull in opposite directions.
+
+> **War story 1 — leave `local-only` out and receptor won't stay running.** Without it this config has **no backends** (no listener, no peers — those come in Lab 12), and receptor treats that as "nothing to do": it logs `WARNING Nothing to do - no backends are running` and exits *cleanly*, which looks like a crash loop from systemd and makes `receptorctl` throw `Connection refused`. `local-only` is exactly what a single controller with no listener needs — it means "run as an isolated node." Remove it the moment a real peer exists (Lab 12 does). If you hit the crash loop first: fix the config, then `sudo systemctl reset-failed receptor` before restarting.
+>
+> **War story 2 — write it the way receptor's own docs do (`- local-only`) and AWX cannot read the file.** This is the trap, because receptor accepts the bare form happily: the daemon starts, `receptorctl status` prints the node, and this lab's Verify passes. Then the first project sync dies in the *dispatcher*, not in receptor:
+>
+> ```
+> File "/opt/awx/awx/main/tasks/receptor.py", line 142, in get_receptor_sockfile
+>     for entry_name, entry_data in section.items():
+> AttributeError: 'str' object has no attribute 'items'
+> ```
+>
+> **WHY:** AWX reads this file and assumes every list item is a mapping — `get_receptor_sockfile()` and `get_tls_client()` both call `section.items()` on each entry. YAML parses a bare `- local-only` as the **string** `"local-only"`, and strings have no `.items()`. It's fatal rather than cosmetic because the string sits *before* `control-service`, so the loop blows up before it ever finds the socket path — hence a traceback about parsing, not about connecting. (`work_signing_enabled()` gets away with it: it uses `'work-signing' in section`, which on a string is just a harmless substring test.)
+>
+> **FIX:** give the key a value so YAML produces a dict — `- local-only: null`. That's not a workaround, it's what AWX itself writes: `RECEPTOR_CONFIG_STARTER` in `awx/main/tasks/receptor.py` opens with `{'local-only': None}`. Receptor treats both forms identically. **General lesson:** this file has two consumers with different parsers, and the stricter one is AWX — so keep every entry a `key: value` mapping, never a bare directive, even where receptor's docs show one.
 
 > **How `local` work actually runs:** the dispatcher submits it to receptor; receptor's work-command spawns `ansible-runner worker`; ansible-runner starts the control-plane EE under the podman you just installed. Note the chain — **receptor is the parent of podman here**, which is why the unit below carries `XDG_RUNTIME_DIR` (rootless podman needs it, and system services don't get it for free).
 
@@ -280,6 +295,20 @@ sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl \
 # want: {} — empty, but answering
 ```
 
-If `status` prints the node and `work list` answers, AWX's dispatcher can reach receptor the same way — the mesh of one is up.
+If `status` prints the node and `work list` answers, receptor itself is healthy — the mesh of one is up.
+
+**Now check the other consumer.** `receptorctl` talking to the socket proves nothing about whether *AWX* can read `receptor.conf`; the two use different parsers, and only AWX's is strict (war story 2 above). Ask AWX directly, using its own functions:
+
+```bash
+sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/python -c "
+from awx.main.tasks.receptor import read_receptor_config, get_receptor_sockfile, get_tls_client
+c = read_receptor_config()
+print(\"sockfile:\", get_receptor_sockfile(c))
+print(\"tls-client:\", get_tls_client(c, True))"'
+# want: sockfile: /var/run/awx-receptor/receptor.sock
+#       tls-client: tls_client
+```
+
+An `AttributeError: 'str' object has no attribute 'items'` here means a bare directive somewhere in the file — fix it before moving on, or the failure resurfaces as a broken project sync with a traceback that looks nothing like a config problem.
 
 Next: [The execution plane](12-execution-plane.md)

@@ -242,7 +242,7 @@ The mesh has a direction, and it's worth being explicit about: **controllers dia
 sudo vim /etc/receptor/receptor.conf
 ```
 
-**Replace** the Lab 11 `- local-only` line (a node with a real peer must not be isolation-mode) with:
+**Replace** the Lab 11 `- local-only: null` line (a node with a real peer must not be isolation-mode) with:
 
 ```yaml
 - tcp-peer:
