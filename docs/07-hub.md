@@ -53,19 +53,31 @@ All commands on **ace-hub** unless stated otherwise.
 ```bash
 sudo useradd --system --home-dir /var/lib/pulp --create-home --shell /bin/bash pulp
 sudo install -d -o pulp -g pulp /var/lib/pulp /var/lib/pulp/assets /var/lib/pulp/media /var/lib/pulp/tmp /etc/pulp
-sudo usermod -aG redis pulp     # Lab 5 redis socket (hub uses db 2)
-
-sudo -iu postgres psql -c "CREATE USER pulp WITH PASSWORD 'CHANGE-ME';"
-sudo -iu postgres psql -c "CREATE DATABASE pulp OWNER pulp;"
 ```
 
-Pulp stores encrypted fields, so it needs the postgres **`hstore`** extension — which lives
-in `postgresql-contrib` and must be created *in the pulp database* by a superuser:
+The `pulp` role and database already exist — [Lab 4](04-postgresql.md) created all four up front.
+Confirm this node can reach it:
 
 ```bash
+sudo dnf -y install postgresql
+PGPASSWORD='CHANGE-ME-pulp' psql -h ace-db -U pulp -d pulp -c 'SELECT 1'   # want: one row
+```
+
+Pulp stores encrypted fields, so it needs the postgres **`hstore`** extension. Creating an
+extension requires a superuser, and superuser is a thing you have on the database host — so this
+one step runs **on ace-db**, not here:
+
+```bash
+# on ace-db
 sudo dnf -y install postgresql-contrib
 sudo -iu postgres psql -d pulp -c "CREATE EXTENSION IF NOT EXISTS hstore;"
+sudo -iu postgres psql -d pulp -c '\dx' | grep hstore     # want: hstore listed
 ```
+
+> This is the first time a component needs something done *for* it on another machine, and it is
+> worth noticing why: `CREATE EXTENSION` loads a shared library into the database, which is a
+> server-side privilege no application role should hold. The pulp role owns its schema; it does not
+> own the server.
 
 ## Python 3.11, not 3.12
 
@@ -114,7 +126,7 @@ EOF
 ## Settings — `/etc/pulp/settings.py`
 
 pulpcore reads `PULP_SETTINGS`. Write the override by hand — pulpcore's defaults plus the
-galaxy_ng gateway settings, adapted to our local postgres + unix-socket redis:
+galaxy_ng gateway settings, adapted to the database on ace-db and redis on ace-gateway:
 
 First the pulp **database-fields encryption key** — a Fernet key (url-safe base64 of 32
 random bytes) that pulp uses to encrypt secret model fields; without it, `migrate` refuses
@@ -130,10 +142,10 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": "pulp", "USER": "pulp", "PASSWORD": "CHANGE-ME",
-        "HOST": "localhost", "PORT": 5432,
+        "HOST": "ace-db", "PORT": 5432,
     }
 }
-REDIS_URL = "unix:///var/run/redis/redis.sock?db=2"
+REDIS_URL = "redis://ace-gateway:6379/2"
 SECRET_KEY = "CHANGE-ME-RANDOM"
 DB_ENCRYPTION_KEY = "/etc/pulp/certs/database_fields.symmetric.key"
 
@@ -228,7 +240,7 @@ EOF
 sudo tee /etc/systemd/system/pulpcore-api.service >/dev/null <<'EOF'
 [Unit]
 Description=Pulp API Server
-After=network-online.target postgresql.service redis.service
+After=network-online.target
 Wants=network-online.target
 [Service]
 Type=notify
@@ -247,7 +259,7 @@ EOF
 sudo tee /etc/systemd/system/pulpcore-content.service >/dev/null <<'EOF'
 [Unit]
 Description=Pulp Content App
-After=network-online.target postgresql.service redis.service
+After=network-online.target
 Wants=network-online.target
 [Service]
 Type=notify
@@ -267,7 +279,7 @@ EOF
 sudo tee /etc/systemd/system/pulpcore-worker@.service >/dev/null <<'EOF'
 [Unit]
 Description=Pulp Worker %i
-After=network-online.target postgresql.service redis.service
+After=network-online.target
 Wants=network-online.target
 [Service]
 EnvironmentFile=/etc/default/pulpcore

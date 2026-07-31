@@ -156,39 +156,23 @@ sudo chmod 0640 /etc/eda/settings.yaml
 sudo vim /etc/eda/settings.yaml    # set the real DB password
 ```
 
-## Redis over the network
+## Redis
 
-EDA addresses redis by **host:port** for its channels and websocket layer, and
-[Lab 5](05-gateway.md) deliberately left redis socket-only (`port 0`). This is the component that
-needs it opened, so this is where it gets opened — on **ace-gateway**, not here:
-
-```bash
-# on ace-gateway
-sudo sed -i 's/^port 0/port 6379/' /etc/redis/redis.conf
-grep -E '^(port|bind|unixsocket) ' /etc/redis/redis.conf
-# want: port 6379, bind 127.0.0.1 192.168.56.11, and the unixsocket line intact
-sudo systemctl restart redis
-
-sudo firewall-cmd --permanent --add-port=6379/tcp
-sudo firewall-cmd --reload
-```
-
-The socket stays — the gateway keeps using it locally, which is both faster and unreachable from
-the network. EDA gets the TCP port, firewalled to the lab network by the `bind` line.
+EDA addresses redis by **host:port** for its channels and websocket layer.
+[Lab 5](05-gateway.md) already turned that port on and firewalled it to the lab network, and
+[Lab 7](07-hub.md) is already using it. Confirm the path before trusting it:
 
 ```bash
-# back on ace-eda — prove the path before trusting it
 sudo dnf -y install redis          # for redis-cli
 redis-cli -h ace-gateway -p 6379 ping     # want: PONG
 ```
 
-> **Start closed, open what a component proves it needs.** Redis was socket-only for two labs
-> because nothing needed more. Opening it now, for one named consumer, with a `bind` that names one
-> interface, is a smaller decision than having left it open since Lab 5 — and you can say exactly
-> which component justified it.
+> If that times out, the firewall rule on ace-gateway is missing; if it is refused, redis is bound
+> to loopback only. Both are Lab 5 problems, not EDA problems.
 >
-> This is also the only cross-node cache dependency in the build, which is worth noticing: if
-> ace-gateway is down, EDA's websockets stop, but the controller and hub carry on.
+> Note that EDA and hub use different redis **databases** (`/1` and `/2` in their URLs) on the same
+> server. That is not isolation in any security sense — anyone who can reach the port can select any
+> database — it just stops the two components colliding on key names.
 
 ## Migrate, init, admin, static
 
