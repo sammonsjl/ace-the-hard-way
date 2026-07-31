@@ -1,6 +1,6 @@
 # Appendix Lab A1 — Breaking uwsgi on purpose (the EPEL conflict)
 
-> Do this AFTER Lab 14 passes. This lab deliberately breaks your working platform, diagnoses it, fixes it, and then makes the breakage impossible. It reproduces a real production failure mode: EPEL's uwsgi clobbering the platform's own.
+> Do this AFTER Lab 17 passes. This lab deliberately breaks your working platform, diagnoses it, fixes it, and then makes the breakage impossible. It reproduces a real production failure mode: EPEL's uwsgi clobbering the platform's own.
 
 ## What you will have at the end
 

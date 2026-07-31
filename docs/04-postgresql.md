@@ -1,4 +1,4 @@
-# Lab 3 — PostgreSQL
+# Lab 4 — PostgreSQL
 
 ## What you will have at the end
 
@@ -73,7 +73,7 @@ sudo systemctl reload postgresql
 
 ## Create the AWX database and user
 
-Pick a real password and stash it somewhere you'll find in Lab 6 (it goes into `/etc/tower/conf.d/postgres.py`):
+Pick a real password and stash it somewhere you'll find in Lab 9 (it goes into `/etc/tower/conf.d/postgres.py`):
 
 ```bash
 sudo -iu postgres psql <<'SQL'
@@ -120,4 +120,4 @@ sudo -iu postgres psql -c "SHOW max_connections;"    # want: 1024
 systemctl is-enabled postgresql                     # want: enabled (survives reboot)
 ```
 
-Next: [Redis](04-redis.md)
+Next: [Redis](05-redis.md)

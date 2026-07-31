@@ -12,6 +12,11 @@ CLAUDE.md
 # not part of the tutorial. Contains throwaway lab credentials.
 E2E-TEST.md
 
+# Reference material and notes taken from it. The tutorial is written from
+# upstream sources; these are the author's verification notes and must not ship.
+downloads/
+docs/bundle-facts.md
+
 # Lab 12 mesh-cert courier files. /vagrant IS this directory, so anything the
 # labs hand between the nodes through it lands right here. Root-anchored on
 # purpose — per-deployment key material must never be committed, and a reader

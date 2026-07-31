@@ -27,7 +27,7 @@ All commands on **ace-control** (hub is a control-plane service in this single-b
 ```bash
 sudo useradd --system --home-dir /var/lib/pulp --create-home --shell /bin/bash pulp
 sudo install -d -o pulp -g pulp /var/lib/pulp /var/lib/pulp/assets /var/lib/pulp/media /var/lib/pulp/tmp /etc/pulp
-sudo usermod -aG redis pulp     # Lab 4 redis socket (hub uses db 2)
+sudo usermod -aG redis pulp     # Lab 5 redis socket (hub uses db 2)
 
 sudo -iu postgres psql -c "CREATE USER pulp WITH PASSWORD 'CHANGE-ME';"
 sudo -iu postgres psql -c "CREATE DATABASE pulp OWNER pulp;"
@@ -257,7 +257,7 @@ LimitNOFILE=524288
 WantedBy=multi-user.target
 EOF
 
-sudo semanage fcontext -a -t bin_t '/var/lib/pulp/venv/bin(/.*)?'   # Lab 8's 203/EXEC fix
+sudo semanage fcontext -a -t bin_t '/var/lib/pulp/venv/bin(/.*)?'   # Lab 11's 203/EXEC fix
 sudo restorecon -Rv /var/lib/pulp/venv/bin
 sudo systemctl daemon-reload
 sudo systemctl enable --now pulpcore-api pulpcore-content pulpcore-worker@1 pulpcore-worker@2
@@ -393,7 +393,7 @@ curl -skL -u "admin:CHANGE-ME" https://192.168.56.10/api/galaxy/_ui/v1/me/ \
 
 ## The payoff — it appears in the console
 
-Now open the platform UI from [Lab 17](17-platform-ui.md) at **`https://192.168.56.10`** and
+Now open the platform UI from [Lab 7](07-platform-ui.md) at **`https://192.168.56.10`** and
 **refresh**. The navigation has grown a section: **Automation Content**, alongside Automation
 Execution.
 

@@ -1,4 +1,4 @@
-# Lab 7 — Database init
+# Lab 10 — Database init
 
 ## What you will have at the end
 
@@ -28,7 +28,7 @@ sudo -u awx bash -c 'DJANGO_SUPERUSER_PASSWORD=CHANGE-ME AWX_MODE=production /va
 
 ## Register this node
 
-`ace-control` is a **control** node — it runs the control plane; jobs execute on `ace-exec` (later labs). The `--hostname` must match `CLUSTER_HOST_ID` from Lab 6 (`ace-control`).
+`ace-control` is a **control** node — it runs the control plane; jobs execute on `ace-exec` (later labs). The `--hostname` must match `CLUSTER_HOST_ID` from Lab 9 (`ace-control`).
 
 ```bash
 sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage provision_instance --hostname="$(hostname)" --node_type=control'
@@ -49,4 +49,4 @@ sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage li
 # want: ace-control listed, type control, in the controlplane group
 ```
 
-Next: [Running the services](08-awx-services.md)
+Next: [Running the services](11-awx-services.md)

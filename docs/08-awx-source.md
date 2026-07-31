@@ -1,4 +1,4 @@
-# Lab 5 — AWX from source
+# Lab 8 — AWX from source
 
 ## What you will have at the end
 
@@ -95,7 +95,7 @@ sudo rm -f /opt/awx/awx/devonly.py
 >     return          # skip scheduling
 > manager().schedule()
 > ```
-> With `devonly` present, `MODE` is `'development'` **even though you export `AWX_MODE=production` everywhere** — the env var picks the settings files, but `MODE` is decided by that import. So the guard evaluates `settings.AWX_DISABLE_TASK_MANAGERS`, which **doesn't exist in production settings** (it's only defined in `development_defaults.py`). The scheduled `task_manager` task raises `AttributeError` on every tick, the dispatcher swallows it as a failed task, and your jobs sit in `pending` while the rest of the stack looks perfectly healthy — API up, mesh up, `list_instances` green. Deleting `devonly` makes `MODE = 'production'`, the guard short-circuits before touching the missing setting, and `manager().schedule()` runs. (This is the same `AttributeError: ... AWX_DISABLE_TASK_MANAGERS` noted in Lab 8's war story — same root cause, and this is its real fix.)
+> With `devonly` present, `MODE` is `'development'` **even though you export `AWX_MODE=production` everywhere** — the env var picks the settings files, but `MODE` is decided by that import. So the guard evaluates `settings.AWX_DISABLE_TASK_MANAGERS`, which **doesn't exist in production settings** (it's only defined in `development_defaults.py`). The scheduled `task_manager` task raises `AttributeError` on every tick, the dispatcher swallows it as a failed task, and your jobs sit in `pending` while the rest of the stack looks perfectly healthy — API up, mesh up, `list_instances` green. Deleting `devonly` makes `MODE = 'production'`, the guard short-circuits before touching the missing setting, and `manager().schedule()` runs. (This is the same `AttributeError: ... AWX_DISABLE_TASK_MANAGERS` noted in Lab 11's war story — same root cause, and this is its real fix.)
 
 ## Verify
 
@@ -108,20 +108,20 @@ sudo -u awx /var/lib/awx/venv/awx/bin/pip show awx   # record the Version line
 
 (Equivalently, `sudo -u awx /var/lib/awx/venv/awx/bin/python -c "import awx; print(awx.__version__)"` — same string, and importing `awx` doesn't load Django settings.)
 
-**Don't try `awx-manage` yet — not even `--version`.** With `devonly` gone the interpreter is in production mode, and *every* `awx-manage` invocation dies until Lab 6 writes `/etc/tower/settings.py`:
+**Don't try `awx-manage` yet — not even `--version`.** With `devonly` gone the interpreter is in production mode, and *every* `awx-manage` invocation dies until Lab 9 writes `/etc/tower/settings.py`:
 
 ```
 django.core.exceptions.ImproperlyConfigured: No AWX configuration found at
 ['/etc/tower', '/etc/ansible-automation-platform/', '/etc/tower/conf.d/'].
 ```
 
-The reason it catches even `--version`: `awx-manage`'s entry point calls `prepare_env()` *first*, and current `devel`'s `prepare_env()` reads `settings.DEBUG` (`awx/__init__.py`) — which forces the settings module to import and raise, before the `--version` fast-path in `manage()` is ever reached. That error IS the build working; the full command list runs at the end of Lab 6.
+The reason it catches even `--version`: `awx-manage`'s entry point calls `prepare_env()` *first*, and current `devel`'s `prepare_env()` reads `settings.DEBUG` (`awx/__init__.py`) — which forces the settings module to import and raise, before the `--version` fast-path in `manage()` is ever reached. That error IS the build working; the full command list runs at the end of Lab 9.
 
 > **Devel caveat, live.** This very step used to be `awx-manage --version`, which printed the version before Django initialized — until upstream added that `settings.DEBUG` read to `prepare_env()` and it started failing. Exactly the "`devel` moves daily" risk from the top of this lab, which is why you recorded the commit SHA above — your build is pinned even though the branch isn't.
 
 ## Put `awx-manage` in the PATH
 
-A venv-only install means typing the full `/var/lib/awx/venv/awx/bin/awx-manage` every time, and every doc and forum answer you'll ever read just says `awx-manage`. Close the gap with a small wrapper at **`/usr/bin/awx-manage`** that execs the venv binary, and bake in `AWX_MODE=production` while we're here. Removing `devonly` above fixed the code-path `MODE`; `AWX_MODE=production` is the *other* half — it selects which settings files load (`/etc/tower` + postgres, not the dev sqlite defaults). A process that loses it loads the wrong settings and dies in strange ways (see Lab 8's warning):
+A venv-only install means typing the full `/var/lib/awx/venv/awx/bin/awx-manage` every time, and every doc and forum answer you'll ever read just says `awx-manage`. Close the gap with a small wrapper at **`/usr/bin/awx-manage`** that execs the venv binary, and bake in `AWX_MODE=production` while we're here. Removing `devonly` above fixed the code-path `MODE`; `AWX_MODE=production` is the *other* half — it selects which settings files load (`/etc/tower` + postgres, not the dev sqlite defaults). A process that loses it loads the wrong settings and dies in strange ways (see Lab 11's warning):
 
 ```bash
 sudo tee /usr/bin/awx-manage >/dev/null <<'EOF'
@@ -136,13 +136,13 @@ sudo chmod 0755 /usr/bin/awx-manage
 sudo -u awx awx-manage --version 2>&1 | tail -1
 # want (for now): "...No AWX configuration found at ['/etc/tower', ...]"
 # That error is the wrapper WORKING: production mode reads /etc/tower, which
-# Lab 6 hasn't written yet. Re-run after Lab 6 and it prints the version.
+# Lab 9 hasn't written yet. Re-run after Lab 9 and it prints the version.
 ```
 
 Why `/usr/bin` and not `/usr/local/bin`: `sudo`'s `secure_path` on Rocky does not include `/usr/local/bin`, so `sudo -u awx awx-manage` would fail with "command not found" — a trap you'd hit constantly.
 
 Why still `sudo -u awx`: it's in the PATH for *everyone*, but the config (`/etc/tower`, `SECRET_KEY`) is readable only by `awx` — that's deliberate. Root can read anything, so plain `sudo awx-manage` also works; what you can't do is run it as your login user.
 
-> Labs 6–14 spell out the full `sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage ...'` form so they work even without this wrapper — but with it, every one of those collapses to `sudo -u awx awx-manage ...`.
+> Labs 9–17 spell out the full `sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage ...'` form so they work even without this wrapper — but with it, every one of those collapses to `sudo -u awx awx-manage ...`.
 
-Next: [Configuring AWX](06-awx-config.md)
+Next: [Configuring AWX](09-awx-config.md)

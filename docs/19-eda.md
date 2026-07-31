@@ -122,7 +122,7 @@ sudo vim /etc/eda/settings.yaml    # set the real DB password
 
 ## Redis: a loopback TCP listener
 
-EDA addresses redis by **host:port** (for the channels/websocket layer), but Lab 4's redis is
+EDA addresses redis by **host:port** (for the channels/websocket layer), but Lab 5's redis is
 **socket-only** (`port 0`). Add a loopback TCP listener *alongside* the socket — the socket
 stays for the controller and hub, EDA gets its port:
 
@@ -147,7 +147,7 @@ sudo -u eda bash -c 'umask 022 && aap-eda-manage collectstatic --noinput --clear
 ## The service family (systemd)
 
 Four units, one shared environment file. The workers use **dispatcherd** over pg_notify —
-the same task engine as the controller (Lab 8), no separate broker:
+the same task engine as the controller (Lab 11), no separate broker:
 
 ```bash
 sudo tee /etc/tmpfiles.d/eda.conf >/dev/null <<'EOF'
@@ -229,7 +229,7 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-sudo semanage fcontext -a -t bin_t '/var/lib/eda/venv/bin(/.*)?'   # Lab 8's 203/EXEC fix
+sudo semanage fcontext -a -t bin_t '/var/lib/eda/venv/bin(/.*)?'   # Lab 11's 203/EXEC fix
 sudo restorecon -Rv /var/lib/eda/venv/bin
 sudo systemctl daemon-reload
 sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-scheduler automation-eda-default-worker
@@ -343,7 +343,7 @@ from source.
 ## The payoff — the console is complete
 
 Refresh the platform UI at **`https://192.168.56.10`** one last time. **Automation Decisions**
-joins Automation Execution and Automation Content, and the navigation you saw in Lab 17 with a
+joins Automation Execution and Automation Content, and the navigation you saw in Lab 7 with a
 single entry is now the full platform — one login reaching three services you built from source,
 on three different Python versions, sharing one identity.
 

@@ -1,4 +1,4 @@
-# Lab 11 — Receptor
+# Lab 13 — Receptor
 
 ## What you will have at the end
 
@@ -11,7 +11,7 @@ All commands on **ace-control**.
 AWX's dispatcher does not have a "receptor URL" setting. It **reads `/etc/receptor/receptor.conf` directly** (the path is hardcoded in `awx/main/tasks/receptor.py`), finds the `control-service` entry, and connects to whatever socket `filename:` points at. Two more behaviors follow from the same file:
 
 - If the config contains a `work-signing` section, AWX **signs every work unit** it submits (`ansible-runner` and `local` work types). Signing happens client-side in `receptorctl`, running as the `awx` user — so the private key must be readable by `awx`.
-- If the config contains a `tls-client` section, AWX uses it for TLS-peered nodes (Lab 12 peers through it).
+- If the config contains a `tls-client` section, AWX uses it for TLS-peered nodes (Lab 14 peers through it).
 
 Hand-writing this file IS configuring AWX. No AWX settings change in this lab.
 
@@ -28,7 +28,7 @@ sudo tar -xzf /tmp/receptor.tgz -C /usr/local/bin receptor
 receptor --version    # want: 1.6.5
 ```
 
-> `/usr/local/bin` gets the SELinux `bin_t` label by default — no relabel dance like Lab 8's venv. One ownership note: a packaged receptor typically creates a separate `receptor` system user to own `/etc/receptor` (group `awx`, 0750) while the **daemon itself runs as `awx`**. We skip the extra file-owner account and use `awx` for both — same effective access, one less user to reason about.
+> `/usr/local/bin` gets the SELinux `bin_t` label by default — no relabel dance like Lab 11's venv. One ownership note: a packaged receptor typically creates a separate `receptor` system user to own `/etc/receptor` (group `awx`, 0750) while the **daemon itself runs as `awx`**. We skip the extra file-owner account and use `awx` for both — same effective access, one less user to reason about.
 
 ## Directories
 
@@ -95,7 +95,7 @@ sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/a
 >
 > If `Linger=no` and the directory is missing, that's your bug: `sudo loginctl enable-linger awx`, then restart receptor so the EE gets a runtime dir that exists. Nothing about receptor's own config is wrong in this failure mode, which is exactly why it costs so much time.
 
-(`quay.io/ansible/awx-ee:latest` doubles as the default job EE and the control-plane EE — Lab 7's `register_default_execution_environments` registered both.)
+(`quay.io/ansible/awx-ee:latest` doubles as the default job EE and the control-plane EE — Lab 10's `register_default_execution_environments` registered both.)
 
 Smoke-test the sandbox — and make it exercise **crypto**, not just the shell (see the warning below for why):
 
@@ -118,7 +118,7 @@ echo $?    # want: 0 — if you get 132, read on
 
 ## The mesh root CA — receptor's own PKI
 
-Here's a genuinely under-documented corner: receptor certs are **not** made with openssl, and the mesh does **not** share the Lab 10 web CA. The `receptor` binary ships its own PKI (`--cert-init`, `--cert-makereq`, `--cert-signreq`), and that's what creates the dedicated mesh root CA. Why the special tooling: receptor verifies **node IDs, not hostnames** — each cert carries the node ID in an `otherName` SAN under receptor's private OID (`1.3.6.1.4.1.2312.19.1`), and `--cert-makereq nodeid=...` is what injects it. Sign a normal web cert instead and the mesh fails TLS with errors that never mention the real cause.
+Here's a genuinely under-documented corner: receptor certs are **not** made with openssl, and the mesh does **not** share the Lab 12 web CA. The `receptor` binary ships its own PKI (`--cert-init`, `--cert-makereq`, `--cert-signreq`), and that's what creates the dedicated mesh root CA. Why the special tooling: receptor verifies **node IDs, not hostnames** — each cert carries the node ID in an `otherName` SAN under receptor's private OID (`1.3.6.1.4.1.2312.19.1`), and `--cert-makereq nodeid=...` is what injects it. Sign a normal web cert instead and the mesh fails TLS with errors that never mention the real cause.
 
 Create the CA — the CN is free-form, since receptor authenticates on node IDs rather than names:
 
@@ -168,7 +168,7 @@ sudo chown root:awx /etc/receptor/work_private_key.pem /etc/receptor/work_public
 sudo chmod 0640 /etc/receptor/work_private_key.pem /etc/receptor/work_public_key.pem
 ```
 
-The **public** key travels to ace-exec in Lab 12; the private key never leaves this box.
+The **public** key travels to ace-exec in Lab 14; the private key never leaves this box.
 
 ## receptor.conf — written by hand
 
@@ -194,7 +194,7 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 
 - log-level: info
 
-# no mesh peers yet — see the note below; Lab 12 REPLACES this with the tcp-peer
+# no mesh peers yet — see the note below; Lab 14 REPLACES this with the tcp-peer
 # the `: null` is load-bearing — see the war story below
 - local-only: null
 
@@ -227,15 +227,17 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 EOF
 ```
 
-- **`node.id`** must equal `CLUSTER_HOST_ID` from Lab 6 — AWX addresses work by node ID.
+- **`node.id`** must equal `CLUSTER_HOST_ID` from Lab 9 — AWX addresses work by node ID.
 - **`firewallrules`** is a receptor-level rule (not firewalld): reject any traffic *from the mesh* aimed at this node's control service. Only local socket clients (the dispatcher) issue control commands.
 - **Both `work-signing` and `work-verification`** live on the control node — it signs what it sends AND verifies what it runs. `verifysignature: true` on the local work-command closes that loop.
 - **`control-service`** at the socket path from the Directories section above, `0660`, with `tls: tls_server` — TLS applies when the control service is reached over the network; local unix-socket clients like `receptorctl` and the dispatcher connect plain.
-- **`tls_server` / `tls_client`** are just the names we give these sections. AWX discovers the `tls-client` section by scanning the config — the name itself just has to be referenced consistently (Lab 12's `tcp-peer` uses it).
-- **`work-command` (local)** is how control-plane work (project updates, system jobs) would execute *on this node* — see the warning below.
+- **`tls_server` / `tls_client`** are just the names we give these sections. AWX discovers the `tls-client` section by scanning the config — the name itself just has to be referenced consistently (Lab 14's `tcp-peer` uses it).
+- **`work-command` (local)** is how control-plane work (project updates, system jobs) executes *on this node* — see the note below. This entry, not any listener, is what makes project syncs work.
 - **`local-only: null`** — two war stories in one line, and they pull in opposite directions.
 
-> **War story 1 — leave `local-only` out and receptor won't stay running.** Without it this config has **no backends** (no listener, no peers — those come in Lab 12), and receptor treats that as "nothing to do": it logs `WARNING Nothing to do - no backends are running` and exits *cleanly*, which looks like a crash loop from systemd and makes `receptorctl` throw `Connection refused`. `local-only` is exactly what a single controller with no listener needs — it means "run as an isolated node." Remove it the moment a real peer exists (Lab 12 does). If you hit the crash loop first: fix the config, then `sudo systemctl reset-failed receptor` before restarting.
+> **Which end of the mesh listens?** This node doesn't get a `tcp-listener`, and that is deliberate: in this topology the **execution node listens** and the control node dials out to it ([Lab 14](14-execution-plane.md) adds the `tcp-peer` here and the listener there). It could be the other way around — receptor doesn't care, and work flows in both directions regardless — but outbound-from-the-control-node is the conventional arrangement, and it means the box holding your signing key opens no ports to the mesh at all.
+>
+> **War story 1 — a receptor with no backends exits cleanly, which looks like a crash loop.** With no listener and no peers yet, receptor decides it has nothing to do: it logs `WARNING Nothing to do - no backends are running` and **exits 0**. systemd reports a service that keeps stopping, `receptorctl` throws `Connection refused`, and nothing anywhere says "you have no backends." `local-only` is exactly what a node in that state needs — it declares an isolated node deliberately. Lab 14 replaces it the moment a real peer exists. If you hit the crash loop first: fix the config, then `sudo systemctl reset-failed receptor` before restarting.
 >
 > **War story 2 — write it the way receptor's own docs do (`- local-only`) and AWX cannot read the file.** This is the trap, because receptor accepts the bare form happily: the daemon starts, `receptorctl status` prints the node, and this lab's Verify passes. Then the first project sync dies in the *dispatcher*, not in receptor:
 >
@@ -247,7 +249,7 @@ EOF
 >
 > **WHY:** AWX reads this file and assumes every list item is a mapping — `get_receptor_sockfile()` and `get_tls_client()` both call `section.items()` on each entry. YAML parses a bare `- local-only` as the **string** `"local-only"`, and strings have no `.items()`. It's fatal rather than cosmetic because the string sits *before* `control-service`, so the loop blows up before it ever finds the socket path — hence a traceback about parsing, not about connecting. (`work_signing_enabled()` gets away with it: it uses `'work-signing' in section`, which on a string is just a harmless substring test.)
 >
-> **FIX:** give the key a value so YAML produces a dict — `- local-only: null`. That's not a workaround, it's what AWX itself writes: `RECEPTOR_CONFIG_STARTER` in `awx/main/tasks/receptor.py` opens with `{'local-only': None}`. Receptor treats both forms identically. **General lesson:** this file has two consumers with different parsers, and the stricter one is AWX — so keep every entry a `key: value` mapping, never a bare directive, even where receptor's docs show one.
+> **FIX:** give the key a value so YAML produces a dict — `- local-only: null`. That's not a workaround, it's what AWX itself writes: `RECEPTOR_CONFIG_STARTER` in `awx/main/tasks/receptor.py` opens with `{'local-only': None}`. Receptor treats both forms identically. **General lesson, and it applies to every entry in this file:** it has two consumers with different parsers, and the stricter one is AWX — so keep every entry a `key: value` mapping, never a bare directive, even where receptor's own documentation shows one.
 
 > **How `local` work actually runs:** the dispatcher submits it to receptor; receptor's work-command spawns `ansible-runner worker`; ansible-runner starts the control-plane EE under the podman you just installed. Note the chain — **receptor is the parent of podman here**, which is why the unit below carries `XDG_RUNTIME_DIR` (rootless podman needs it, and system services don't get it for free).
 
@@ -326,7 +328,7 @@ print('non-mapping entries:', bad if bad else 'none')"
 
 Everything above tests plumbing. This tests the thing the plumbing exists for — and it's the first point in the tutorial where a real job runs, so don't move on until it passes. A project sync is control-plane work: it runs *here*, on ace-control, inside the control-plane EE.
 
-Launch one against the demo project Lab 7 preloaded, straight from the ORM (no admin password needed):
+Launch one against the demo project Lab 10 preloaded, straight from the ORM (no admin password needed):
 
 ```bash
 sudo -u awx awx-manage shell -c "
@@ -362,9 +364,9 @@ Three failure modes, and they're distinguishable at a glance:
 | Symptom | Cause | Where it's covered |
 |---|---|---|
 | `AttributeError: 'str' object has no attribute 'items'` | bare directive in `receptor.conf` | war story 2 above |
-| Sits in `pending` forever, nothing in podman | task manager not scheduling — `devonly`/`AWX_MODE` | [Lab 5](05-awx-source.md), Lab 8's `AWX_MODE` war story |
+| Sits in `pending` forever, nothing in podman | task manager not scheduling — `devonly`/`AWX_MODE` | [Lab 8](08-awx-source.md), Lab 11's `AWX_MODE` war story |
 | Fails at container start, or exit 132 with an empty traceback | missing linger, or aarch64 SIGILL | the linger note and exit-132 war story above |
 
 An `AttributeError: 'str' object has no attribute 'items'` here means a bare directive somewhere in the file — fix it before moving on, or the failure resurfaces as a broken project sync with a traceback that looks nothing like a config problem.
 
-Next: [The execution plane](12-execution-plane.md)
+Next: [The execution plane](14-execution-plane.md)

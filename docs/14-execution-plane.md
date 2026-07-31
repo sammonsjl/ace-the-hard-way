@@ -1,8 +1,8 @@
-# Lab 12 — The execution plane
+# Lab 14 — The execution plane
 
 ## What you will have at the end
 
-The execution plane's first node: **ace-exec** running receptor from the release binary, TLS-peered to the control node with certs from the Lab 11 **mesh CA**, verifying signed work, with podman ready to sandbox jobs.
+The execution plane's first node: **ace-exec** running receptor from the release binary, TLS-peered to the control node with certs from the Lab 13 **mesh CA**, verifying signed work, with podman ready to sandbox jobs.
 
 ```
 ace-control                              ace-exec
@@ -12,7 +12,7 @@ ace-control                              ace-exec
                                                           └── EE container under podman
 ```
 
-> **Why podman is here:** an execution environment IS a container image — since AWX 18 there is no containerless job execution. Receptor (bare metal, yours) hands the job to ansible-runner, which runs it inside the EE under podman. Same pattern as the controller (Lab 11): podman is the job sandbox on every node that runs work, and nowhere else.
+> **Why podman is here:** an execution environment IS a container image — since AWX 18 there is no containerless job execution. Receptor (bare metal, yours) hands the job to ansible-runner, which runs it inside the EE under podman. Same pattern as the controller (Lab 13): podman is the job sandbox on every node that runs work, and nowhere else.
 
 Commands run on **both** nodes in this lab — each block says which.
 
@@ -30,7 +30,7 @@ echo "192.168.56.10 ace-control" | sudo tee -a /etc/hosts
 
 ## Install receptor (ace-exec)
 
-Same pinned release, same directory contract as Lab 11:
+Same pinned release, same directory contract as Lab 13:
 
 ```bash
 RECEPTOR_VERSION=1.6.5
@@ -61,7 +61,7 @@ EOF
 
 ## The mesh cert — CSR here, signed by the CA host
 
-Same PKI as Lab 11 (receptor's own — `nodeid=` bakes the node ID into the cert's `otherName` SAN). The flow is the one any CA should use: the key is born on the node and never leaves; the CSR travels to the CA host (ace-control), comes back as a cert. Our courier is `/vagrant` — only public material crosses it.
+Same PKI as Lab 13 (receptor's own — `nodeid=` bakes the node ID into the cert's `otherName` SAN). The flow is the one any CA should use: the key is born on the node and never leaves; the CSR travels to the CA host (ace-control), comes back as a cert. Our courier is `/vagrant` — only public material crosses it.
 
 **On ace-exec — key and CSR:**
 
@@ -128,9 +128,9 @@ sudo loginctl enable-linger awx
 loginctl show-user awx --property=Linger        # want: Linger=yes
 ```
 
-> Same trap as the control node, and it matters just as much here — this is the node where jobs actually run. If you skipped it, see [Lab 11's linger note](11-receptor.md#podman-on-the-control-node-yes-really) for what logind is doing and why a missing `/run/user/<uid>` looks like an EE failure instead of a session one.
+> Same trap as the control node, and it matters just as much here — this is the node where jobs actually run. If you skipped it, see [Lab 13's linger note](13-receptor.md#podman-on-the-control-node-yes-really) for what logind is doing and why a missing `/run/user/<uid>` looks like an EE failure instead of a session one.
 
-Pre-pull the default EE (the one Lab 7's `register_default_execution_environments` registered), so the first job doesn't pay the download. **Change directory first** — `sudo -u` keeps your current working directory, and `/home/vagrant` is 0700, so rootless podman invoked from there dies with `cannot chdir to /home/vagrant: Permission denied`. Run all `sudo -u awx podman ...` commands from a world-readable directory:
+Pre-pull the default EE (the one Lab 10's `register_default_execution_environments` registered), so the first job doesn't pay the download. **Change directory first** — `sudo -u` keeps your current working directory, and `/home/vagrant` is 0700, so rootless podman invoked from there dies with `cannot chdir to /home/vagrant: Permission denied`. Run all `sudo -u awx podman ...` commands from a world-readable directory:
 
 ```bash
 cd /tmp
@@ -195,7 +195,7 @@ EOF
 
 ## The unit (ace-exec)
 
-One difference from Lab 11's unit (besides no `PartOf` — that's controller-only): rootless podman resolves its runtime dir from `XDG_RUNTIME_DIR`, and a system service gets no such variable — jobs would fail with a cryptic "cannot find runtime directory". Bake it in:
+One difference from Lab 13's unit (besides no `PartOf` — that's controller-only): rootless podman resolves its runtime dir from `XDG_RUNTIME_DIR`, and a system service gets no such variable — jobs would fail with a cryptic "cannot find runtime directory". Bake it in:
 
 ```bash
 AWX_UID=$(id -u awx)
@@ -236,13 +236,13 @@ sudo firewall-cmd --list-ports    # want: 27199/tcp
 
 ## Peer the control node (ace-control)
 
-The mesh has a direction, and it's worth being explicit about: **controllers dial out, execution nodes listen.** That way an execution node needs no outbound reach into the control plane, and adding one is a firewall change on the new node only. Edit `/etc/receptor/receptor.conf` — the `tls_client` section from Lab 11 does the identity, `redial` keeps the link self-healing:
+The mesh has a direction, and it's worth being explicit about: **controllers dial out, execution nodes listen.** That way an execution node needs no outbound reach into the control plane, and adding one is a firewall change on the new node only. Edit `/etc/receptor/receptor.conf` — the `tls_client` section from Lab 13 does the identity, `redial` keeps the link self-healing:
 
 ```bash
 sudo vim /etc/receptor/receptor.conf
 ```
 
-**Replace** the Lab 11 `- local-only: null` line (a node with a real peer must not be isolation-mode) with:
+**Replace** the Lab 13 `- local-only: null` line (a node with a real peer must not be isolation-mode) with:
 
 ```yaml
 - tcp-peer:
@@ -277,10 +277,10 @@ cd /tmp
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
   podman run --rm --env OPENSSL_armcap=0 quay.io/ansible/awx-ee:latest ansible-playbook --version
 # want: ansible-playbook [core ...] — the EE runs rootless as awx
-# exit 132 without the --env? That's Lab 11's Apple Silicon SIGILL story. AWX-launched
-# jobs on this node are already covered by the global AWX_TASK_ENV setting from Lab 11.
+# exit 132 without the --env? That's Lab 13's Apple Silicon SIGILL story. AWX-launched
+# jobs on this node are already covered by the global AWX_TASK_ENV setting from Lab 13.
 ```
 
 > **If the peer never appears:** three usual suspects, in order. (1) firewalld — the connection times out silently; check `sudo firewall-cmd --list-ports` on ace-exec. (2) The node-ID SAN — both certs must show the `1.3.6.1.4.1.2312.19.1` otherName (the openssl check above); a cert made outside receptor's PKI fails TLS with what looks like a CA problem. (3) Clock skew — preflight's chrony check exists for a reason. Whatever it was: WHAT/WHY/FIX into this lab.
 
-Next: [Instance registration](13-instance-registration.md)
+Next: [Instance registration](15-instance-registration.md)

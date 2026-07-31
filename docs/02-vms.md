@@ -44,7 +44,7 @@ sudo chown -R awx:awx /var/lib/awx /etc/tower /var/log/tower
 sudo chmod 0750 /var/log/tower
 
 # the home dir must be 0755 — nginx must traverse it to serve
-# /var/lib/awx/public later. useradd created it 0700; fix that now or Lab 10
+# /var/lib/awx/public later. useradd created it 0700; fix that now or Lab 12
 # ends in "stat() failed (13: Permission denied)" on every static file.
 sudo chmod 0755 /var/lib/awx
 ```
@@ -78,7 +78,7 @@ sudo reboot                         # ssh session drops; that's expected
 
 ## Prep the execution plane node
 
-`ace-exec` needs exactly one thing today — the same service user, because receptor runs as `awx` on execution nodes too. Everything else (receptor, podman, TLS) is Lab 12's job:
+`ace-exec` needs exactly one thing today — the same service user, because receptor runs as `awx` on execution nodes too. Everything else (receptor, podman, TLS) is Lab 14's job:
 
 ```bash
 vagrant ssh ace-exec
@@ -141,4 +141,4 @@ stat -c '%a %U %n' /var/log        # want: 755 root /var/log
 
 All six pass = the box is ready. Any fail = fix it now; every one of these produces a confusing failure five labs later if ignored.
 
-Next: [PostgreSQL](03-postgresql.md)
+Next: [The internal CA](03-internal-ca.md)

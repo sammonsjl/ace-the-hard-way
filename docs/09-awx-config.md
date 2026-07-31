@@ -1,4 +1,4 @@
-# Lab 6 — Configuring AWX
+# Lab 9 — Configuring AWX
 
 ## What you will have at the end
 
@@ -15,12 +15,12 @@ Layout we build:
 ├── SECRET_KEY               # 0400, awx-only
 ├── settings.py             # reads SECRET_KEY from the file above
 └── conf.d/
-    ├── postgres.py          # database connection (Lab 3)
+    ├── postgres.py          # database connection (Lab 4)
     ├── channels.py          # broadcast-websocket secret
     └── cluster_host_id.py   # this node's cluster id
 ```
 
-Redis needs no file — `defaults.py` already points the broker and cache at the socket from Lab 4.
+Redis needs no file — `defaults.py` already points the broker and cache at the socket from Lab 5.
 
 All commands on **ace-control**.
 
@@ -42,7 +42,7 @@ sudo -u awx wc -c /etc/tower/SECRET_KEY    # want: ~64 bytes, not 0
 
 ## Base settings file
 
-This is the file that turns a bare production-mode checkout into a configured one. Write the whole shape, not just the one key line — the extras below are the settings AWX's `defaults.py` leaves you to supply. Two entries are load-bearing: `SECRET_KEY`, and **`ALLOWED_HOSTS = ['*']`** — Django in production mode rejects every request with a bare `400` when `ALLOWED_HOSTS` is empty, and AWX's `defaults.py` leaves it empty. You won't notice until Lab 10, when nginx is finally in front and every `/api/` call answers `{"detail":"The request could not be understood by the server."}` while all eight services sit there running innocently. (The wildcard is safe here because nginx is the only front door, and Django still validates origins for CSRF.)
+This is the file that turns a bare production-mode checkout into a configured one. Write the whole shape, not just the one key line — the extras below are the settings AWX's `defaults.py` leaves you to supply. Two entries are load-bearing: `SECRET_KEY`, and **`ALLOWED_HOSTS = ['*']`** — Django in production mode rejects every request with a bare `400` when `ALLOWED_HOSTS` is empty, and AWX's `defaults.py` leaves it empty. You won't notice until Lab 12, when nginx is finally in front and every `/api/` call answers `{"detail":"The request could not be understood by the server."}` while all eight services sit there running innocently. (The wildcard is safe here because nginx is the only front door, and Django still validates origins for CSRF.)
 
 ```bash
 sudo -u awx tee /etc/tower/settings.py >/dev/null <<'EOF'
@@ -72,7 +72,7 @@ EOF
 
 ## Database connection
 
-Use the `awx` database password you set in Lab 3:
+Use the `awx` database password you set in Lab 4:
 
 ```bash
 sudo -u awx tee /etc/tower/conf.d/postgres.py >/dev/null <<'EOF'
@@ -81,7 +81,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'awx',
         'USER': 'awx',
-        'PASSWORD': 'CHANGE-ME',   # the password from Lab 3
+        'PASSWORD': 'CHANGE-ME',   # the password from Lab 4
         'HOST': 'localhost',
         'PORT': 5432,
     }
@@ -111,7 +111,7 @@ sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage ch
 # A database or SECRET_KEY problem would be an ERROR and a traceback, not a warning.
 
 sudo -u awx awx-manage --version
-# the Lab 5 wrapper works now that /etc/tower exists — want: the version string
+# the Lab 8 wrapper works now that /etc/tower exists — want: the version string
 ```
 
-Next: [Database init](07-awx-init.md)
+Next: [Database init](10-awx-init.md)

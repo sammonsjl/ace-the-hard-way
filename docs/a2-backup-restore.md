@@ -1,6 +1,6 @@
 # Appendix Lab A2 — Backup and restore
 
-> Day-two operations are part of running a platform, not an afterthought — and you can't claim you have a backup until you've restored from it. Do this after Lab 14.
+> Day-two operations are part of running a platform, not an afterthought — and you can't claim you have a backup until you've restored from it. Do this after Lab 17.
 
 ## What you will have at the end
 
@@ -16,18 +16,18 @@ Before backing anything up, know what you're protecting. Most of this box is reb
 |---|---|---|
 | **The database** | postgres `awx` | Everything is gone: jobs, inventories, credentials, instances, settings, schedules |
 | **The secret key** | `/etc/tower/SECRET_KEY` (`0400 awx`) | The database survives but **every encrypted field in it is unreadable** — credentials become permanent noise. Irreplaceable |
-| Service config | `/etc/tower/conf.d/*.py` | DB password, `CLUSTER_HOST_ID`, websocket secret — rewritable from Lab 6, but the DB password has to match what postgres expects |
-| Hand-written config | `/etc/tower/settings.py`, `uwsgi.ini`, `supervisord.conf` | Rewritable from Labs 6 and 8 |
-| Web TLS + its CA | `/etc/tower/tower.cert`, `tower.key`, `/etc/tower/ca/` | Reissuable (Lab 10) — but `ca.key` also signs the gateway's cert later, so reissuing means re-trusting in more than one place |
+| Service config | `/etc/tower/conf.d/*.py` | DB password, `CLUSTER_HOST_ID`, websocket secret — rewritable from Lab 9, but the DB password has to match what postgres expects |
+| Hand-written config | `/etc/tower/settings.py`, `uwsgi.ini`, `supervisord.conf` | Rewritable from Labs 9 and 11 |
+| Web TLS + its CA | `/etc/tower/tower.cert`, `tower.key`, `/etc/tower/ca/` | Reissuable (Lab 12) — but `ca.key` also signs the gateway's cert later, so reissuing means re-trusting in more than one place |
 | **Mesh PKI** | `/etc/receptor/tls/ca/mesh-CA.key` + `.crt` | Lose the CA key and **every node cert must be reissued** — the mesh gets rebuilt from scratch |
 | Mesh node cert | `/etc/receptor/tls/ace-control.{crt,key}` | Reissuable, *if* you still have the CA key |
 | **Work signing keypair** | `/etc/receptor/work_{private,public}_key.pem` | Regenerable, but the new public key must reach every execution node or all work fails verification |
-| Receptor config | `/etc/receptor/receptor.conf` | Rewritable from Lab 11 |
+| Receptor config | `/etc/receptor/receptor.conf` | Rewritable from Lab 13 |
 
 And what you deliberately **don't** back up:
 
 - **Redis** — a broker and cache, nothing durable. It repopulates itself.
-- **The venv** (`/var/lib/awx/venv/awx`) — rebuildable from Lab 5. Keep the recorded commit SHA instead of gigabytes of site-packages.
+- **The venv** (`/var/lib/awx/venv/awx`) — rebuildable from Lab 8. Keep the recorded commit SHA instead of gigabytes of site-packages.
 - **Projects** (`/var/lib/awx/projects`) — SCM checkouts; a project sync recreates them.
 - **Static files** (`/var/lib/awx/public/static`) — `collectstatic` recreates them (Lab 9).
 - **`/var/lib/receptor`** — in-flight work units only. Nothing there outlives a job.
@@ -77,7 +77,7 @@ If `SECRET_KEY` isn't in that archive, stop and fix it now. It's the one file yo
 
 ## Break it
 
-Stop the controller family. Receptor goes down with it — Lab 11's unit has `PartOf=automation-controller.service`:
+Stop the controller family. Receptor goes down with it — Lab 13's unit has `PartOf=automation-controller.service`:
 
 ```bash
 sudo systemctl stop automation-controller
@@ -110,7 +110,7 @@ sudo -iu postgres pg_restore -d awx /var/backups/ace/db/awx-$TS.dump
 
 Silence means success. Two things worth understanding:
 
-- **`dropdb` did not drop the `awx` role.** Roles live in the cluster, not inside a database, so the login and its password survived — which is why nothing in `/etc/tower/conf.d/postgres.py` needed touching. Rebuild the whole *cluster* and you're back at Lab 3's `CREATE USER`.
+- **`dropdb` did not drop the `awx` role.** Roles live in the cluster, not inside a database, so the login and its password survived — which is why nothing in `/etc/tower/conf.d/postgres.py` needed touching. Rebuild the whole *cluster* and you're back at Lab 4's `CREATE USER`.
 - **Ownership comes back from the dump.** `pg_restore` runs as superuser `postgres` and reassigns objects to `awx`, because that role still exists.
 
 If you also lost the config — the real disaster, not this drill — restore it before starting anything:
@@ -130,7 +130,7 @@ sudo -u awx awx-manage list_instances                 # want: ace-control, with 
 
 ## Prove it — an untested restore is not a restore
 
-`list_instances` answering only proves the schema loaded. Run real work: in the UI (`https://192.168.56.10`), launch **Demo Job Template**. It should reach **Successful** on `Execution Node: ace-exec`, exactly as in [Lab 14](14-smoke-test.md).
+`list_instances` answering only proves the schema loaded. Run real work: in the UI (`https://192.168.56.10`), launch **Demo Job Template**. It should reach **Successful** on `Execution Node: ace-exec`, exactly as in [Lab 17](17-smoke-test.md).
 
 That one job exercises the restored database, the surviving `SECRET_KEY`, the mesh certs, and the work-signing keypair together.
 
@@ -169,7 +169,7 @@ sudo systemctl restart automation-controller
 
 Re-run the check once more — `decrypts correctly: True`. **That's the whole lesson:** a database dump without its `SECRET_KEY` is a backup of everything except the secrets, and you won't find out until you need them.
 
-## If you've done Labs 15–19
+## If you've done the platform labs
 
 Each platform service adds state in exactly the same two shapes — a database, plus a secret you cannot regenerate:
 
@@ -179,6 +179,6 @@ Each platform service adds state in exactly the same two shapes — a database, 
 | Hub | `pulp` | `/etc/pulp/certs/database_fields.symmetric.key` | `/etc/pulp/settings.py`, uploaded content under `/var/lib/pulp/media` |
 | EDA | `eda` | `/etc/eda/SECRET_KEY` | `/etc/eda/settings.yaml` |
 
-Same pattern: `pg_dump` each database, archive each config directory with `--numeric-owner -p`, and treat those three key files exactly the way you treat `/etc/tower/SECRET_KEY`. The platform UI's static files (`/var/lib/ansible-automation-platform/platform/ui`) are rebuildable from Lab 17 — don't bother.
+Same pattern: `pg_dump` each database, archive each config directory with `--numeric-owner -p`, and treat those three key files exactly the way you treat `/etc/tower/SECRET_KEY`. The platform UI's static files (`/var/lib/ansible-automation-platform/platform/ui`) are rebuildable from Lab 7 — don't bother.
 
 Back to the [README](../README.md)

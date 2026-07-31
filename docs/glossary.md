@@ -50,9 +50,9 @@ Same Django app, two plugs — that's why AWX needs two web servers.
 
 | Term | Meaning |
 |---|---|
-| **gateway (Jewel)** | The platform's front door: single login, one URL, proxies to the controller/hub/EDA (Labs 15–16). |
+| **gateway (Jewel)** | The platform's front door: single login, one URL, proxies to the controller/hub/EDA (Labs 6–7, joined in 16). |
 | **envoy** | The proxy the gateway drives — the actual traffic router in front of the platform services. Learns its routes from the gateway over xDS; opens no listener until a service is registered. |
-| **awx-manage** | AWX's admin command (Django manage.py in a suit): migrations, users, instance registration, all of Lab 7. |
+| **awx-manage** | AWX's admin command (Django manage.py in a suit): migrations, users, instance registration, all of Lab 10. |
 
 ## The other platform services
 

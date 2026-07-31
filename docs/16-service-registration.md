@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-AWX registered as a service behind the gateway: envoy opens `:8443`, one login at the gateway reaches the controller's API, and the Lab 14 job still runs. The platform, assembled.
+AWX registered as a service behind the gateway: envoy opens `:8443`, one login at the gateway reaches the controller's API, and the Lab 17 job still runs. The platform, assembled.
 
 Everything here happens over the gateway's REST API. Automation would drive it with the `ansible.platform` collection's modules; we make the same calls with curl, so you can see each object as it's created. The gateway's browsable API (`http://127.0.0.1:8080/api/gateway/v1/` in a browser) shows every endpoint and its required fields if anything drifts.
 
@@ -33,7 +33,7 @@ Create them in this order — HttpPort → ServiceClusters → ServiceNodes → 
 ```python
 import json, subprocess
 GW = "http://127.0.0.1:8080/api/gateway/v1"
-AUTH = "admin:CHANGE-ME"   # the gateway admin password from Lab 15
+AUTH = "admin:CHANGE-ME"   # the gateway admin password from Lab 6
 
 def call(method, path, data=None):
     cmd = ["curl", "-s", "-u", AUTH, "-X", method, GW + path, "-H", "Content-Type: application/json"]
@@ -91,7 +91,7 @@ read -s -p "gateway admin password: " GW_PW; echo    # then edit AUTH in registe
 python3 register.py
 ```
 
-If a POST rejects a field, `curl -s -u admin:... -X OPTIONS "$GW/services/" | python3 -m json.tool` lists what that endpoint actually wants, including which fields are FK `"field"` types — the API is the truth, this page is the map. (The controller cluster speaks TLS to nginx; the lab CA is in the system trust from Lab 10, so verification works.)
+If a POST rejects a field, `curl -s -u admin:... -X OPTIONS "$GW/services/" | python3 -m json.tool` lists what that endpoint actually wants, including which fields are FK `"field"` types — the API is the truth, this page is the map. (The controller cluster speaks TLS to nginx; the lab CA is in the system trust from Lab 12, so verification works.)
 
 Watch envoy wake up:
 
@@ -147,7 +147,7 @@ sudo systemctl restart automation-controller
 
 > **Heads-up — this step disables the standalone controller login.** The moment `RESOURCE_SERVER['URL']` is set, AWX's `settings/__init__.py` deliberately forces **JWT-only** authentication (`REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES` becomes just the gateway JWT consumer) — its comment: *"prevents direct API access to Controller bypassing the platform's authentication."* From now on you log in **at the platform**, not at the controller's own UI on :443. That UI will still render, but every API call it makes returns `401` and the page just sits there — a login that looks like it does nothing. The intended front door is the platform UI (a `@ansible/platform-ui` build fronting the gateway). **Until you build that UI, keep a way in for lab work** by commenting out the `RESOURCE_SERVER` block above: the gateway's JWT trust (`ANSIBLE_BASE_JWT_KEY`) stays, so gateway-fronted access keeps working, and the controller's own session login comes back. The only thing you lose is AWX's reverse user-sync to the gateway, which a single-box lab doesn't need. Re-enable it once a platform UI exists.
 
-**3. Merge AWX's users/orgs/teams up into the platform** — the last step, and only once trust exists in both directions. This one calls the controller *through the gateway* (`https://localhost:8443/api/controller/...`), so it hits the lab-CA-signed front-door cert — and Python's `requests` validates against **certifi's** bundle, not the system trust where Lab 10 installed the lab CA. Point it at the system bundle with `REQUESTS_CA_BUNDLE`:
+**3. Merge AWX's users/orgs/teams up into the platform** — the last step, and only once trust exists in both directions. This one calls the controller *through the gateway* (`https://localhost:8443/api/controller/...`), so it hits the lab-CA-signed front-door cert — and Python's `requests` validates against **certifi's** bundle, not the system trust where Lab 12 installed the lab CA. Point it at the system bundle with `REQUESTS_CA_BUNDLE`:
 
 ```bash
 sudo -u gateway bash -c 'REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
@@ -159,7 +159,7 @@ sudo -u gateway bash -c 'REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 
 > **A `503` here (not `401`) means you're racing the restart from step 2.** The gateway proxies this call to the controller upstream, and for a few seconds after `systemctl restart automation-controller` that upstream is still marked down. Wait until `curl -sk https://localhost:8443/api/controller/v2/ping/` returns `200`, then re-run — it's idempotent.
 
-> **Two SSL traps here, both from the self-call to `localhost:8443`.** Without `REQUESTS_CA_BUNDLE` you get `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` (certifi doesn't know the lab CA). With it, you might still get `Hostname mismatch, certificate is not valid for 'localhost'` — which is why Lab 15's gateway cert carries a `DNS:localhost` SAN. If you built that cert without `localhost`, reissue it (Lab 15) before this step.
+> **Two SSL traps here, both from the self-call to `localhost:8443`.** Without `REQUESTS_CA_BUNDLE` you get `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` (certifi doesn't know the lab CA). With it, you might still get `Hostname mismatch, certificate is not valid for 'localhost'` — which is why Lab 6's gateway cert carries a `DNS:localhost` SAN. If you built that cert without `localhost`, reissue it (Lab 6) before this step.
 
 ## Verify — one login, whole platform
 
@@ -172,7 +172,7 @@ curl -sk -u "admin:${GW_PW}" \
   https://192.168.56.10:8443/api/controller/v2/ping/ | python3 -m json.tool
 # want: AWX's ping JSON — via envoy → (gateway auth over gRPC) → nginx → uwsgi
 
-# and the Lab 14 job still runs through the platform door.
+# and the Lab 17 job still runs through the platform door.
 # look the template up by name — everything here goes through the gateway:
 JT_ID=$(curl -sk -u "admin:${GW_PW}" \
   'https://192.168.56.10:8443/api/controller/v2/job_templates/?name=Demo%20Job%20Template' \
@@ -192,6 +192,6 @@ That second curl is the whole platform in one line: envoy took the request on th
 
 > The unified platform UI is a separate build (the `ansible-ui` tree from Lab 9 has a platform target), and it's the very next lab. The API-level platform above is the real milestone — the console is a face on top of what you just proved with curl.
 
-The controller is behind the gateway. Lab 17 puts the platform console in front of it and moves the front door to 443; Labs 18–19 then bring hub and EDA in exactly the same way — each built from source, each joining the same single sign-on.
+The controller is behind the gateway. Lab 7 puts the platform console in front of it and moves the front door to 443; Labs 18–19 then bring hub and EDA in exactly the same way — each built from source, each joining the same single sign-on.
 
-Next: [The platform UI](17-platform-ui.md)
+Next: [Smoke test](17-smoke-test.md)
