@@ -54,10 +54,18 @@ sudo useradd --system --home-dir /var/lib/ansible-automation-platform/gateway \
 sudo usermod -aG redis gateway      # Lab 5's socket (the gateway caches on db 4)
 sudo install -d -o gateway -g gateway -m 0750 /etc/ansible-automation-platform/gateway
 sudo install -d -o gateway -g gateway -m 2775 /var/log/ansible-automation-platform/gateway
+sudo install -d -o gateway -g gateway -m 0755 /var/lib/ansible-automation-platform/venv
 sudo chmod 0755 /var/lib/ansible-automation-platform
 
 id gateway     # want: groups include redis
+ls -ld /var/lib/ansible-automation-platform{,/gateway,/venv}
 ```
+
+> The `venv` directory is created explicitly because the gateway's **home** is
+> `/var/lib/ansible-automation-platform/gateway`, one level down — so `useradd` leaves the parent
+> root-owned, and `sudo -u gateway python3.12 -m venv …/venv/gateway` fails with a bare
+> `Error: [Errno 13] Permission denied: '/var/lib/ansible-automation-platform/venv'` that never
+> mentions ownership.
 
 The redis group is not optional: the settings below cache on Lab 5's socket, in a directory only
 that group can enter. Miss it and the gateway starts, then fails the moment it touches the cache.
