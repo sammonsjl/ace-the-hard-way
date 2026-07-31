@@ -118,7 +118,9 @@ systemctl is-active redis    # want: active
 ## 2. The gateway user and its layout
 
 ```bash
-sudo usermod -aG redis gateway     # the user was created in Lab 2
+sudo useradd --system --home-dir /var/lib/ansible-automation-platform/gateway \
+             --create-home --shell /bin/bash gateway
+sudo usermod -aG redis gateway
 sudo install -d -o gateway -g gateway -m 0750 /etc/ansible-automation-platform/gateway
 sudo install -d -o gateway -g gateway -m 2775 /var/log/ansible-automation-platform/gateway
 sudo install -d -o gateway -g gateway -m 0755 /var/lib/ansible-automation-platform/venv

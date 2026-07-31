@@ -46,7 +46,57 @@ vagrant ssh ace-controller
 
 ---
 
-## 1. Build AWX from source
+## 1. The service user and its filesystem
+
+Everything the controller owns belongs to one unprivileged user, in a layout the rest of this lab
+depends on.
+
+```bash
+sudo useradd --system --home-dir /var/lib/awx --create-home --shell /bin/bash awx
+
+# home layout: projects, job output, static files, and the venv's future home
+sudo install -d -o awx -g awx -m 0755 /var/lib/awx
+sudo install -d -o awx -g awx -m 0700 /var/lib/awx/.ssh
+sudo install -d -o awx -g awx -m 0750 /var/lib/awx/projects
+sudo install -d -o awx -g awx -m 0750 /var/lib/awx/job_status
+sudo install -d -o awx -g awx -m 0755 /var/lib/awx/venv
+sudo install -d -o root -g awx -m 0755 /var/lib/awx/public/static
+
+# config root (settings.py, conf.d fragments, SECRET_KEY, TLS pair)
+sudo install -d -o root -g awx -m 0755 /etc/tower
+sudo install -d -o root -g awx -m 0750 /etc/tower/conf.d
+
+# logs
+sudo install -d -o awx  -g awx  -m 0750 /var/log/tower
+sudo install -d -o root -g root -m 0755 /var/log/supervisor
+```
+
+| Path | Owner | Purpose |
+|---|---|---|
+| `/var/lib/awx` | awx:awx 0755 | home: venv, `projects/`, `job_status/`, `public/static/` |
+| `/etc/tower` | **root**:awx 0755 | `settings.py`, `conf.d/*.py` (0750), `SECRET_KEY`, TLS pair |
+| `/var/run/tower` | nginx:nginx 2775 | uwsgi + daphne sockets — created in section 6, needs tmpfiles.d |
+| `/var/log/tower` | awx:awx 0750 | application logs |
+| `/var/log/supervisor` | root:root 0755 | per-process supervisor logs |
+
+Two of those choices decide how later steps have to be written:
+
+**`/etc/tower` is root-owned with group `awx`.** The service reads its configuration and can never
+rewrite it. That means the `SECRET_KEY` needs *group* read rather than `0400`, and every config
+file here is written by root — not by the service. It is the single most load-bearing ownership
+decision in this lab.
+
+**`/var/lib/awx` must be `0755`, not `0700`.** nginx has to traverse it to serve
+`/var/lib/awx/public`. `useradd` creates a home at `0700`, so this genuinely changes it — and the
+failure if you don't is `stat() failed (13: Permission denied)` on every static file.
+
+> **The `tower` naming is deliberate.** `/etc/tower`, `/var/log/tower` and `/var/run/tower` are what
+> a current packaged install still creates, years after the product stopped being called Tower.
+> Matching it is the point of this tutorial; renaming them would be tidier and less true.
+
+---
+
+## 2. Build AWX from source
 
 We track `devel` rather than a release tag: release tags are cut against AWX's containerised
 deployment story, while `devel` is where the packaging behaviour this tutorial leans on actually
@@ -140,16 +190,16 @@ sudo -u awx /var/lib/awx/venv/awx/bin/pip show awx | grep -E '^(Name|Version)'
 
 sudo -u awx awx-manage --version 2>&1 | tail -1
 # want (for now): a complaint about missing configuration. That error is the wrapper WORKING:
-# production mode reads /etc/tower, which section 2 hasn't written yet.
+# production mode reads /etc/tower, which section 3 hasn't written yet.
 ```
 
-> Every `awx-manage` subcommand fails until section 2, not just `--version`. `manage()` calls
+> Every `awx-manage` subcommand fails until section 3, not just `--version`. `manage()` calls
 > `prepare_env()` first, and that reads `settings.DEBUG` — which forces the settings to load before
 > any argument parsing happens. Use `pip show awx` when you want the version without configuration.
 
 ---
 
-## 2. Configuration
+## 3. Configuration
 
 ```bash
 sudo bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/tower/SECRET_KEY'
@@ -158,7 +208,7 @@ sudo chmod 0640    /etc/tower/SECRET_KEY
 sudo -u awx head -c 8 /etc/tower/SECRET_KEY >/dev/null && echo "awx can read SECRET_KEY — good"
 ```
 
-> **`root:awx 0640`, not `0400`.** `/etc/tower` is root-owned ([Lab 2](02-vms.md)) so the service
+> **`root:awx 0640`, not `0400`.** `/etc/tower` is root-owned (section 1) so the service
 > reads its configuration and can never rewrite it — which means the key's *group* is what grants
 > access. `settings.py` below does `open('/etc/tower/SECRET_KEY','rb').read()` and every AWX process
 > runs as `awx`. A root-owned `0400` file looks stricter and simply cannot be read; you get a
@@ -256,7 +306,7 @@ EOF
 >
 > and `get_redis_client()` reads `settings.BROKER_URL`. A zero-capacity node is a node the
 > scheduler will never give work to, so **every job you launch sits in `pending` forever** — the
-> same symptom as the `devonly` trap in section 1, from a completely different cause. Check
+> same symptom as the `devonly` trap in section 2, from a completely different cause. Check
 > `capacity` and `node_state` before assuming the scheduler is broken:
 >
 > ```bash
@@ -297,7 +347,7 @@ single empty `index.html`.
 
 ---
 
-## 3. Database initialisation
+## 4. Database initialisation
 
 ```bash
 sudo -u awx awx-manage migrate --noinput
@@ -315,7 +365,7 @@ broke.
 
 ---
 
-## 4. Register this node — as a hybrid
+## 5. Register this node — as a hybrid
 
 ```bash
 sudo -u awx awx-manage provision_instance --hostname="$(hostname)" --node_type=hybrid
@@ -342,7 +392,7 @@ processes are up and heartbeating, which happens in section 7.
 
 ---
 
-## 5. The processes
+## 6. The processes
 
 ```bash
 sudo -u awx /var/lib/awx/venv/awx/bin/pip install uwsgi
@@ -637,7 +687,7 @@ EOF
 
 > **`AWX_MODE=production` on every program that runs Python.** A packaged AWX never needs it,
 > because a release defaults to production. A source build is pushed the other way by two separate
-> things and both must be fixed: the `devonly` marker (section 1) decides `MODE`, and `AWX_MODE`
+> things and both must be fixed: the `devonly` marker (section 2) decides `MODE`, and `AWX_MODE`
 > selects the *settings files*. A process starting without it loads dev sqlite defaults instead of
 > `/etc/tower` and runs half in, half out.
 >
@@ -714,7 +764,7 @@ sudo -u awx awx-manage list_instances
 
 ---
 
-## 6. nginx
+## 7. nginx
 
 ```bash
 sudo tee /etc/tower/conf.d/csrf.py >/dev/null <<'EOF'
@@ -953,7 +1003,7 @@ That single command tests the CA chain, the SAN, and the socket path at once.
 
 ---
 
-## 7. Join the platform
+## 8. Join the platform
 
 Two directions of trust, in this order. Getting it backwards is the classic failure.
 
@@ -1087,7 +1137,7 @@ sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 
 ---
 
-## 8. What you have, and what you don't
+## 9. What you have, and what you don't
 
 Open **`https://192.168.56.11`** and log in as the **gateway** admin.
 

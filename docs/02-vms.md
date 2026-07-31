@@ -2,8 +2,8 @@
 
 ## What you will have at the end
 
-Five Rocky Linux 9 VMs that can see and name each other, all passing the preflight checks, each
-with the service user its component will run as.
+Five Rocky Linux 9 VMs that can see and name each other, and all pass the preflight checks.
+Nothing component-specific — that starts in Lab 4.
 
 ## The topology, and why it has this shape
 
@@ -94,65 +94,18 @@ vagrant ssh ace-controller -c 'getent ahostsv4 ace-db ace-gateway | head -2; gre
 > Also note `getent ahostsv4`, not `getent hosts`. On a multi-homed box the latter returns a
 > link-local `fe80::` address first, and an `fe80::` in a certificate SAN is worse than no SAN.
 
-## Service users
+## What this lab does NOT do
 
-Each component runs as its own unprivileged user — no service runs as root, and no two components
-share an identity. Create each one on its own node:
+No service users, no application directories, no packages beyond `vim curl jq git`.
 
-```bash
-# on ace-controller
-vagrant ssh ace-controller
-sudo useradd --system --home-dir /var/lib/awx --create-home --shell /bin/bash awx
-```
+Each component creates its own user and its own filesystem layout in its own lab, on its own
+machine — the gateway in [Lab 5](05-gateway.md), the controller in [Lab 6](06-controller.md), hub
+in [Lab 8](08-hub.md), EDA in [Lab 9](09-eda.md). That is not tidiness for its own sake: an `awx`
+user on the hub node would be a lie about what runs there, and a reader who stops after Lab 5
+should have a gateway machine with nothing else pre-seeded on it.
 
-```bash
-# on ace-gateway
-vagrant ssh ace-gateway
-sudo useradd --system --home-dir /var/lib/ansible-automation-platform/gateway \
-             --create-home --shell /bin/bash gateway
-```
-
-`ace-hub` and `ace-eda` create their users in their own labs, because those users have to exist
-alongside packages that arrive at the same time. `ace-db` needs none — the `postgres` user comes
-with the package.
-
-## The controller's filesystem contract
-
-Only `ace-controller` needs a directory tree laid down in advance. On that node:
-
-```bash
-# home layout: projects, job output, static files, and the venv's future home
-sudo install -d -o awx -g awx -m 0755 /var/lib/awx
-sudo install -d -o awx -g awx -m 0700 /var/lib/awx/.ssh
-sudo install -d -o awx -g awx -m 0750 /var/lib/awx/projects
-sudo install -d -o awx -g awx -m 0750 /var/lib/awx/job_status
-sudo install -d -o awx -g awx -m 0755 /var/lib/awx/venv
-sudo install -d -o root -g awx -m 0755 /var/lib/awx/public/static
-
-# config root (settings.py, conf.d fragments, SECRET_KEY, certs)
-sudo install -d -o root -g awx -m 0755 /etc/tower
-sudo install -d -o root -g awx -m 0750 /etc/tower/conf.d
-
-# logs
-sudo install -d -o awx  -g awx  -m 0750 /var/log/tower
-sudo install -d -o root -g root -m 0755 /var/log/supervisor
-```
-
-| Path | Owner | Purpose |
-|---|---|---|
-| `/var/lib/awx` | awx:awx 0755 | home: venv, `projects/`, `job_status/`, `public/static/` |
-| `/etc/tower` | **root**:awx 0755 | `settings.py`, `conf.d/*.py` (0750), `SECRET_KEY`, TLS pair |
-| `/var/run/tower` | nginx:nginx 2775 | uwsgi + daphne sockets — created in Lab 6, needs tmpfiles.d |
-| `/var/log/tower` | awx:awx 0750 | application logs |
-| `/var/log/supervisor` | root:root 0755 | per-process supervisor logs |
-
-`/etc/tower` is **root-owned with group `awx`** on purpose: the service reads its configuration and
-can never rewrite it. That single choice decides how several later steps have to be written — the
-`SECRET_KEY` needs group read rather than `0400`, and config files are written by root, not by the
-service.
-
-`/var/lib/awx` must be `0755` and not `0700`: nginx has to traverse it to serve
-`/var/lib/awx/public`. `useradd` creates a home at `0700`, so this genuinely changes it.
+What this lab leaves you is five interchangeable Rocky boxes that can find each other. Everything
+that makes a machine *the controller* or *the hub* happens in that component's lab.
 
 ## Preflight checks
 

@@ -224,7 +224,7 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 EOF
 ```
 
-- **`node.id`** must equal `CLUSTER_HOST_ID` from section 2.
+- **`node.id`** must equal `CLUSTER_HOST_ID` from [Lab 6](06-controller.md)'s configuration step.
 - **`firewallrules`** is receptor's own rule, not firewalld: reject traffic *from the mesh* aimed at
   this node's control service. Only local socket clients — the dispatcher — issue control commands.
 - **Both `work-signing` and `work-verification`** are here because this node both submits and runs.
@@ -334,10 +334,10 @@ back through the callback receiver and out over the websocket. Every hop hand-bu
 
 | Symptom | Where to look |
 |---|---|
-| Job stuck in `pending` forever | `devonly.py` still present (section 1), or the dispatcher is down |
-| Fails instantly, empty `result_traceback` | EE cannot start — linger (section 5), or exit 132 on aarch64 |
-| `Execution Node` blank, or job never dispatched | `register_queue` for `default` (section 4) |
-| Console shows no **Automation Execution** | the registry row from section 9 is missing or envoy hasn't polled yet |
+| Job stuck in `pending` forever | `devonly.py` still present ([Lab 6](06-controller.md)), or the dispatcher is down |
+| Fails instantly, empty `result_traceback` | EE cannot start — linger (section 1 here), or exit 132 on aarch64 |
+| `Execution Node` blank, or job never dispatched | `register_queue` for `default` ([Lab 6](06-controller.md)) |
+| Console shows no **Automation Execution** | the registry row from [Lab 6](06-controller.md) is missing or envoy hasn't polled yet |
 | Live output never updates | websocket path — check the `/api/controller/v2/websocket/` prefix |
 
 ## Verify
