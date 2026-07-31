@@ -29,6 +29,27 @@ It depends on more of the platform than anything else: PostgreSQL on ace-db, Red
 the gateway for identity, and the controller as the thing it ultimately triggers. That makes it a
 good last build — if EDA works, everything underneath it does.
 
+## A note on names
+
+Two conventions collide in this build, and it is worth knowing which is which.
+
+**Paths follow the platform.** EDA's configuration lives in
+`/etc/ansible-automation-platform/eda/` and its state in
+`/var/lib/ansible-automation-platform/eda/` — the same layout the gateway uses, and the same one a
+packaged install creates. It is deliberately *not* `/etc/eda`; components that belong to the
+platform live under the platform's directory.
+
+Hub is the exception that proves the rule: it keeps `/etc/pulp` and `/var/lib/pulp`, because those
+are **pulpcore's own** upstream paths and a packaged install inherits them rather than moving pulp
+somewhere else. Only hub's *logs* go to `/var/log/ansible-automation-platform/hub`.
+
+**Unit names are ours.** A packaged install calls these
+`automation-eda-controller-daphne.service`, `automation-eda-controller-scheduler.service` and so
+on, driven by a `.target`. We use the shorter `automation-eda-*` because we build four services and
+a packaged install builds seven — it also has activation workers and an event-stream listener, which
+this tutorial does not cover. Rather than adopt a naming scheme for a service set we do not have,
+the names say what they are. If you later add those services, renaming is the obvious first step.
+
 ## What you will have at the end
 
 Event-Driven Ansible — **eda-server** — built from source, running as its systemd
@@ -53,8 +74,8 @@ All commands on **ace-eda**.
 ## Foundation
 
 ```bash
-sudo useradd --system --home-dir /var/lib/eda --create-home --shell /bin/bash eda
-sudo install -d -o eda -g eda /var/lib/eda /var/lib/eda/media /var/lib/eda/static /etc/eda
+sudo useradd --system --home-dir /var/lib/ansible-automation-platform/eda --create-home --shell /bin/bash eda
+sudo install -d -o eda -g eda /var/lib/ansible-automation-platform/eda /var/lib/ansible-automation-platform/eda/media /var/lib/ansible-automation-platform/eda/static /etc/ansible-automation-platform/eda
 ```
 
 The database role already exists — [Lab 4](04-postgresql.md) created all four up front. Confirm
@@ -78,10 +99,10 @@ sudo install -d -o eda -g eda /opt/eda-server
 sudo -u eda git clone https://github.com/ansible/eda-server.git /opt/eda-server
 sudo -u eda git -C /opt/eda-server rev-parse --short HEAD    # RECORD THIS — moving tip
 
-sudo -u eda python3.12 -m venv /var/lib/eda/venv
+sudo -u eda python3.12 -m venv /var/lib/ansible-automation-platform/eda/venv
 sudo -u eda bash <<'EOF'
 set -euo pipefail
-source /var/lib/eda/venv/bin/activate
+source /var/lib/ansible-automation-platform/eda/venv/bin/activate
 pip install --upgrade pip setuptools wheel
 cd /opt/eda-server
 pip install . gunicorn
@@ -106,23 +127,23 @@ The PATH wrapper — `aap-eda-manage`, carrying `EDA_SETTINGS_FILE`, `OPENSSL_ar
 sudo tee /usr/bin/aap-eda-manage >/dev/null <<'EOF'
 #!/bin/bash
 export OPENSSL_armcap=0
-export EDA_SETTINGS_FILE=/etc/eda/settings.yaml
-export PATH=/var/lib/eda/venv/bin:$PATH
-exec /var/lib/eda/venv/bin/aap-eda-manage "$@"
+export EDA_SETTINGS_FILE=/etc/ansible-automation-platform/eda/settings.yaml
+export PATH=/var/lib/ansible-automation-platform/eda/venv/bin:$PATH
+exec /var/lib/ansible-automation-platform/eda/venv/bin/aap-eda-manage "$@"
 EOF
 sudo chmod 0755 /usr/bin/aap-eda-manage
 ```
 
-## Settings — `/etc/eda/settings.yaml`
+## Settings — `/etc/ansible-automation-platform/eda/settings.yaml`
 
-eda-server reads a dynaconf YAML (`EDA_SETTINGS_FILE`, defaulting to `/etc/eda/settings.yaml`):
+eda-server reads a dynaconf YAML (`EDA_SETTINGS_FILE`, defaulting to `/etc/ansible-automation-platform/eda/settings.yaml`):
 
 ```bash
-sudo -u eda bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/eda/SECRET_KEY'
-sudo chmod 0400 /etc/eda/SECRET_KEY
+sudo -u eda bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/ansible-automation-platform/eda/SECRET_KEY'
+sudo chmod 0400 /etc/ansible-automation-platform/eda/SECRET_KEY
 
-sudo tee /etc/eda/settings.yaml >/dev/null <<'EOF'
-SECRET_KEY_FILE: /etc/eda/SECRET_KEY
+sudo tee /etc/ansible-automation-platform/eda/settings.yaml >/dev/null <<'EOF'
+SECRET_KEY_FILE: /etc/ansible-automation-platform/eda/SECRET_KEY
 ALLOWED_HOSTS: "*"
 DATABASES:
   default:
@@ -132,8 +153,8 @@ DATABASES:
     PASSWORD: CHANGE-ME
     HOST: ace-db
     PORT: 5432
-MEDIA_ROOT: /var/lib/eda/media
-STATIC_ROOT: /var/lib/eda/static
+MEDIA_ROOT: /var/lib/ansible-automation-platform/eda/media
+STATIC_ROOT: /var/lib/ansible-automation-platform/eda/static
 STATIC_URL: /api/eda/static/
 DEPLOYMENT_TYPE: podman
 MQ_HOST: ace-gateway
@@ -151,9 +172,9 @@ ENABLE_SERVICE_BACKED_SSO: false
 WEBSOCKET_BASE_URL: wss://192.168.56.10
 WEBSOCKET_SSL_VERIFY: "no"
 EOF
-sudo chown eda:eda /etc/eda/settings.yaml
-sudo chmod 0640 /etc/eda/settings.yaml
-sudo vim /etc/eda/settings.yaml    # set the real DB password
+sudo chown eda:eda /etc/ansible-automation-platform/eda/settings.yaml
+sudo chmod 0640 /etc/ansible-automation-platform/eda/settings.yaml
+sudo vim /etc/ansible-automation-platform/eda/settings.yaml    # set the real DB password
 ```
 
 ## Redis
@@ -199,11 +220,11 @@ sudo systemd-tmpfiles --create /etc/tmpfiles.d/eda.conf
 
 sudo tee /etc/default/eda >/dev/null <<'EOF'
 OPENSSL_armcap=0
-EDA_SETTINGS_FILE=/etc/eda/settings.yaml
-PATH=/var/lib/eda/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+EDA_SETTINGS_FILE=/etc/ansible-automation-platform/eda/settings.yaml
+PATH=/var/lib/ansible-automation-platform/eda/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 EOF
 
-VENV=/var/lib/eda/venv/bin
+VENV=/var/lib/ansible-automation-platform/eda/venv/bin
 
 sudo tee /etc/systemd/system/automation-eda-api.service >/dev/null <<EOF
 [Unit]
@@ -271,8 +292,8 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-sudo semanage fcontext -a -t bin_t '/var/lib/eda/venv/bin(/.*)?'   # Lab 11's 203/EXEC fix
-sudo restorecon -Rv /var/lib/eda/venv/bin
+sudo semanage fcontext -a -t bin_t '/var/lib/ansible-automation-platform/eda/venv/bin(/.*)?'   # Lab 11's 203/EXEC fix
+sudo restorecon -Rv /var/lib/ansible-automation-platform/eda/venv/bin
 sudo systemctl daemon-reload
 sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-scheduler automation-eda-default-worker
 
@@ -304,7 +325,7 @@ server {
     ssl_certificate_key /etc/ansible-automation-platform/eda/server.key;
     ssl_ciphers         PROFILE=SYSTEM;
     client_max_body_size 20m;
-    root /var/lib/eda/static;
+    root /var/lib/ansible-automation-platform/eda/static;
     location /api/eda/ws/ {
         proxy_pass http://eda-ws;
         proxy_http_version 1.1;
@@ -312,7 +333,7 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $http_host;
     }
-    location /api/eda/static/ { alias /var/lib/eda/static/; }
+    location /api/eda/static/ { alias /var/lib/ansible-automation-platform/eda/static/; }
     location / {
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -349,13 +370,13 @@ ensure("/services/", "eda api",
 ```bash
 sudo -u gateway aap-gateway-manage generate_service_secret eda   # RECORD it
 
-sudo tee -a /etc/eda/settings.yaml >/dev/null <<'EOF'
+sudo tee -a /etc/ansible-automation-platform/eda/settings.yaml >/dev/null <<'EOF'
 RESOURCE_SERVER:
   URL: https://192.168.56.11
   SECRET_KEY: PASTE-THE-EDA-SECRET
   VALIDATE_HTTPS: false
 EOF
-sudo vim /etc/eda/settings.yaml    # paste the real secret
+sudo vim /etc/ansible-automation-platform/eda/settings.yaml    # paste the real secret
 sudo systemctl restart automation-eda-api automation-eda-default-worker
 ```
 
