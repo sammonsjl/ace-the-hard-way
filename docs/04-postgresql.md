@@ -1,123 +1,201 @@
 # Lab 4 — PostgreSQL
 
+## What this is
+
+The platform's database server: one PostgreSQL instance on its own host, holding a separate
+database for each of the four services.
+
+## Where it fits
+
+Every stateful thing the platform knows lives here. Job history, inventories and credentials belong
+to the controller; users, teams and the service registry belong to the gateway; content metadata to
+hub; rulebook activations to EDA. Four services, four databases, one server.
+
+This is the first component you build because everything else needs it — the gateway cannot migrate
+without it, and the controller cannot start.
+
+It is also the only VM in this build that serves no HTTP at all. It has no certificate, no nginx,
+no place in the gateway's registry, and no user-facing surface. It exists to be connected to, on
+one port, by four hosts.
+
+> **Why 15 and not something newer.** PostgreSQL 15 is what this platform's components are built
+> and tested against, and Rocky 9 ships it as a module stream. Newer majors are supported for
+> customer-managed databases, but the version the product installs for itself is 15 — so we pin the
+> module stream explicitly rather than inheriting whatever the distro's default becomes.
+
 ## What you will have at the end
 
-PostgreSQL 15 from the Rocky repos, running as a systemd service, with an `awx` database and user that authenticate over scram-sha-256.
+PostgreSQL 15 on **ace-db**, listening on the lab network, with four roles and four databases, and
+`scram-sha-256` password authentication for every remote client.
 
-## Why PostgreSQL 15
+All commands on **ace-db** unless stated otherwise.
 
-AWX's own development environment runs on PostgreSQL 15 (`quay.io/sclorg/postgresql-15-c9s` in `tools/docker-compose`), so 15 is the version its migrations and queries are actually exercised against. Rocky 9 ships 15 as a module stream, so we get it from the distro repos and pin the major version explicitly rather than inheriting whatever the default stream becomes.
-
-All commands on **ace-control**.
+```bash
+vagrant ssh ace-db
+```
 
 ## Install
 
 ```bash
 sudo dnf -y module enable postgresql:15
 sudo dnf -y install postgresql-server postgresql
-psql --version          # want: psql (PostgreSQL) 15.x — record the exact version
-```
-
-## Initialize and start
-
-```bash
 sudo postgresql-setup --initdb
 sudo systemctl enable --now postgresql
 systemctl is-active postgresql    # want: active
+psql --version                    # record it — want: 15.x
 ```
 
-The data directory is `/var/lib/pgsql/data` — the distro package's default, and what the backup lab (A2) will come looking for.
+## Listen on the network
 
-## Authentication: scram-sha-256
-
-PostgreSQL 15 defaults to scram-sha-256 for password hashing — confirm rather than assume:
+A default `initdb` binds loopback only, which was fine when everything shared a box and is useless
+now. Four other machines have to reach this one:
 
 ```bash
-sudo -iu postgres psql -c "SHOW password_encryption;"   # want: scram-sha-256
+sudo vim /var/lib/pgsql/data/postgresql.conf
 ```
 
-Now make the client-connection rules use it. Edit `/var/lib/pgsql/data/pg_hba.conf` and look at the `host` lines near the bottom. **Rocky's stock `initdb` ships them as `ident`, not `scram-sha-256`** — so you will actually see this:
-
 ```
-# TYPE  DATABASE  USER  ADDRESS       METHOD
-local   all       all                 peer
-host    all       all   127.0.0.1/32  ident      # <- stock default, change this
-host    all       all   ::1/128       ident      # <- stock default, change this
+listen_addresses = '192.168.56.10,localhost'
+max_connections = 200
 ```
 
-Change both TCP-loopback lines' METHOD to `scram-sha-256` so it matches the password auth we just confirmed:
+`listen_addresses` is deliberately **not** `'*'`. This VM has two interfaces — the lab network and
+the hypervisor's management network — and only one of them should carry database traffic. Naming
+the address is the difference between a database on your lab network and a database on whatever
+else the host happens to be attached to.
+
+`max_connections` matters more here than it looks. The controller alone opens a connection per
+uwsgi worker, per dispatcher process and per callback receiver; add the gateway, hub and EDA doing
+the same and the default of 100 runs out during normal operation, with an error that names the
+client rather than the limit.
+
+## Password authentication
+
+Confirm the server will hash passwords the modern way:
+
+```bash
+sudo -iu postgres psql -c "SHOW password_encryption;"    # want: scram-sha-256
+```
+
+Then make the client rules match. Rocky's stock `initdb` ships the TCP rules as `ident`, which
+cannot work for a remote client — there is no local identity to check:
+
+```bash
+sudo vim /var/lib/pgsql/data/pg_hba.conf
+```
+
+Change the loopback rules and add one for the lab network:
 
 ```
-# TYPE  DATABASE  USER  ADDRESS       METHOD
-local   all       all                 peer
-host    all       all   127.0.0.1/32  scram-sha-256
-host    all       all   ::1/128       scram-sha-256
+# TYPE  DATABASE  USER  ADDRESS            METHOD
+local   all       all                      peer
+host    all       all   127.0.0.1/32       scram-sha-256
+host    all       all   ::1/128            scram-sha-256
+host    all       all   192.168.56.0/24    scram-sha-256
 ```
 
-(`local ... peer` stays — that's what lets the `postgres` OS user administer the DB without a password. `peer` reads the OS uid straight off the Unix socket, which is why `sudo -u postgres psql` always works.)
+That last line is what makes this a server rather than a standalone. It is also the line to think
+about: it says *any* host on the lab network may attempt to authenticate to *any* database. A
+tighter build writes four rules, one per database, each naming its own client:
 
-> **Warning — leave those lines on `ident` and every TCP login fails, password or not.** `ident` (RFC 1413) asks an `identd` server on the *client* to vouch for which OS user owns the connecting socket. No VM runs `identd`, so the lookup can't complete and PostgreSQL rejects the connection *before it ever checks the password*:
->
-> ```
-> psql: error: connection to server at "localhost" (::1), port 5432 failed:
-> FATAL:  Ident authentication failed for user "awx"
-> ```
->
-> Two things make this sneaky. First, `sudo -u postgres psql` keeps working the whole time (it uses the Unix socket → the `local ... peer` rule), so the DB *looks* fine. Second, `-h localhost` usually resolves to the IPv6 loopback `::1` first, so the rule that bites you is the `::1/128` line — change **both** loopback lines, not just the IPv4 one.
+```
+host    awx       awx       192.168.56.12/32   scram-sha-256
+host    gateway   gateway   192.168.56.11/32   scram-sha-256
+host    pulp      pulp      192.168.56.13/32   scram-sha-256
+host    eda       eda       192.168.56.14/32   scram-sha-256
+```
 
-Apply — this is a `reload`, not a `restart`. `pg_hba.conf` is re-read on `SIGHUP`; no need to bounce the server:
+Either works. The four-rule version is what you would write in production and is strictly better —
+a compromised hub cannot even attempt to log into the controller's database. Use it if you prefer;
+the single-subnet rule is kept above because it makes a first-time failure easier to diagnose.
+
+Apply with a **reload**, not a restart — `pg_hba.conf` is re-read on `SIGHUP`:
 
 ```bash
 sudo systemctl reload postgresql
 ```
 
-## Create the AWX database and user
-
-Pick a real password and stash it somewhere you'll find in Lab 9 (it goes into `/etc/tower/conf.d/postgres.py`):
-
-```bash
-sudo -iu postgres psql <<'SQL'
-CREATE USER awx WITH PASSWORD 'CHANGE-ME';
-CREATE DATABASE awx OWNER awx;
-SQL
-```
-
-## Tuning
-
-A production deployment sizes `postgresql.conf` from the box's RAM — `max_connections`, `shared_buffers`, `work_mem`, `maintenance_work_mem` — and sets `listen_addresses = '*'`, because production DBs usually serve remote nodes.
-
-For our single-node lab, two changes in `/var/lib/pgsql/data/postgresql.conf` are worth making; the rest of Rocky's defaults are fine at this scale:
-
-```
-max_connections = 1024          # AWX's process family opens many connections
-shared_buffers = 1GB            # size from RAM; ~1/8 of our 8 GB VM
-```
-
-We deliberately keep `listen_addresses` at its localhost default — our DB serves only this box. **Production variant:** on a real multi-node install, the DB is a separate host with `listen_addresses = '*'`, firewalled to the platform nodes, and pg_hba rules per node.
-
-Restart (these two need a full restart, not a reload):
+`listen_addresses` and `max_connections` *do* need a restart:
 
 ```bash
 sudo systemctl restart postgresql
+ss -tlnp | grep 5432        # want: 192.168.56.10:5432, not just 127.0.0.1
 ```
 
-> **Warning — write the units in full: `1GB`, not `1G`.** PostgreSQL only accepts the memory-unit suffixes `B`, `kB`, `MB`, `GB`, and `TB`. A bare `1G` is an invalid value, and PostgreSQL rejects the *entire* config file when it reads it, so the postmaster exits `FATAL` before it ever opens a socket:
->
-> ```
-> LOG:  invalid value for parameter "shared_buffers": "1G"
-> HINT: Valid units for this parameter are "B", "kB", "MB", "GB", and "TB".
-> FATAL: configuration file "/var/lib/pgsql/data/postgresql.conf" contains errors
-> ```
->
-> The nasty part: this is fatal only on a **cold start / restart**. A live server that gets a `reload` (SIGHUP) logs the error and keeps running on the *old* value — so the typo hides until the next restart, which may be days later at a reboot. Cross-check the exact spelling before you `restart`. (`max_connections = 1024` uses no unit suffix and is never involved in this failure.)
+## The four databases
 
-## Verify
+Each service gets its own role and its own database, owned by that role. No service can read
+another's tables.
 
 ```bash
-psql -U awx -h localhost -d awx -c '\conninfo'
-# want: "You are connected to database "awx" as user "awx" ..." after the password prompt
-sudo -iu postgres psql -c "SHOW max_connections;"    # want: 1024
-systemctl is-enabled postgresql                     # want: enabled (survives reboot)
+sudo -iu postgres psql <<'SQL'
+CREATE USER awx      WITH PASSWORD 'CHANGE-ME-awx';
+CREATE USER gateway  WITH PASSWORD 'CHANGE-ME-gateway';
+CREATE USER pulp     WITH PASSWORD 'CHANGE-ME-pulp';
+CREATE USER eda      WITH PASSWORD 'CHANGE-ME-eda';
+
+CREATE DATABASE awx     OWNER awx;
+CREATE DATABASE gateway OWNER gateway;
+CREATE DATABASE pulp    OWNER pulp;
+CREATE DATABASE eda     OWNER eda;
+SQL
 ```
 
-Next: [Redis](05-redis.md)
+**Pick four real passwords and record them now.** Each goes into exactly one config file on exactly
+one other machine, several labs apart:
+
+| Role | Password used in | On |
+|---|---|---|
+| `gateway` | `/etc/ansible-automation-platform/gateway/settings.py` | [Lab 5](05-gateway.md), ace-gateway |
+| `awx` | `/etc/tower/conf.d/postgres.py` | [Lab 6](06-controller.md), ace-controller |
+| `pulp` | pulp's settings | [Lab 7](07-hub.md), ace-hub |
+| `eda` | EDA's settings | [Lab 8](08-eda.md), ace-eda |
+
+Confirm:
+
+```bash
+sudo -iu postgres psql -c '\l' | grep -E 'awx|gateway|pulp|eda'
+# want: four databases, each owned by its own role
+```
+
+## Firewall
+
+```bash
+sudo dnf -y install firewalld
+sudo systemctl enable --now firewalld
+sudo firewall-cmd --permanent --add-service=postgresql
+sudo firewall-cmd --reload
+sudo firewall-cmd --list-services      # want: ... postgresql ...
+```
+
+## Verify — from a client, not from here
+
+A database that answers on localhost proves nothing. The check that matters runs on a **different
+machine**. On **ace-controller**:
+
+```bash
+sudo dnf -y install postgresql          # the client, not the server
+PGPASSWORD='CHANGE-ME-awx' psql -h ace-db -U awx -d awx -c 'SELECT version();'
+# want: the PostgreSQL 15 version banner
+```
+
+That one command exercises the whole chain: name resolution (`ace-db` from `/etc/hosts`),
+`listen_addresses`, the firewall, the `pg_hba.conf` rule, and the password. When it fails, the
+error tells you which:
+
+| Error | Cause |
+|---|---|
+| `could not translate host name "ace-db"` | `/etc/hosts` — see [Lab 2](02-vms.md) |
+| `No route to host`, or a timeout | firewalld on ace-db |
+| `Connection refused` | `listen_addresses` is still loopback-only, or postgres is down |
+| `no pg_hba.conf entry for host …` | the `192.168.56.0/24` line is missing, or postgres wasn't reloaded |
+| `password authentication failed` | the password — everything else worked |
+
+That table is worth internalising, because those five failures look identical from the
+application's point of view later on: the service simply refuses to start.
+
+Run the same check from **ace-gateway**, **ace-hub** and **ace-eda** with their own credentials
+before moving on. Finding a broken path now costs a minute; finding it during a Django migration
+costs an hour.
+
+Next: [The platform gateway](05-gateway.md)
