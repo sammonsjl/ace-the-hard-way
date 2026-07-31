@@ -22,10 +22,15 @@ The gateway runs as its own **`gateway`** user (not `awx`), config lives in **`/
 
 ```bash
 sudo useradd --system --home-dir /var/lib/ansible-automation-platform --create-home --shell /bin/bash gateway
+sudo usermod -aG redis gateway      # Lab 4 redis socket (gateway uses db 4)
 sudo install -d -o gateway -g gateway -m 0750 /etc/ansible-automation-platform/gateway
 sudo install -d -o gateway -g gateway /var/log/ansible-automation-platform
 sudo chmod 0755 /var/lib/ansible-automation-platform
+
+id gateway     # want: groups include redis
 ```
+
+The redis group is not optional: the settings below cache on Lab 4's unix socket, which is `0770 redis:redis`. Miss this and the gateway starts, then fails the moment it touches the cache. Same group trick Lab 4 used for `awx`, and Labs 17–18 repeat for `pulp` and `eda`.
 
 ## Database
 
@@ -134,7 +139,7 @@ EOF
 sudo vim /etc/ansible-automation-platform/gateway/settings.py   # real DB password
 ```
 
-> The gateway user needs to reach the Lab 4 redis socket: `sudo usermod -aG redis gateway` — the same group trick Lab 4 used for awx.
+> That `CACHES` block is why the gateway user joined the `redis` group back in Layout — if you skipped it, go back now.
 >
 > The SECRET_KEY needs no setting line — jewel's `set_secret_key` defaults `SECRET_KEY_FILE` to exactly `{etc}/SECRET_KEY`, which is where we just wrote it. (You *can* set `GATEWAY_SECRET_KEY_FILE` explicitly, but the default already matches, so we skip it.)
 
