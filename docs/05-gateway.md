@@ -919,6 +919,20 @@ ss -tln | grep ':443 '     # want: envoy now listening on 443
 curl -sk https://192.168.56.11/api/gateway/v1/ping/ | python3 -m json.tool | head -5
 ```
 
+> **A `404` on the first try is normal — wait five seconds and repeat.** The listener and the routes
+> arrive as *separate* xDS updates, so there is a window where envoy is listening on 443 and has
+> nothing to route to yet. `ss` shows the port open, `curl` returns 404, and nothing is wrong.
+>
+> If it is still 404 after fifteen seconds, look at what envoy actually has rather than guessing:
+>
+> ```bash
+> curl -s http://127.0.0.1:19000/config_dump | grep -c virtual_hosts   # want: > 0
+> curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/    # nginx direct — want 200
+> ```
+>
+> nginx answering on 8443 while 443 does not tells you the service is healthy and the *registry*
+> is the problem, which is a different half of the system to go looking in.
+
 ---
 
 ## Verify
