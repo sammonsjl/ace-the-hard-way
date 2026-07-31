@@ -371,6 +371,24 @@ sudo -u gateway bash -c 'DJANGO_SUPERUSER_PASSWORD=CHANGE-ME aap-gateway-manage 
 > for the rest of the tutorial. If you get it wrong, fix it with
 > `sudo -u gateway aap-gateway-manage changepassword admin`.
 
+Then seed the **local authenticator**. A superuser row is not enough on its own: the gateway
+authenticates through pluggable authenticator objects, and until one exists there is no login
+backend at all — every credential, including the superuser you just made, is rejected with
+`{"detail":"Invalid username/password."}`.
+
+```bash
+sudo -u gateway aap-gateway-manage authenticators --initialize
+# want: "Created default local authenticator"
+```
+
+> The `authenticators` subcommand comes from `django-ansible-base`, not from jewel's own command
+> set — it will not appear in jewel's `management/commands/` directory, but it is there.
+>
+> The failure mode if you skip it is genuinely confusing: the console renders, the password is
+> right, the user exists and is a superuser, and the login form just says the credentials are
+> invalid. `aap-gateway-manage shell -c "from ansible_base.authentication.models import
+> Authenticator; print(Authenticator.objects.all())"` returning an empty list is the tell.
+
 ## nginx
 
 One nginx serves every web-facing service on this box. It gets a main config with an include

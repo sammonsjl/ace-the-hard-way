@@ -8,21 +8,12 @@ Everything here happens over the gateway's REST API. Automation would drive it w
 
 All commands on **ace-control**.
 
-## Wait for the gateway, then initialize the local authenticator
+## Wait for the gateway
 
 ```bash
 curl -sk https://127.0.0.1:8443/api/gateway/v1/ping/ | python3 -m json.tool
 # want: {"status":"good", ...} — don't proceed until this answers
 ```
-
-Now seed the local authenticator — a one-time step, and it has to happen after the services are up. Without it there's no login backend and every credential is rejected:
-
-```bash
-sudo -u gateway aap-gateway-manage authenticators --initialize
-# want: "Created default local authenticator"
-```
-
-(The `authenticators` subcommand comes from `django-ansible-base`, not jewel's own command set — it won't show up in jewel's `management/commands/` directory, but it's there.)
 
 ## Register the registry (the rows envoy is polling for)
 
