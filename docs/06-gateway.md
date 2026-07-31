@@ -193,11 +193,11 @@ files = supervisord.d/*.ini
 EOF
 ```
 
-> `chown = awx:awx` on the control socket, in a file written before the `awx` user exists, looks
-> like a mistake. It isn't — it's the reason AWX can restart its own processes later without
-> running as root. [Lab 8](08-awx-source.md) creates that user; until then supervisord will warn
-> that it can't chown the socket and carry on. If you would rather not see the warning, come back
-> and add this line after Lab 8.
+> `chown = awx:awx` on the control socket, in the gateway's lab, is not a copy-paste error. It is
+> what lets AWX restart its own processes later without running as root — `reload.py` shells out
+> to `supervisorctl` as the `awx` user, and that means `awx` has to be able to open this socket.
+> [Lab 2](02-vms.md) already created the user, so the ownership resolves now; the gateway's own
+> programs don't care who owns it.
 
 The unit, mirroring what a packaged supervisord ships:
 

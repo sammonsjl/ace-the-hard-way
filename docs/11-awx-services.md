@@ -446,6 +446,13 @@ systemctl is-active nginx supervisord           # want: active active
 > `PartOf` is deliberately one-directional: stopping nginx does **not** stop the controller. That
 > asymmetry is the point — you can bounce one component without tearing down the platform, but
 > tearing down the platform takes everything with it.
+>
+> **On this box it takes the gateway with it, and that is a single-node artifact.** nginx and
+> supervisord serve the gateway too, so `systemctl restart automation-controller` bounces the
+> platform's front door as a side effect. A real deployment puts the controller and the gateway on
+> different hosts, where the same drop-ins only ever touch the controller's own nginx and its own
+> supervisord. Worth knowing before you restart the controller expecting the console to stay up —
+> it will come back, but not instantly.
 
 Then kill a child and watch supervisord bring it back:
 
