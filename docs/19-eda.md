@@ -250,7 +250,7 @@ curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ 
 ## nginx front on 8445
 
 ```bash
-sudo ace-sign-service server /etc/ansible-automation-platform/eda eda ace-control cert
+sudo /usr/local/sbin/ace-sign-service server /etc/ansible-automation-platform/eda eda ace-control cert
 
 sudo tee /etc/nginx/conf.d/automation-eda.nginx.conf >/dev/null <<'EOF'
 upstream eda-api { server unix:/run/eda/eda-api.sock; }

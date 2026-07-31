@@ -11,7 +11,7 @@ All commands on **ace-control**.
 ## Wait for the gateway, then initialize the local authenticator
 
 ```bash
-curl -s https://127.0.0.1:8443/api/gateway/v1/ping/ | python3 -m json.tool
+curl -sk https://127.0.0.1:8443/api/gateway/v1/ping/ | python3 -m json.tool
 # want: {"status":"good", ...} — don't proceed until this answers
 ```
 
@@ -32,11 +32,11 @@ Create them in this order — HttpPort → ServiceClusters → ServiceNodes → 
 
 ```python
 import json, subprocess
-GW = "http://127.0.0.1:8080/api/gateway/v1"
+GW = "https://127.0.0.1:8443/api/gateway/v1"
 AUTH = "admin:CHANGE-ME"   # the gateway admin password from Lab 6
 
 def call(method, path, data=None):
-    cmd = ["curl", "-s", "-u", AUTH, "-X", method, GW + path, "-H", "Content-Type: application/json"]
+    cmd = ["curl", "-sk", "-u", AUTH, "-X", method, GW + path, "-H", "Content-Type: application/json"]
     if data is not None:
         cmd += ["-d", json.dumps(data)]
     return json.loads(subprocess.check_output(cmd).decode() or "{}")
@@ -118,7 +118,7 @@ sudo -u gateway aap-gateway-manage generate_service_secret controller
 **2. Tell AWX to trust the gateway.** A new settings fragment, `/etc/tower/conf.d/gateway.py`:
 
 ```bash
-sudo -u awx tee /etc/tower/conf.d/gateway.py >/dev/null <<'EOF'
+sudo tee /etc/tower/conf.d/gateway.py >/dev/null <<'EOF'
 # JWTs: fetch the gateway's public key from this URL and trust its logins
 ANSIBLE_BASE_JWT_KEY = 'https://192.168.56.10'
 ANSIBLE_BASE_JWT_REDIRECT_TYPE = "awx"

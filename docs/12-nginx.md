@@ -43,7 +43,7 @@ Browsers will reach the controller through envoy, so their `Origin` header says
 trust:
 
 ```bash
-sudo -u awx tee /etc/tower/conf.d/csrf.py >/dev/null <<'EOF'
+sudo tee /etc/tower/conf.d/csrf.py >/dev/null <<'EOF'
 CSRF_TRUSTED_ORIGINS = [
     'https://192.168.56.10',
     'https://192.168.56.10:8043',
@@ -62,7 +62,7 @@ you can still debug the controller without going through the proxy.
 Lab 3 built the CA and the signing script. One line:
 
 ```bash
-sudo ace-sign-service tower /etc/tower awx ace-control cert
+sudo /usr/local/sbin/ace-sign-service tower /etc/tower awx ace-control cert
 ```
 
 That writes `/etc/tower/tower.key` and `/etc/tower/tower.cert` — AWX's historical `tower` naming,

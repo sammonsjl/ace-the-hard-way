@@ -106,16 +106,32 @@ lets it live system-wide instead of inside a venv:
 ```bash
 sudo dnf -y install python3.12-pip
 sudo python3.12 -m pip install supervisor
-which supervisord supervisorctl     # want: /usr/local/bin/... — both on the default PATH
+ls -l /usr/local/bin/supervisord /usr/local/bin/supervisorctl
 ```
 
-**Both of those facts are load-bearing.** AWX restarts its own processes by shelling out to a
-bare `supervisorctl`, resolved from `PATH`, reading its **default** config location — no path,
-no `-c` flag, no environment variable. Put supervisord somewhere clever and
-[Lab 11](11-awx-services.md) has to thread `SUPERVISOR_CONFIG_PATH` through every program's
-environment, which works until you forget one.
+pip puts them in `/usr/local/bin`, which is not where a packaged supervisord lives and not
+somewhere `sudo` will look. Link them into `/usr/bin`:
 
-So: default binary location, default config path, one file per service in a drop-in directory.
+```bash
+sudo ln -sf /usr/local/bin/supervisord  /usr/bin/supervisord
+sudo ln -sf /usr/local/bin/supervisorctl /usr/bin/supervisorctl
+sudo supervisorctl version    # want: a version, not "command not found"
+```
+
+> **Why the symlinks are not optional.** Rocky's `sudo` replaces `PATH` with a `secure_path` of
+> `/sbin:/bin:/usr/sbin:/usr/bin` — no `/usr/local` anywhere (`sudo grep secure_path /etc/sudoers`).
+> Without the links, every `sudo supervisorctl …` in this tutorial fails with
+> `sudo: supervisorctl: command not found` while the binary sits there, executable, one directory
+> over.
+>
+> It matters more than convenience. AWX restarts its own processes by shelling out to a **bare**
+> `supervisorctl`, resolved from `PATH`, reading its **default** config location — no path, no
+> `-c` flag, no environment variable. `/usr/bin/supervisorctl` plus `/etc/supervisord.conf` is
+> exactly what that call expects. Put either somewhere clever and
+> [Lab 11](11-awx-services.md) has to thread `SUPERVISOR_CONFIG_PATH` through every program's
+> environment, which works right up until you forget one.
+
+So: stock binary location, stock config path, one file per service in a drop-in directory.
 
 ```bash
 sudo install -d -o root -g root -m 0755 /var/log/supervisor
@@ -169,7 +185,7 @@ After=rc-local.service
 
 [Service]
 Type=forking
-ExecStart=/usr/local/bin/supervisord -c /etc/supervisord.conf
+ExecStart=/usr/bin/supervisord -c /etc/supervisord.conf
 
 [Install]
 WantedBy=multi-user.target
@@ -298,7 +314,7 @@ certificate to envoy when it registers a listener. All three want the same pair,
 [Lab 3](03-internal-ca.md)'s CA. The signing script does it in one line:
 
 ```bash
-sudo ace-sign-service gateway /etc/ansible-automation-platform/gateway gateway ace-control cert
+sudo /usr/local/sbin/ace-sign-service gateway /etc/ansible-automation-platform/gateway gateway ace-control cert
 ```
 
 That writes `gateway.key` and `gateway.cert` — note the **`.cert`** extension, which is what

@@ -32,16 +32,20 @@ Build the directory tree from the filesystem contract below:
 
 ```bash
 # home layout: projects, job output, static files, and the venv's future home
-sudo mkdir -p /var/lib/awx/{projects,job_status,public/static,venv}
+sudo install -d -o awx -g awx -m 0755 /var/lib/awx
+sudo install -d -o awx -g awx -m 0700 /var/lib/awx/.ssh
+sudo install -d -o awx -g awx -m 0750 /var/lib/awx/projects
+sudo install -d -o awx -g awx -m 0750 /var/lib/awx/job_status
+sudo install -d -o awx -g awx -m 0755 /var/lib/awx/venv
+sudo install -d -o root -g awx -m 0755 /var/lib/awx/public/static
 
 # config root (settings.py, conf.d fragments, SECRET_KEY, certs)
-sudo mkdir -p /etc/tower/conf.d
+sudo install -d -o root -g awx -m 0755 /etc/tower
+sudo install -d -o root -g awx -m 0750 /etc/tower/conf.d
 
-# logs: app logs (awx-owned, 0750) and supervisor's per-process logs
-sudo mkdir -p /var/log/tower /var/log/supervisor
-
-sudo chown -R awx:awx /var/lib/awx /etc/tower /var/log/tower
-sudo chmod 0750 /var/log/tower
+# logs: app logs (awx-owned) and supervisor's per-process logs
+sudo install -d -o awx  -g awx  -m 0750 /var/log/tower
+sudo install -d -o root -g root -m 0755 /var/log/supervisor
 
 # the home dir must be 0755 — nginx must traverse it to serve
 # /var/lib/awx/public later. useradd created it 0700; fix that now or Lab 12
@@ -49,14 +53,39 @@ sudo chmod 0750 /var/log/tower
 sudo chmod 0755 /var/lib/awx
 ```
 
-`/var/run/tower` (the uwsgi/daphne sockets) lives on a tmpfs — it vanishes every reboot unless systemd recreates it. That's what tmpfiles.d is for:
+`/var/run/tower` — where the uwsgi and daphne sockets will live — is deliberately *not* created
+here. It has to be owned by `nginx`, and that user doesn't exist yet.
+[Lab 11](11-awx-services.md) creates it, with the tmpfiles.d entry that rebuilds it on every boot.
+
+## Make the node names resolve (both VMs)
+
+Every later lab addresses these boxes by name: certificate SANs, the receptor mesh, nginx
+`server_name`, the gateway's own self-calls. Right now they don't resolve to anything useful —
+the box image maps its own hostname to `127.0.1.1`, and the only other address either VM knows
+about is the hypervisor's management network, not the lab network.
+
+Two `/etc/hosts` lines stand in for DNS. Run this on **both** VMs:
 
 ```bash
-sudo tee /etc/tmpfiles.d/tower.conf > /dev/null <<'TMPEOF'
-d /var/run/tower 0750 awx awx -
-TMPEOF
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/tower.conf
+# drop the box's self-mapping, which would otherwise win
+sudo sed -i '/127\.0\.1\.1/d' /etc/hosts
+
+sudo tee -a /etc/hosts >/dev/null <<'EOF'
+192.168.56.10 ace-control
+192.168.56.20 ace-exec
+EOF
+
+getent ahostsv4 ace-control | head -1    # want: 192.168.56.10
+getent ahostsv4 ace-exec    | head -1    # want: 192.168.56.20
 ```
+
+> **`ahostsv4`, not `hosts`.** `getent hosts` returns whatever the resolver offers first, which on
+> a multi-homed box with IPv6 is often a link-local `fe80::` address. [Lab 3](03-internal-ca.md)'s
+> certificate signing reads this, and an `fe80::` address in a SAN is worse than no SAN at all.
+>
+> Deleting the `127.0.1.1` line matters just as much. Leave it and `ace-control` resolves to a
+> loopback address on the control node itself — so the certificate you sign in Lab 3 carries
+> `IP:127.0.1.1`, and every other machine's connection fails the hostname check.
 
 Update the base system:
 
@@ -65,12 +94,11 @@ sudo dnf -y update
 cat /etc/rocky-release
 ```
 
-**Verify the node**, then reboot as the last step (applies any kernel update; tmpfiles.d will recreate `/var/run/tower` on the way up):
+**Verify the node**, then reboot as the last step (applies any kernel update):
 
 ```bash
 id awx                              # service user exists
 sudo -u awx bash -c 'echo $HOME'    # /var/lib/awx
-ls -ld /var/run/tower               # exists, awx:awx 0750
 ping -c1 192.168.56.20              # execution plane reachable
 # ...plus the Preflight checks (section below)
 sudo reboot                         # ssh session drops; that's expected
@@ -103,9 +131,9 @@ One user, five directories. Lay it down once here and every later lab has a home
 
 | Path | Owner | Purpose |
 |---|---|---|
-| `/var/lib/awx` | awx:awx | home: venv (`venv/awx/`), `projects/`, `job_status/`, `public/static/` |
-| `/etc/tower` | awx:awx | `settings.py`, `conf.d/*.py`, `SECRET_KEY` (0400), TLS cert/key |
-| `/var/run/tower` | awx:awx | uwsgi + daphne sockets (needs tmpfiles.d — they vanish on reboot) |
+| `/var/lib/awx` | awx:awx 0755 | home: venv (`venv/awx/`), `projects/`, `job_status/`, `public/static/` |
+| `/etc/tower` | **root**:awx 0755 | `settings.py`, `conf.d/*.py` (0750), `SECRET_KEY` (0400), TLS cert/key |
+| `/var/run/tower` | nginx:nginx 2775 | uwsgi + daphne sockets (Lab 11 — needs tmpfiles.d, they vanish on reboot) |
 | `/var/log/tower` | awx:awx (0750) | application logs |
 | `/var/log/supervisor` | root | per-process supervisor logs |
 

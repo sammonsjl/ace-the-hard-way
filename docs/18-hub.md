@@ -277,7 +277,7 @@ Hub gets its own server block and its own lab-CA-signed cert, on **8444** — th
 nginx already owns 443 on this shared box.
 
 ```bash
-sudo ace-sign-service pulp_webserver /etc/pulp/certs pulp ace-control
+sudo /usr/local/sbin/ace-sign-service pulp_webserver /etc/pulp/certs pulp ace-control
 sudo chown pulp:pulp /etc/pulp/certs
 
 sudo tee /etc/nginx/conf.d/automation-hub.nginx.conf >/dev/null <<'EOF'

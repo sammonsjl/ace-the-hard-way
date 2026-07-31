@@ -144,7 +144,9 @@ set -euo pipefail
 
 NAME=$1; DIR=$2; GROUP=$3; HOST=$4; EXT=${5:-crt}
 CA=/etc/ansible-automation-platform/ca
-IP=$(getent hosts "$HOST" | awk '{print $1; exit}')
+# ahostsv4, not `hosts`: plain `getent hosts` returns link-local IPv6 first on a
+# multi-homed box, and an fe80:: address in a SAN is worse than no SAN at all.
+IP=$(getent ahostsv4 "$HOST" | awk '{print $1; exit}')
 
 install -d -o root -g "$GROUP" -m 0750 "$DIR"
 
@@ -178,6 +180,12 @@ openssl x509 -in "$DIR/$NAME.$EXT" -noout -subject -ext subjectAltName
 sudo chmod 0700 /usr/local/sbin/ace-sign-service
 ```
 
+> **Call it by its full path.** Rocky's `sudo` resets `PATH` to a `secure_path` that does **not**
+> include `/usr/local/sbin` or `/usr/local/bin` — check yours with
+> `sudo grep secure_path /etc/sudoers`. So `sudo ace-sign-service …` gives you
+> `sudo: ace-sign-service: command not found` even though the file is right there and executable.
+> Every invocation in this tutorial spells the path out.
+
 Why each extension is there:
 
 | Extension | Reason |
@@ -199,7 +207,7 @@ you end up with a ten-year key nobody remembers generating.
 Sign a throwaway certificate and confirm it chains:
 
 ```bash
-sudo ace-sign-service smoketest /tmp/ca-smoketest root ace-control
+sudo /usr/local/sbin/ace-sign-service smoketest /tmp/ca-smoketest root ace-control
 sudo openssl verify \
   -CAfile /etc/ansible-automation-platform/ca/ansible-automation-platform-managed-ca-cert.crt \
   /tmp/ca-smoketest/smoketest.crt

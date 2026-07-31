@@ -155,7 +155,7 @@ print('decrypts correctly:', decrypt_field(c, 'password') == 'canary-1234')"
 
 ```bash
 sudo cp -a /etc/tower/SECRET_KEY /root/SECRET_KEY.real
-sudo -u awx bash -c 'umask 377; head -c 48 /dev/urandom | base64 -w0 > /etc/tower/SECRET_KEY'
+sudo bash -c 'umask 377; head -c 48 /dev/urandom | base64 -w0 > /etc/tower/SECRET_KEY'
 sudo systemctl restart automation-controller
 ```
 

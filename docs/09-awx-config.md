@@ -35,9 +35,9 @@ sudo install -d -o awx -g awx /var/log/tower
 ## SECRET_KEY
 
 ```bash
-sudo -u awx bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/tower/SECRET_KEY'
+sudo bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/tower/SECRET_KEY'
 sudo chmod 0400 /etc/tower/SECRET_KEY
-sudo -u awx wc -c /etc/tower/SECRET_KEY    # want: ~64 bytes, not 0
+sudo wc -c /etc/tower/SECRET_KEY    # want: ~64 bytes, not 0
 ```
 
 ## Base settings file
@@ -45,7 +45,7 @@ sudo -u awx wc -c /etc/tower/SECRET_KEY    # want: ~64 bytes, not 0
 This is the file that turns a bare production-mode checkout into a configured one. Write the whole shape, not just the one key line — the extras below are the settings AWX's `defaults.py` leaves you to supply. Two entries are load-bearing: `SECRET_KEY`, and **`ALLOWED_HOSTS = ['*']`** — Django in production mode rejects every request with a bare `400` when `ALLOWED_HOSTS` is empty, and AWX's `defaults.py` leaves it empty. You won't notice until Lab 12, when nginx is finally in front and every `/api/` call answers `{"detail":"The request could not be understood by the server."}` while all eight services sit there running innocently. (The wildcard is safe here because nginx is the only front door, and Django still validates origins for CSRF.)
 
 ```bash
-sudo -u awx tee /etc/tower/settings.py >/dev/null <<'EOF'
+sudo tee /etc/tower/settings.py >/dev/null <<'EOF'
 # hand-written /etc/tower/settings.py
 
 STATIC_ROOT = '/var/lib/awx/public/static'
@@ -75,7 +75,7 @@ EOF
 Use the `awx` database password you set in Lab 4:
 
 ```bash
-sudo -u awx tee /etc/tower/conf.d/postgres.py >/dev/null <<'EOF'
+sudo tee /etc/tower/conf.d/postgres.py >/dev/null <<'EOF'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -93,9 +93,9 @@ sudo vim /etc/tower/conf.d/postgres.py    # replace CHANGE-ME with the real pass
 ## Websocket secret and cluster id
 
 ```bash
-sudo -u awx bash -c 'echo "BROADCAST_WEBSOCKET_SECRET = \"$(openssl rand -base64 32)\"" > /etc/tower/conf.d/channels.py'
+sudo bash -c 'echo "BROADCAST_WEBSOCKET_SECRET = \"$(openssl rand -base64 32)\"" > /etc/tower/conf.d/channels.py'
 
-sudo -u awx tee /etc/tower/conf.d/cluster_host_id.py >/dev/null <<'EOF'
+sudo tee /etc/tower/conf.d/cluster_host_id.py >/dev/null <<'EOF'
 CLUSTER_HOST_ID = "ace-control"
 EOF
 ```

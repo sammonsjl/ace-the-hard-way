@@ -18,15 +18,19 @@ Commands run on **both** nodes in this lab — each block says which.
 
 ## Names must resolve (both nodes)
 
-Peer names must be resolvable — the mesh certs carry DNS names, and receptor dials peers by name. Two `/etc/hosts` lines stand in for DNS:
+The mesh certificates carry DNS names and receptor dials peers by name, so both boxes have to
+agree on what `ace-control` and `ace-exec` mean. [Lab 2](02-vms.md) already put those lines in
+`/etc/hosts` — confirm rather than repeat:
 
 ```bash
-# on ace-control:
-echo "192.168.56.20 ace-exec" | sudo tee -a /etc/hosts
-
-# on ace-exec:
-echo "192.168.56.10 ace-control" | sudo tee -a /etc/hosts
+# on BOTH nodes:
+getent ahostsv4 ace-control | head -1    # want: 192.168.56.10
+getent ahostsv4 ace-exec    | head -1    # want: 192.168.56.20
 ```
+
+If either answers with `127.0.1.1` or nothing at all, go back and do Lab 2's `/etc/hosts` step
+before going further — a mesh certificate signed against the wrong address fails at the TLS
+handshake with an error about the *peer*, not about the name.
 
 ## Install receptor (ace-exec)
 
