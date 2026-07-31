@@ -17,13 +17,13 @@ It builds that architecture from upstream community projects:
 
 No installer. No operator. No docker-compose. No Kubernetes.
 
-> Inspired by [kubernetes-the-hard-way](https://github.com/kelseyhightower/kubernetes-the-hard-way): there the binaries are the artifacts and you write the units by hand. AWX doesn't ship runnable binaries — so here you build the artifacts from source too, then still write every unit by hand. Where upstream *does* ship a real binary (receptor, envoy, k3s), we use the tarball, KTHW style.
+> Inspired by [kubernetes-the-hard-way](https://github.com/kelseyhightower/kubernetes-the-hard-way): there the binaries are the artifacts and you write the units by hand. AWX doesn't ship runnable binaries — so here you build the artifacts from source too, then still write every unit by hand. Where upstream *does* ship a real binary — receptor and envoy — we use the release tarball, KTHW style.
 >
 > The results are not production-ready. The *understanding* is the product.
 
 ## What you end up with
 
-Two VMs, nineteen labs later. Every box below is a process you started by hand, from a config file you wrote:
+Five VMs, nine labs later. Every box below is a process you started by hand, from a config file you wrote:
 
 ```mermaid
 flowchart TB
@@ -34,7 +34,7 @@ flowchart TB
         gwnginx["nginx :8443<br/>gateway API + the console SPA"]
         gwuwsgi["uwsgi 127.0.0.1:8050<br/>REST API + the service registry"]
         gwgrpc["gRPC control plane :50051<br/>authorises every proxied request"]
-        redis[("Redis<br/>unix socket locally · :6379 for hub and EDA")]
+        redis[("Redis<br/>unix socket for the gateway · :6379 for the others")]
     end
 
     subgraph CTL["ace-controller · 192.168.56.12 — HYBRID node"]
@@ -87,8 +87,8 @@ flowchart TB
     hubproc -.->|"5432"| pg
     edaproc -.->|"5432"| pg
 
-    gwuwsgi -.->|"unix socket"| redis
-    ctlsup -.->|"6379"| redis
+    gwuwsgi -.->|"unix socket · db 4"| redis
+    ctlsup -.->|"6379 · db 0, 1"| redis
     hubproc -.->|"6379 · db 2"| redis
     edaproc -.->|"6379 · db 5"| redis
 
@@ -112,8 +112,9 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 
 ## What you need
 
-- A laptop with ~16 GB RAM free for VMs
-- [Vagrant](https://developer.hashicorp.com/vagrant) with a supported provider — run end-to-end on **KVM/libvirt (Linux, x86_64)** and **VMware Fusion (macOS, Apple Silicon or Intel)**; the default box publishes both architectures. Pick your track in [Lab 1](docs/01-prerequisites.md).
+- **16 GB of RAM, minimum.** The `Vagrantfile` allocates 14.3 GB across the five VMs and leaves ~1.5 GB for the host. More is better; less will not work.
+- ~60 GB of free disk
+- [Vagrant](https://developer.hashicorp.com/vagrant) with a supported provider — the five-VM estate is built and verified end-to-end on **KVM/libvirt (Linux, x86_64)**; **VMware Fusion (macOS)** ran the earlier single-node shape and the default box publishes both architectures, but the five-machine topology has not been re-run there. Pick your track in [Lab 1](docs/01-prerequisites.md).
 - Patience — that's the "hard way" part
 
 ## Labs
@@ -142,7 +143,7 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 
 ## A note on containers
 
-Everything you build and operate is bare metal. Podman appears only as the **execution-environment sandbox**, on every node that runs work — jobs on the execution plane, project syncs and system jobs on the controller — because an EE *is* a container image and AWX has had no containerless execution since v18. That is the only place podman appears: no service you build runs in a container.
+Everything you build and operate is bare metal. Podman appears in exactly one role, on exactly one machine: the **execution-environment sandbox** on `ace-controller`, which runs project syncs, system jobs and your jobs alike — because an EE *is* a container image and AWX has had no containerless execution since v18. No service you build runs in a container. (Split execution onto its own VM, as a production build of this topology does, and podman moves there with it — it still appears exactly once.)
 
 ACE is an independent assembly of upstream community projects — [AWX](https://github.com/ansible/awx), [ansible-ui](https://github.com/ansible/ansible-ui), [receptor](https://github.com/ansible/receptor), [jewel](https://github.com/ansible/jewel), [galaxy_ng](https://github.com/ansible/galaxy_ng), and [eda-server](https://github.com/ansible/eda-server) — plus [envoy](https://github.com/envoyproxy/envoy) as the gateway's proxy, wired together by hand.
 
