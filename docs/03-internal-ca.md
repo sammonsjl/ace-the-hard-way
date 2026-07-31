@@ -148,7 +148,8 @@ CA=/etc/ansible-automation-platform/ca
 # multi-homed box, and an fe80:: address in a SAN is worse than no SAN at all.
 IP=$(getent ahostsv4 "$HOST" | awk '{print $1; exit}')
 
-install -d -o root -g "$GROUP" -m 0750 "$DIR"
+# only create it if it is missing — never re-own a directory the service already owns
+[ -d "$DIR" ] || install -d -o root -g "$GROUP" -m 0750 "$DIR"
 
 openssl genrsa -out "$DIR/$NAME.key" 4096
 chown root:"$GROUP" "$DIR/$NAME.key"
@@ -198,6 +199,11 @@ Why each extension is there:
 
 The private key is `0640 root:<group>` — readable by the service, writable by nobody but root.
 The certificate is `0644`; it's public.
+
+The directory is only created when it is missing. That guard matters: several services own their
+own config directory and write into it as themselves, and an unconditional `install -d` would
+quietly hand it to `root` — after which the service's next config write fails with a bare
+`Permission denied` on a path that looks perfectly fine in `ls`.
 
 `-days 365` matches what a real install issues. Certificates that outlive their service are how
 you end up with a ten-year key nobody remembers generating.

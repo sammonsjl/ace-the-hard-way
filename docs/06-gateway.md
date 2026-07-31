@@ -492,6 +492,26 @@ sudo nginx -t                # want: syntax is ok / test is successful
 sudo systemctl enable --now nginx
 ```
 
+One SELinux boolean, before anything tries to use this. nginx is not allowed to open network
+connections by default, and `uwsgi_pass` to `127.0.0.1:8050` is a network connection even though
+both ends are on this box:
+
+```bash
+sudo setsebool -P httpd_can_network_connect on
+```
+
+> Skip it and everything *looks* right — uwsgi is listening on 8050, nginx is listening on 8443,
+> both are `RUNNING` — but every request 502s and the only honest evidence is in nginx's error
+> log:
+>
+> ```
+> connect() to 127.0.0.1:8050 failed (13: Permission denied) while connecting to upstream
+> ```
+>
+> "Permission denied" on a loopback TCP connection is almost always SELinux rather than anything
+> you can see in `ls` or `ss`. [Lab 12](12-nginx.md) needs the same boolean and re-states it,
+> because it also has to deal with the harder unix-socket case.
+
 Now `collectstatic` can run — as **root**, because `STATIC_ROOT` is a root-owned tree that nginx
 only ever reads:
 
