@@ -39,10 +39,10 @@ sudo install -d -o awx -g awx -m 0750 /etc/receptor /etc/receptor/tls /etc/recep
 sudo install -d -o awx -g awx -m 0700 /var/lib/receptor
 
 sudo tee /etc/tmpfiles.d/receptor.conf >/dev/null <<'EOF'
-D /var/run/receptor 0750 awx awx -
+D /run/receptor 0750 awx awx -
 EOF
 sudo tee /etc/tmpfiles.d/awx-receptor.conf >/dev/null <<'EOF'
-D /var/run/awx-receptor 0750 awx awx -
+D /run/awx-receptor 0750 awx awx -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/receptor.conf /etc/tmpfiles.d/awx-receptor.conf
 

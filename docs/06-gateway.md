@@ -138,7 +138,7 @@ sudo install -d -o root -g root -m 0755 /var/log/supervisor
 sudo install -d -o root -g root -m 0755 /etc/supervisord.d
 sudo install -d -o root -g root -m 0755 /var/run/supervisor
 sudo tee /etc/tmpfiles.d/supervisor.conf >/dev/null <<'EOF'
-D /var/run/supervisor 0755 root root -
+D /run/supervisor 0755 root root -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/supervisor.conf
 

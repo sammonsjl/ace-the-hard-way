@@ -28,7 +28,7 @@ about the real problem. Write a tmpfiles.d entry so systemd recreates it at boot
 
 ```bash
 sudo tee /etc/tmpfiles.d/redis.conf >/dev/null <<'EOF'
-D /var/run/redis 0750 redis redis -
+D /run/redis 0750 redis redis -
 EOF
 sudo systemd-tmpfiles --create
 ls -ld /var/run/redis    # want: drwxr-x--- redis redis
@@ -37,6 +37,10 @@ ls -ld /var/run/redis    # want: drwxr-x--- redis redis
 > `D` rather than `d`: `D` empties the directory on boot as well as creating it. A stale socket
 > file from an unclean shutdown is exactly the kind of thing that makes a service refuse to start
 > once and then work fine after you delete something by hand and never learn why.
+>
+> And `/run`, not `/var/run`, in the tmpfiles entry — they are the same directory, but systemd
+> calls the older spelling a "legacy directory" and prints a rewrite warning on every
+> `systemd-tmpfiles` run. Same applies to every tmpfiles entry in this tutorial.
 
 SELinux labels a directory by its path, and one you create by hand inherits the wrong context:
 

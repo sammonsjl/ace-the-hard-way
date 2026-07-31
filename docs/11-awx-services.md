@@ -104,7 +104,7 @@ sudo usermod -aG nginx awx     # awx needs group-write on the setgid dir to crea
 ```bash
 sudo install -d -o nginx -g nginx -m 2775 /var/run/tower
 sudo tee /etc/tmpfiles.d/tower.conf >/dev/null <<'EOF'
-D /var/run/tower 2775 nginx nginx -
+D /run/tower 2775 nginx nginx -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/tower.conf
 ls -ld /var/run/tower          # want: drwxrwsr-x nginx nginx  (note the 's')
@@ -129,7 +129,7 @@ sudo install -d -o awx -g awx -m 0750 /var/lib/awx/rsyslog/conf.d
 
 sudo install -d -o awx -g awx -m 0750 /var/run/awx-rsyslog
 sudo tee /etc/tmpfiles.d/rsyslog.conf >/dev/null <<'EOF'
-D /var/run/awx-rsyslog 0750 awx awx -
+D /run/awx-rsyslog 0750 awx awx -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/rsyslog.conf
 ```
