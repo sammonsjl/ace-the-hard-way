@@ -79,15 +79,30 @@ sudo -iu postgres psql -d pulp -c '\dx' | grep hstore     # want: hstore listed
 > server-side privilege no application role should hold. The pulp role owns its schema; it does not
 > own the server.
 
-## Python 3.11, not 3.12
+## Build toolchain, and Python 3.11 rather than 3.12
 
 The galaxy_ng/pulpcore stack of this era pins `setuptools<66`, and that setuptools calls
-`pkgutil.ImpImporter`, which **Python 3.12 removed**. So the hub venv is built on **Python
-3.11**, even though the controller used 3.12.
+`pkgutil.ImpImporter`, which **Python 3.12 removed**. So the hub venv is built on **Python 3.11**,
+even though the controller used 3.12. Two components, two interpreters, on two machines — which is
+one of the quieter arguments for giving each component its own host.
 
 ```bash
-sudo dnf -y install python3.11 python3.11-devel
+sudo dnf -y install \
+  gcc gcc-c++ make git \
+  python3.11 python3.11-devel \
+  libffi-devel openssl-devel \
+  libpq-devel postgresql-devel \
+  openldap-devel cyrus-sasl-devel \
+  libxml2-devel libxslt-devel
 ```
+
+> `openldap-devel` and `cyrus-sasl-devel` are the ones people miss, because nothing in "install a
+> content repository" suggests LDAP. galaxy_ng pulls `python-ldap` in through
+> `django-ansible-base`'s authentication extras, and without those headers the build dies a
+> hundred lines into a gcc invocation with
+> `fatal error: lber.h: No such file or directory`, then reports only
+> `Failed to build python-ldap`. The traceback names the Python package; the header names the
+> package you actually need.
 
 ## Install galaxy_ng from git `main` (this version choice is load-bearing)
 
