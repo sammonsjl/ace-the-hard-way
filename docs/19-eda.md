@@ -4,11 +4,11 @@
 
 Event-Driven Ansible — **eda-server** — built from source, running as its systemd
 service family (API, websockets, scheduler, worker), fronted by its own nginx, and
-registered behind the gateway so `https://192.168.56.10:8443/api/eda/…` authenticates
+registered behind the gateway so `https://192.168.56.10/api/eda/…` authenticates
 with the same platform login as the controller and the hub.
 
 ```
-envoy :8443 ──/api/eda/…──► nginx :8445 ──┬── unix:/run/eda/eda-api.sock   (gunicorn, aap_eda.wsgi — REST API)
+envoy :443 ──/api/eda/…──► nginx :8445 ──┬── unix:/run/eda/eda-api.sock   (gunicorn, aap_eda.wsgi — REST API)
    (gateway JWT)                           └── unix:/run/eda/eda-ws.sock    (daphne, aap_eda.asgi — websockets)
                                            aap-eda-manage scheduler         (periodic)
                                            aap-eda-manage dispatcherd       (DefaultWorker — pg_notify tasking, like AWX)
@@ -104,7 +104,7 @@ MQ_HOST: localhost
 MQ_PORT: 6379
 MQ_DB: 5
 # gateway integration (JWT consumer)
-ANSIBLE_BASE_JWT_KEY: https://192.168.56.10:8443
+ANSIBLE_BASE_JWT_KEY: https://192.168.56.10
 ANSIBLE_BASE_JWT_VALIDATE_CERT: false
 ANSIBLE_BASE_JWT_REDIRECT_TYPE: eda
 ANSIBLE_BASE_MANAGED_ROLE_REGISTRY:
@@ -112,7 +112,7 @@ ANSIBLE_BASE_MANAGED_ROLE_REGISTRY:
     name: Platform Auditor
     shortname: sys_auditor
 ENABLE_SERVICE_BACKED_SSO: false
-WEBSOCKET_BASE_URL: wss://192.168.56.10:8443
+WEBSOCKET_BASE_URL: wss://192.168.56.10
 WEBSOCKET_SSL_VERIFY: "no"
 EOF
 sudo chown eda:eda /etc/eda/settings.yaml
@@ -235,7 +235,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-scheduler automation-eda-default-worker
 
 curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ \
-  -H 'Host: 192.168.56.10:8443'
+  -H 'Host: 192.168.56.10'
 # want: {"status": ...} JSON. A momentary "degraded / Dispatcherd workers unavailable"
 # right after start is heartbeat lag — `journalctl -u automation-eda-default-worker` will
 # show "pg_notify … established" and tasks running.
@@ -317,7 +317,7 @@ sudo -u gateway aap-gateway-manage generate_service_secret eda   # RECORD it
 
 sudo tee -a /etc/eda/settings.yaml >/dev/null <<'EOF'
 RESOURCE_SERVER:
-  URL: https://192.168.56.10:8443
+  URL: https://192.168.56.10
   SECRET_KEY: PASTE-THE-EDA-SECRET
   VALIDATE_HTTPS: false
 EOF
@@ -328,9 +328,9 @@ sudo systemctl restart automation-eda-api automation-eda-default-worker
 ## Verify — EDA through the platform door
 
 ```bash
-curl -sk https://192.168.56.10:8443/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"  # 200
+curl -sk https://192.168.56.10/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"  # 200
 
-curl -sk -u "admin:CHANGE-ME" https://192.168.56.10:8443/api/eda/v1/users/me/ \
+curl -sk -u "admin:CHANGE-ME" https://192.168.56.10/api/eda/v1/users/me/ \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["username"], d["is_superuser"], d["resource"]["resource_type"])'
 # want: admin True shared.user — the gateway minted a JWT, EDA's DAB JWT consumer validated
 #       it, and resolved the platform's shared user. SSO across controller + hub + EDA.
@@ -340,8 +340,14 @@ That `shared.user` resource type is the whole platform speaking one identity: th
 proven by the gateway, accepted by the controller, the hub, and EDA alike — each built by hand
 from source.
 
-All three services are wired to the gateway. The last lab gives them a face: the unified
-platform console, served on 443.
+## The payoff — the console is complete
+
+Refresh the platform UI at **`https://192.168.56.10`** one last time. **Automation Decisions**
+joins Automation Execution and Automation Content, and the navigation you saw in Lab 17 with a
+single entry is now the full platform — one login reaching three services you built from source,
+on three different Python versions, sharing one identity.
+
+Again: no UI rebuild. Three registry entries, three envoy routes, one console.
 
 Back to the [README](../README.md) — you built an automation platform, every service and its
 console, by hand.

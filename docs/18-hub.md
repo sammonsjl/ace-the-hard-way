@@ -4,11 +4,11 @@
 
 Automation Hub — **galaxy_ng** on **pulpcore** — built from source, running as a
 pulp service family (API + content + workers), fronted by its own nginx, and
-registered behind the gateway so `https://192.168.56.10:8443/api/galaxy/…`
+registered behind the gateway so `https://192.168.56.10/api/galaxy/…`
 authenticates with the same platform login as the controller.
 
 ```
-envoy :8443 ──/api/galaxy/…──► nginx :8444 ──┬── unix:/…/pulpcore-api.sock      (gunicorn, the REST API + galaxy_ng)
+envoy :443 ──/api/galaxy/…──► nginx :8444 ──┬── unix:/…/pulpcore-api.sock      (gunicorn, the REST API + galaxy_ng)
    (gateway JWT)                              └── unix:/…/pulpcore-content.sock  (gunicorn, artifact serving)
                                               pulpcore-worker@1, @2              (tasking)
 ```
@@ -111,10 +111,10 @@ REDIS_URL = "unix:///var/run/redis/redis.sock?db=2"
 SECRET_KEY = "CHANGE-ME-RANDOM"
 DB_ENCRYPTION_KEY = "/etc/pulp/certs/database_fields.symmetric.key"
 
-CONTENT_ORIGIN = "https://192.168.56.10:8443"
-ANSIBLE_API_HOSTNAME = "https://192.168.56.10:8443"
-ANSIBLE_CONTENT_HOSTNAME = "https://192.168.56.10:8443/pulp/content"
-TOKEN_SERVER = "https://192.168.56.10:8443/token/"
+CONTENT_ORIGIN = "https://192.168.56.10"
+ANSIBLE_API_HOSTNAME = "https://192.168.56.10"
+ANSIBLE_CONTENT_HOSTNAME = "https://192.168.56.10/pulp/content"
+TOKEN_SERVER = "https://192.168.56.10/token/"
 API_ROOT = "/api/galaxy/pulp/"
 CONTENT_PATH_PREFIX = "/pulp/content/"
 STATIC_ROOT = "/var/lib/pulp/assets"
@@ -138,9 +138,9 @@ STORAGES = {
 # gateway integration (galaxy_ng JWT consumer)
 ANSIBLE_BASE_JWT_REDIRECT_TYPE = "hub"
 ANSIBLE_BASE_JWT_VALIDATE_CERT = False
-ANSIBLE_BASE_JWT_KEY = "https://192.168.56.10:8443"
+ANSIBLE_BASE_JWT_KEY = "https://192.168.56.10"
 ANSIBLE_BASE_ROLES_REQUIRE_VIEW = False
-CSRF_TRUSTED_ORIGINS = ["https://192.168.56.10:8443"]
+CSRF_TRUSTED_ORIGINS = ["https://192.168.56.10"]
 ENABLE_SERVICE_BACKED_SSO = False
 GALAXY_AUTHENTICATION_CLASSES = [
     "galaxy_ng.app.auth.session.SessionAuthentication",
@@ -364,7 +364,7 @@ sudo -u gateway aap-gateway-manage generate_service_secret galaxy   # RECORD it
 
 sudo tee -a /etc/pulp/settings.py >/dev/null <<'EOF'
 RESOURCE_SERVER = {
-    "URL": "https://192.168.56.10:8443",
+    "URL": "https://192.168.56.10",
     "SECRET_KEY": "PASTE-THE-GALAXY-SECRET",
     "VALIDATE_HTTPS": False,
 }
@@ -377,10 +377,10 @@ sudo systemctl restart pulpcore-api pulpcore-content pulpcore-worker@1 pulpcore-
 
 ```bash
 # unauthenticated status, proxied through envoy → nginx → pulp
-curl -sk https://192.168.56.10:8443/api/galaxy/pulp/api/v3/status/ | python3 -m json.tool | grep component
+curl -sk https://192.168.56.10/api/galaxy/pulp/api/v3/status/ | python3 -m json.tool | grep component
 
 # the real test: JWT SSO. one platform login reaches galaxy_ng as the platform admin:
-curl -skL -u "admin:CHANGE-ME" https://192.168.56.10:8443/api/galaxy/_ui/v1/me/ \
+curl -skL -u "admin:CHANGE-ME" https://192.168.56.10/api/galaxy/_ui/v1/me/ \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["username"], d["is_superuser"])'
 # want: admin True — the gateway minted a JWT, galaxy_ng's HubJWTAuth validated it,
 #       and mapped it to the platform admin. SSO across the whole platform.
@@ -390,5 +390,16 @@ curl -skL -u "admin:CHANGE-ME" https://192.168.56.10:8443/api/galaxy/_ui/v1/me/ 
 > gateway's — you installed a stable galaxy_ng branch instead of `main`. Rebuild the venv from
 > `main` (top of this lab). A `503 no healthy upstream` right after a restart is just envoy's
 > health check catching up — retry in a few seconds.
+
+## The payoff — it appears in the console
+
+Now open the platform UI from [Lab 17](17-platform-ui.md) at **`https://192.168.56.10`** and
+**refresh**. The navigation has grown a section: **Automation Content**, alongside Automation
+Execution.
+
+Nothing about the UI changed — no rebuild, no redeploy, not even a restart. You added rows to the
+gateway's service registry, envoy picked up the new route within five seconds, and the console
+asked `GET /api/` and drew what it found. That is the service registry doing exactly what
+[Lab 16](16-service-registration.md) built it for.
 
 Next: [Event-Driven Ansible](19-eda.md)
