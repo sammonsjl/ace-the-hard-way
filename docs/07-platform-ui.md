@@ -57,21 +57,27 @@ sudo -u gateway git -C /opt/ansible-ui rev-parse --short HEAD   # RECORD THIS
 sudo -u gateway bash <<'EOF'
 set -euo pipefail
 cd /opt/ansible-ui
-npm ci --omit=dev --ignore-scripts
+npm ci --ignore-scripts
 
 cd platform
 export PLATFORM_SERVER="https://192.168.56.10"
-export NODE_OPTIONS="--max-old-space-size=6144"
 npm run build          # -> platform/dist
 EOF
 ```
 
-> The build is memory-hungry — it bundles Monaco and all of PatternFly. `NODE_OPTIONS` above
-> gives Node headroom; if it still dies with "JavaScript heap out of memory", the VM needs more
-> RAM rather than the flag needing a bigger number.
+> **No `--omit=dev`.** Vite, its React plugin, and the TypeScript toolchain are all
+> *devDependencies* — they are what performs the build, not what ships in it. Omit them and `npm
+> ci` succeeds, then the build dies with
+> `Cannot find package '@vitejs/plugin-react'`, which reads like a missing dependency in the repo
+> rather than one you told npm to skip. The distinction only makes sense from the perspective of
+> something *consuming* this package; we are compiling it.
 >
-> `--ignore-scripts` skips package postinstall hooks. They're mostly build tooling this workspace
-> doesn't need, and they add several minutes.
+> `--ignore-scripts` skips package postinstall hooks, which are mostly tooling this workspace
+> doesn't need and add several minutes.
+>
+> The build is memory-hungry — it bundles Monaco and all of PatternFly — and sets its own
+> `NODE_OPTIONS=--max-old-space-size=8192` internally, so there is no point exporting your own. If
+> it dies with "JavaScript heap out of memory", the VM needs more RAM.
 
 `PLATFORM_SERVER` is the gateway's public URL. The built SPA makes same-origin calls, so this
 mostly feeds the dev server and the websocket base — but set it correctly anyway, because getting
