@@ -2,7 +2,18 @@
 
 ## What you'll have at the end
 
-A laptop ready to run the two lab VMs.
+A laptop ready to run the five lab VMs.
+
+## What you need
+
+| | |
+|---|---|
+| **RAM** | **16 GB minimum.** The `Vagrantfile` allocates 14.3 GB across five VMs and leaves ~1.5 GB for the host. More is better and the numbers are easy to raise; less will not work. |
+| **Disk** | ~60 GB free. Five Rocky boxes, four source checkouts, a node_modules tree and a container image. |
+| **CPU** | 4 cores is workable, 8 is comfortable. Two of the builds are long compiles. |
+| **Network** | The VMs pull from GitHub, PyPI, npm, quay.io and the Rocky mirrors. Nothing here works air-gapped. |
+
+Everything runs on one machine — the five VMs are a *topology*, not five computers.
 
 ## Install the tools
 
@@ -54,8 +65,8 @@ VMware Fusion is a direct download from the [Broadcom support portal](https://su
 
 | Your platform | Provider | Box | Status |
 |---|---|---|---|
-| Linux (x86_64) | libvirt/KVM (`vagrant-libvirt`) | `bento/rockylinux-9` (default) | ✅ full 19-lab run, amd64 (tested on an Arch host) |
-| macOS (Apple Silicon or Intel) | VMware Fusion (`vagrant-vmware-desktop`) | `bento/rockylinux-9` | ✅ full 19-lab run, what the author develops on |
+| Linux (x86_64) | libvirt/KVM (`vagrant-libvirt`) | `bento/rockylinux-9` (default) | ✅ full run, amd64 (tested on an Arch host) |
+| macOS (Apple Silicon or Intel) | VMware Fusion (`vagrant-vmware-desktop`) | `bento/rockylinux-9` | ✅ full run, what the author develops on |
 | Windows / Linux (x86_64) | VMware Workstation Pro (`vagrant-vmware-desktop`) — free, same plugin | `bento/rockylinux-9` | untested, should work |
 
 The Vagrantfile carries provider blocks for libvirt and VMware, and the box is overridable via the `VAGRANT_BOX` env var. `bento/rockylinux-9` publishes libvirt and VMware images for both x86_64 and aarch64, so the same default box works on every tested provider. Everything from Lab 2 onward happens INSIDE the Rocky VMs — identical on every platform. If a provider combination misbehaves, please open an issue.
@@ -78,6 +89,8 @@ vagrant plugin list        # want: vagrant-libvirt (Linux) or vagrant-vmware-des
 
 ## Why VMs?
 
-Because this tutorial builds everything **bare metal**: real systemd units, real users, real config files on a real Linux system. That needs a disposable Linux machine you can break and rebuild — which is exactly what a Vagrant VM is. It also matches what you'd run in a homelab or datacenter.
+Because this tutorial builds everything **bare metal**: real systemd units, real users, real config files on a real Linux system. That needs disposable Linux machines you can break and rebuild — which is exactly what Vagrant VMs are. It also matches what you'd run in a homelab or datacenter.
+
+**And why five of them?** Because the seams are the lesson. On one box, "the controller talks to the database" is a unix socket and a shrug; across five, it is a hostname, a port, a firewall rule and a certificate whose SAN has to match — and when it breaks you find out which. [Lab 2](02-vms.md) lays out the topology and why each component gets its own machine.
 
 Next: [Provisioning the VMs](02-vms.md)
