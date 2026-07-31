@@ -345,7 +345,7 @@ CACHES['primary'] = {
 }
 CACHES['fallback']['LOCATION'] = '/var/cache/ansible-automation-platform/gateway'
 
-ENVOY_HOSTNAME = '127.0.0.1'
+ENVOY_HOSTNAME = 'ace-gateway'
 GATEWAY_SECRET_KEY_FILE = '/etc/ansible-automation-platform/gateway/SECRET_KEY'
 GATEWAY_CERT_FILE = '/etc/ansible-automation-platform/gateway/gateway.cert'
 GATEWAY_KEY_FILE = '/etc/ansible-automation-platform/gateway/gateway.key'
@@ -375,6 +375,12 @@ sudo vim /etc/ansible-automation-platform/gateway/settings.py   # put the real D
 ```
 
 The URLs carry **no port**, because envoy will own 443 on this host.
+
+`ENVOY_HOSTNAME` is **`ace-gateway`, not `127.0.0.1`**, and that matters more than it looks. The
+gateway calls *itself* through envoy during service registration, over TLS, and validates the
+certificate it gets back. That certificate's SAN covers `DNS:ace-gateway` and
+`IP:192.168.56.11` — a loopback address is in neither, so `127.0.0.1` produces a hostname
+mismatch on a connection the gateway makes to its own machine.
 
 ---
 

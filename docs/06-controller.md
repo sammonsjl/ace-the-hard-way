@@ -1249,23 +1249,47 @@ rotating at the gateway propagates automatically.
 > `https://ace-controller/api/v2/` still renders but every call returns `401`. That is correct:
 > there is one front door now, and you already built the console that uses it.
 
-### Merge users up into the platform
+### Merge the two identity stores
 
-Last, and only once trust exists both ways:
+Last, and only once trust exists in both directions. Two commands on two machines, in this order.
+
+**On ace-gateway** — pull the controller's users, teams and organisations up into the platform:
+
+```bash
+sudo -u gateway REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
+  aap-gateway-manage migrate_service_data --api-slug controller --username admin
+# want: "Controller and Gateway superusers are consistent"
+#       "Service authentication is now enabled."
+```
+
+**Then on ace-controller** — pull the platform's identities back down:
 
 ```bash
 sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
-  awx-manage create_resource_server_users
+  awx-manage resource_sync
+# want: "----- RESOURCE SYNC FINISHED -----"
 ```
 
-> Python's `requests` validates against **certifi's** bundle, not the system trust store where Lab 3
-> installed our CA — hence `REQUESTS_CA_BUNDLE`. Without it you get
-> `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`, which reads like a broken
-> certificate rather than a bundle the library cannot see.
+> **`REQUESTS_CA_BUNDLE` on both, and it is not optional.** Python's `requests` validates against
+> **certifi's** bundle, not the system trust store where [Lab 3](03-internal-ca.md) installed our
+> CA. Without it both commands fail with
+> `SSLError(SSLCertVerificationError(... unable to get local issuer certificate))`, which reads
+> like a broken certificate rather than a bundle the library cannot see. `openssl verify` succeeding
+> on the same file, on the same host, is the tell.
 >
-> A `503` here means you are racing the restart above; wait for
-> `curl -sk https://192.168.56.11/api/controller/v2/ping/` to return `200` and re-run. It is
-> idempotent.
+> **Order matters, and the error if you get it wrong is genuinely opaque.** Run `resource_sync`
+> first and it dies with:
+> ```
+> requests.exceptions.HTTPError: 423 Client Error: Locked for url:
+>   https://192.168.56.11/api/gateway/v1/service-index/metadata/
+> ```
+> `423 Locked` is the gateway saying "I have not migrated this service's data yet, so I will not
+> serve its identity index." `migrate_service_data` is what unlocks it — its last line is literally
+> *"Service authentication is now enabled."* Nothing in the 423 hints at which command you skipped.
+>
+> A `503` instead means you are racing the restart above; wait for
+> `curl -sk https://192.168.56.11/api/controller/v2/ping/` to return `200` and re-run. Both
+> commands are idempotent.
 
 ---
 
