@@ -90,13 +90,29 @@ against native libraries nothing else here needs. They live in **EPEL** and **CR
 ```bash
 sudo dnf -y install epel-release
 sudo dnf config-manager --set-enabled crb
-sudo dnf -y install libxml2-devel xmlsec1-devel xmlsec1-openssl-devel libtool-ltdl-devel
+sudo dnf -y install \
+  gcc gcc-c++ make git \
+  python3.12 python3.12-devel python3.12-pip \
+  libffi-devel openssl-devel \
+  libpq-devel postgresql-devel \
+  openldap-devel cyrus-sasl-devel \
+  libxml2-devel xmlsec1-devel xmlsec1-openssl-devel libtool-ltdl-devel
 ```
 
-> Skip these and the build dies deep in a wheel compile with
-> `Failed to build installable wheels for some pyproject.toml based projects: xmlsec`. The
-> traceback names `xmlsec`, not the missing `-devel`, so it reads like a Python problem when it's
-> a system-library one.
+**What each is for:** `libxml2-devel` + the three `xmlsec1` packages → `xmlsec`, which
+`python3-saml` needs for federation; `openldap-devel` + `cyrus-sasl-devel` → `python-ldap`;
+`libpq-devel`/`postgresql-devel` → `psycopg`; `libffi-devel` → `cffi`; `openssl-devel` → several
+crypto builds. [Lab 8](08-awx-source.md) installs an overlapping set for AWX — the two lists are
+deliberately independent, so neither lab depends on the other having run.
+
+> **These failures all read as Python problems and none of them are.** A missing `xmlsec1-devel`
+> gives you
+> `Failed to build installable wheels for some pyproject.toml based projects: xmlsec`; a missing
+> `openldap-devel` buries `fatal error: lber.h: No such file or directory` a hundred lines into a
+> gcc invocation and then reports `Failed to build python-ldap`. In both cases the traceback names
+> the Python package, never the system header. When a wheel build fails, read *up* past the pip
+> summary to the first `fatal error:` line — that names the header, and the header names the
+> `-devel` package.
 >
 > EPEL being enabled is harmless *as long as you never `dnf install uwsgi`* — see
 > [Appendix A1](a1-epel-uwsgi-conflict.md). Every uwsgi in this tutorial is pip-built inside a
