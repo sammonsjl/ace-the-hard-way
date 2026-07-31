@@ -205,6 +205,22 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
     params: worker
     allowruntimeparams: true
     verifysignature: true
+
+- work-kubernetes:
+    worktype: kubernetes-runtime-auth
+    authmethod: runtime
+    allowruntimeauth: true
+    allowruntimepod: true
+    allowruntimeparams: true
+    verifysignature: true
+
+- work-kubernetes:
+    worktype: kubernetes-incluster-auth
+    authmethod: incluster
+    allowruntimeauth: true
+    allowruntimepod: true
+    allowruntimeparams: true
+    verifysignature: true
 EOF
 ```
 
@@ -214,6 +230,12 @@ EOF
 - **Both `work-signing` and `work-verification`** are here because this node both submits and runs.
 - **`work-command` with `worktype: local`** is how work executes on this node. This entry, not any
   listener, is what makes jobs run.
+- **The two `work-kubernetes` entries** advertise work types this node can run *in a cluster*
+  rather than here. They cost nothing to declare and are what a container group targets: the
+  controller submits the same kind of signed work unit, receptor launches a pod instead of a local
+  container, and nothing above the dispatcher knows the difference. We do not use them in this
+  tutorial — they are here because a control or hybrid node always advertises them, and leaving
+  them out would quietly narrow what this node claims to be able to do.
 
 > **War story 1 — a receptor with no backends exits cleanly, which looks like a crash loop.** With
 > no listener and no peers, receptor decides it has nothing to do: it logs

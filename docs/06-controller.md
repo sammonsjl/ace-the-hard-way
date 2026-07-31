@@ -432,6 +432,7 @@ with nowhere to go.
 ```bash
 sudo tee /etc/tower/uwsgi.ini >/dev/null <<'EOF'
 [uwsgi]
+log-format = [pid: %(pid)|app: -|req: -/-] %(addr) (%(user)) {%(vars) vars in %(pktsize) bytes} [%(ctime)] %(method) %(uri) => generated %(rsize) bytes in %(msecs) msecs (%(proto) %(status)) %(headers) headers in %(hsize) bytes (%(switches) switches on core %(core)) x-request-id: %(var.HTTP_X_REQUEST_ID)
 socket = /var/run/tower/uwsgi.sock
 chmod-socket = 660
 chdir = /opt/awx
@@ -814,6 +815,12 @@ server {
     ssl_certificate_key /etc/tower/tower.key;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         PROFILE=SYSTEM;
+    ssl_session_cache   shared:SSL:50m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+    ssl_prefer_server_ciphers on;
+
+    keepalive_timeout 65;
 
     access_log /var/log/nginx/automation-controller.access.log main;
     error_log  /var/log/nginx/automation-controller.error.log;
@@ -836,15 +843,43 @@ server {
         proxy_set_header Host            $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        # websockets must not be buffered — buffering holds frames until a
+        # block fills, which turns live job output into nothing, then a burst
+        proxy_buffering off;
     }
 
     location / {
+        # add a trailing slash when there isn't one — DRF's routers are
+        # slash-sensitive and a missing one becomes a 404 rather than a redirect
+        rewrite ^(.*)$http_host(.*[^/])$ $1$http_host$2/ permanent;
+
+        # envoy terminates TLS and forwards over http; without this a client
+        # that arrived on http gets absolute https links back and mixed content
+        if ($http_x_forwarded_proto = "http") {
+            rewrite ^ https://$host$request_uri? permanent;
+        }
+
         uwsgi_pass  uwsgi;
         include     /etc/nginx/uwsgi_params;
         uwsgi_read_timeout 120s;
+        proxy_redirect off;
         uwsgi_param HTTP_X_FORWARDED_FOR   $proxy_add_x_forwarded_for;
         uwsgi_param HTTP_X_FORWARDED_PROTO https;
         uwsgi_param HTTP_X_REQUEST_ID      $http_x_request_id;
+
+        # an API should fail as JSON, not as an nginx HTML page
+        error_page 504 =503 /json_503;
+        error_page 502 =503 /json_503;
+    }
+
+    location = /json_503 {
+        internal;
+        add_header Content-Type application/json;
+
+        if ($http_x_request_id) {
+            return 503 '{"status": "error", "message": "Service Unavailable", "code": 503, "request_id": "$http_x_request_id"}';
+        }
+        return 503 '{"status": "error", "message": "Service Unavailable", "code": 503}';
     }
 }
 EOF
