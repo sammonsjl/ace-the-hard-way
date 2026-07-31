@@ -36,9 +36,19 @@ sudo install -d -o awx -g awx /var/log/tower
 
 ```bash
 sudo bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/tower/SECRET_KEY'
-sudo chmod 0400 /etc/tower/SECRET_KEY
-sudo wc -c /etc/tower/SECRET_KEY    # want: ~64 bytes, not 0
+sudo chown root:awx /etc/tower/SECRET_KEY
+sudo chmod 0640    /etc/tower/SECRET_KEY
+sudo wc -c /etc/tower/SECRET_KEY              # want: ~64 bytes, not 0
+sudo -u awx head -c 8 /etc/tower/SECRET_KEY   # want: 8 bytes — awx MUST be able to read it
 ```
+
+> **`root:awx 0640`, not `0400`.** `/etc/tower` is root-owned ([Lab 2](02-vms.md)) so the service
+> can read its configuration but never rewrite it. That means the key's *group* is what grants
+> access: `settings.py` below does `open('/etc/tower/SECRET_KEY', 'rb').read()` and every AWX
+> process runs as `awx`. A root-owned `0400` file looks more secure and simply cannot be read —
+> you get a `PermissionError` from inside Django's settings import, which surfaces as a total
+> failure to start with no obvious link to this file. The `sudo -u awx` check above is there
+> precisely to catch that now rather than in Lab 11.
 
 ## Base settings file
 
@@ -90,6 +100,13 @@ EOF
 sudo vim /etc/tower/conf.d/postgres.py    # replace CHANGE-ME with the real password
 ```
 
+That file holds a database password, and `sudo tee` creates it world-readable. Lock it down:
+
+```bash
+sudo chown root:awx /etc/tower/conf.d/postgres.py
+sudo chmod 0640    /etc/tower/conf.d/postgres.py
+```
+
 ## Websocket secret and cluster id
 
 ```bash
@@ -98,6 +115,15 @@ sudo bash -c 'echo "BROADCAST_WEBSOCKET_SECRET = \"$(openssl rand -base64 32)\""
 sudo tee /etc/tower/conf.d/cluster_host_id.py >/dev/null <<'EOF'
 CLUSTER_HOST_ID = "ace-control"
 EOF
+```
+
+Then settle the permissions on the whole tree in one pass — `settings.py` and everything in
+`conf.d/` is configuration the service reads and nobody else needs to:
+
+```bash
+sudo chown root:awx /etc/tower/settings.py /etc/tower/conf.d/*.py
+sudo chmod 0640     /etc/tower/settings.py /etc/tower/conf.d/*.py
+sudo -u awx cat /etc/tower/conf.d/channels.py >/dev/null && echo "awx can read conf.d — good"
 ```
 
 ## Verify
