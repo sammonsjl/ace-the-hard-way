@@ -313,8 +313,10 @@ LimitNOFILE=524288
 WantedBy=multi-user.target
 EOF
 
-sudo semanage fcontext -a -t bin_t '/var/lib/pulp/venv/bin(/.*)?'   # Lab 11's 203/EXEC fix
+sudo semanage fcontext -a -t bin_t '/var/lib/pulp/venv/bin(/.*)?'   # the 203/EXEC fix again
 sudo restorecon -Rv /var/lib/pulp/venv/bin
+```
+
 Hub gets the same lifecycle handle the controller has: a unit that runs nothing, with the real
 services declaring `PartOf=` it. `systemctl restart pulpcore` bounces the API, the content app and
 both workers in order; `systemctl stop pulpcore` stops the lot. A packaged install ships exactly
@@ -420,7 +422,7 @@ curl -sk https://127.0.0.1:443/api/galaxy/pulp/api/v3/status/ -o /dev/null -w "h
 
 Same REST-with-PKs pattern as [Lab 6](06-controller.md) — a `hub` cluster and node,
 a `galaxy` service under `/api/galaxy/`, plus the container-registry routes. Save as
-`reghub.py` (reuse the `call/find/ensure` helpers from Lab 16's `register.py`):
+`reghub.py` (the same shape as the gateway's own registration in [Lab 5](05-gateway.md)):
 
 ```python
 st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}

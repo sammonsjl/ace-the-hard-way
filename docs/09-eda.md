@@ -210,7 +210,7 @@ sudo -u eda bash -c 'umask 022 && aap-eda-manage collectstatic --noinput --clear
 ## The service family (systemd)
 
 Four units, one shared environment file. The workers use **dispatcherd** over pg_notify —
-the same task engine as the controller (Lab 11), no separate broker:
+the same task engine as the controller ([Lab 6](06-controller.md)), no separate broker:
 
 ```bash
 sudo tee /etc/tmpfiles.d/eda.conf >/dev/null <<'EOF'
@@ -292,7 +292,7 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-sudo semanage fcontext -a -t bin_t '/var/lib/ansible-automation-platform/eda/venv/bin(/.*)?'   # Lab 11's 203/EXEC fix
+sudo semanage fcontext -a -t bin_t '/var/lib/ansible-automation-platform/eda/venv/bin(/.*)?'   # the 203/EXEC fix again
 sudo restorecon -Rv /var/lib/ansible-automation-platform/eda/venv/bin
 sudo systemctl daemon-reload
 sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-scheduler automation-eda-default-worker
@@ -356,7 +356,6 @@ server {
 }
 EOF
 
-sudo semanage port -a -t http_port_t -p tcp 443    # nginx may only bind labeled ports (Lab 18)
 sudo firewall-cmd --permanent --add-port=443/tcp && sudo firewall-cmd --reload
 sudo nginx -t && sudo systemctl reload nginx
 curl -sk https://127.0.0.1:443/api/eda/v1/status/ -o /dev/null -w "eda via nginx: %{http_code}\n"  # want: 200
