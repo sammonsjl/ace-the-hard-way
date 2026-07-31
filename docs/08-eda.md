@@ -130,13 +130,13 @@ DATABASES:
     NAME: eda
     USER: eda
     PASSWORD: CHANGE-ME
-    HOST: localhost
+    HOST: ace-db
     PORT: 5432
 MEDIA_ROOT: /var/lib/eda/media
 STATIC_ROOT: /var/lib/eda/static
 STATIC_URL: /api/eda/static/
 DEPLOYMENT_TYPE: podman
-MQ_HOST: localhost
+MQ_HOST: ace-gateway
 MQ_PORT: 6379
 MQ_DB: 5
 # gateway integration (JWT consumer)
