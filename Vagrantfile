@@ -54,7 +54,19 @@ Vagrant.configure("2") do |config|
   NODES.each do |n|
     config.vm.define n[:name] do |node|
       node.vm.hostname = n[:name]
-      node.vm.network "private_network", ip: n[:ip]
+
+      # One named network shared by all five, with static addresses and no DHCP.
+      # Naming it matters on libvirt: without a name each VM tries to define its
+      # own network for its own address, and five of those racing during a
+      # parallel `vagrant up` fails with
+      #   "Network 192.168.56.11 is not available."
+      # (vmware_desktop ignores the libvirt__ options and just uses ip:.)
+      node.vm.network "private_network",
+                      ip: n[:ip],
+                      netmask: "255.255.255.0",
+                      libvirt__network_name: "ace-lab",
+                      libvirt__dhcp_enabled: false,
+                      libvirt__forward_mode: "nat"
 
       node.vm.provider "vmware_desktop" do |v|
         v.vmx["memsize"]  = n[:mem].to_s
