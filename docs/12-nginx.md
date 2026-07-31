@@ -81,9 +81,19 @@ But the *browsable API* — the thing you get by opening `/api/v2/` in a browser
 Django and needs its stylesheets:
 
 ```bash
-sudo -u awx awx-manage collectstatic --noinput
+sudo bash -c 'umask 022 && awx-manage collectstatic --noinput --clear'
 # want: "... static files copied to '/var/lib/awx/public/static'"
 ```
+
+> **As root, not as `awx`** — the same rule as the gateway's `collectstatic` in
+> [Lab 6](06-gateway.md), for the same reason. `STATIC_ROOT` is `root:awx` ([Lab 2](02-vms.md)):
+> nginx only ever *reads* this tree and the service never writes to it at runtime, so nothing
+> needs it to be service-writable. Run it as `awx` and it dies partway through with
+> `PermissionError: [Errno 13] Permission denied: '/var/lib/awx/public/static/...'`, having
+> already copied some of the files — which makes the retry look like it worked.
+>
+> `umask 022` so the copied files come out world-readable for nginx; `--clear` so a rebuild
+> doesn't leave stale assets behind.
 
 ## The controller's server block
 
@@ -161,6 +171,31 @@ Three details worth reading twice:
 A *packaged* AWX ships an SELinux policy module that quietly grants the socket allowances and the
 file contexts under `/var/lib/awx`. Build from source and you get none of it. Three denials are
 expected, and we write the missing policy by hand.
+
+First, and least obvious: **SELinux has to be told that 8043 is a web port.** `httpd_t` may only
+bind ports labelled `http_port_t`, and the default set is `80, 81, 443, 488, 8008, 8009, 8443,
+9000`. 8443 is on that list, which is why the gateway worked without this. 8043 is not:
+
+```bash
+sudo semanage port -a -t http_port_t -p tcp 8043
+sudo semanage port -l | grep '^http_port_t'      # want: 8043 now in the list
+```
+
+> Skip it and the failure is quietly misleading. `nginx -t` passes, `systemctl reload nginx`
+> reports success, `systemctl is-active nginx` says `active`, and `nginx -T` shows your `listen
+> 8043` directive — but nothing is listening on 8043 and every request gets a connection refused.
+> The only evidence is one line in the **main** error log, not the per-service one you just
+> configured:
+>
+> ```
+> bind() to 0.0.0.0:8043 failed (13: Permission denied)
+> ```
+>
+> A reload cannot report this as a failure because the running config is still valid; nginx simply
+> keeps serving what it already had. `sudo ss -tln | grep 8043` returning nothing, on a service
+> that claims to be running, is the tell.
+
+Then the rest:
 
 ```bash
 # 1. let nginx talk to upstreams
