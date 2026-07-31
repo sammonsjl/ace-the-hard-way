@@ -172,16 +172,26 @@ curl -sk -u "admin:${GW_PW}" \
   https://192.168.56.10:8443/api/controller/v2/ping/ | python3 -m json.tool
 # want: AWX's ping JSON — via envoy → (gateway auth over gRPC) → nginx → uwsgi
 
-# and the Lab 14 job still runs through the platform door:
+# and the Lab 14 job still runs through the platform door.
+# look the template up by name — everything here goes through the gateway:
+JT_ID=$(curl -sk -u "admin:${GW_PW}" \
+  'https://192.168.56.10:8443/api/controller/v2/job_templates/?name=Demo%20Job%20Template' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["id"])')
+echo "job template: $JT_ID"
+
 curl -sk -u "admin:${GW_PW}" -X POST \
-  https://192.168.56.10:8443/api/controller/v2/job_templates/<JT_ID>/launch/ \
+  "https://192.168.56.10:8443/api/controller/v2/job_templates/${JT_ID}/launch/" \
   | python3 -c 'import json,sys; print("job:", json.load(sys.stdin)["job"])'
 ```
 
+(The lookup is worth as much as the launch: a `GET` with a query string, proxied and authenticated
+the same way. If `JT_ID` comes back empty, the gateway isn't routing `/api/controller/` yet — fix
+that before blaming the launch.)
+
 That second curl is the whole platform in one line: envoy took the request on the platform port, checked it with jewel over the gRPC control plane, jewel attached a JWT, the route sent it to nginx, nginx to uwsgi, and AWX's jwt_consumer accepted the gateway's word for who you are. Every hop hand-built.
 
-> The unified platform UI is a separate build (the `ansible-ui` tree from Lab 9 has a platform target) — a future chapter. The API-level platform above is the real milestone.
+> The unified platform UI is a separate build (the `ansible-ui` tree from Lab 9 has a platform target), and it's the very next lab. The API-level platform above is the real milestone — the console is a face on top of what you just proved with curl.
 
-The controller is behind the gateway. The next two labs bring the other platform services in the same way — each built from source, each joining the same single sign-on.
+The controller is behind the gateway. Lab 17 puts the platform console in front of it and moves the front door to 443; Labs 18–19 then bring hub and EDA in exactly the same way — each built from source, each joining the same single sign-on.
 
 Next: [The platform UI](17-platform-ui.md)
