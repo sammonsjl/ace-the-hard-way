@@ -2,12 +2,18 @@
 
 This tutorial walks you through building an open source automation platform the hard way — **from source, bare metal** — so you understand every process, every config file, and every wire. "Bare metal" means literally that: every service is a real process on the box, and containers appear in exactly one role — as execution-environment sandboxes for jobs.
 
-The goal is precise: **hand-build a complete automation platform from upstream source** — a dedicated service user, a deliberate directory layout (AWX's historical `/etc/tower` paths included, on purpose), a supervisor process family you write yourself, and nginx wiring you can read end to end. Every piece is a real process you can inspect, restart, and break.
+The goal is precise: **hand-build a complete automation platform from upstream source, spread across five machines** — a dedicated service user per component, a deliberate directory layout (AWX's historical `/etc/tower` paths included, on purpose), a supervisor process family you write yourself, one private CA signing every service, and nginx wiring you can read end to end. Every piece is a real process you can inspect, restart, and break.
+
+Five machines rather than one is the point, not an inconvenience. On a single box "the controller talks to the database" is a unix socket and a shrug; across five it is a hostname, a port, a firewall rule, and a certificate whose SAN has to match — and when it breaks, you find out which.
 
 It builds that architecture from upstream community projects:
 
-- **Control node** — built by hand on a Linux VM: PostgreSQL, Redis, [AWX](https://github.com/ansible/awx) built from source into a virtualenv, its UI built from source, every process (uwsgi, daphne, dispatcher, callback receiver, wsrelay) running under **supervisord configs you wrote** — the same process topology a real production deployment runs — plus receptor from the release binary, behind nginx. Then the platform gateway on top.
-- **Execution plane** — a second VM (its first node) joined over a **receptor mesh you build yourself**: release binary, hand-made TLS certs, work signing. Jobs dispatch across the mesh and run there in execution environments. Later, the same plane concept extends to Kubernetes via container groups — the control plane never knows the difference.
+- **ace-db** — PostgreSQL on a host of its own, serving four databases to four machines. No HTTP, no certificate, nothing to register.
+- **ace-gateway** — the [platform gateway](https://github.com/ansible/jewel) built from source, with Redis colocated, the unified console ([ansible-ui](https://github.com/ansible/ansible-ui)) built from source, and **envoy** on 443 in front. It is not a reverse proxy you point at things: every route envoy serves is a row in the gateway's registry, and every other component *registers itself* here.
+- **ace-controller** — [AWX](https://github.com/ansible/awx) built from source into a virtualenv, with every process (uwsgi, daphne, dispatcher, callback receiver, wsrelay, ws-heartbeat, and the rsyslog pair) running under **supervisord drop-ins you wrote** — the same process topology a real deployment runs — behind its own nginx.
+- **The execution plane** — [receptor](https://github.com/ansible/receptor) from the release binary, with **work signing you set up yourself**, plus podman. The controller hands receptor a *signed work unit* over a local socket; receptor spawns `ansible-runner`; ansible-runner starts the job in an execution environment. Built as its own lab because on a production build of this topology it is its own VM — here the controller doubles as a **hybrid** node to save a machine.
+- **ace-hub** — [galaxy_ng](https://github.com/ansible/galaxy_ng) on pulpcore, the private content repository the controller pulls collections and EE images from.
+- **ace-eda** — [eda-server](https://github.com/ansible/eda-server), which closes the loop: an event fires a rulebook, the rulebook launches a job template on the controller.
 
 No installer. No operator. No docker-compose. No Kubernetes.
 
