@@ -43,7 +43,7 @@ envoy :443 ──/api/eda/…──► nginx :443 ──┬── unix:/run/eda/
                                            aap-eda-manage dispatcherd       (DefaultWorker — pg_notify tasking, like AWX)
 ```
 
-> **The good news up front:** after the hub's version-alignment saga ([Lab 18](18-hub.md)),
+> **The good news up front:** after the hub's version-alignment saga ([Lab 7](07-hub.md)),
 > EDA is a relief. `eda-server`'s `main` pins **django-ansible-base from git devel** — the
 > *same* DAB the gateway (jewel-devel) uses — so JWT single sign-on lines up on the first try.
 > Track `main`, not a stable branch, for exactly this reason.
@@ -347,7 +347,7 @@ curl -sk https://127.0.0.1:443/api/eda/v1/status/ -o /dev/null -w "eda via nginx
 
 ## Register behind the gateway
 
-Same REST-with-PKs pattern as [Lab 16](16-service-registration.md) (reuse its `register.py`
+Same REST-with-PKs pattern as [Lab 6](06-controller.md) (reuse its `register.py`
 helpers). One EDA cluster/node/service, then the service secret:
 
 ```python

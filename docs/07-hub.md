@@ -366,7 +366,7 @@ curl -sk https://127.0.0.1:443/api/galaxy/pulp/api/v3/status/ -o /dev/null -w "h
 
 ## Register the hub behind the gateway
 
-Same REST-with-PKs pattern as [Lab 16](16-service-registration.md) — a `hub` cluster and node,
+Same REST-with-PKs pattern as [Lab 6](06-controller.md) — a `hub` cluster and node,
 a `galaxy` service under `/api/galaxy/`, plus the container-registry routes. Save as
 `reghub.py` (reuse the `call/find/ensure` helpers from Lab 16's `register.py`):
 
@@ -424,13 +424,13 @@ curl -skL -u "admin:CHANGE-ME" https://192.168.56.11/api/galaxy/_ui/v1/me/ \
 
 ## The payoff — it appears in the console
 
-Now open the platform UI from [Lab 7](07-platform-ui.md) at **`https://192.168.56.11`** and
+Now open the platform UI from [Lab 5](05-gateway.md) at **`https://192.168.56.11`** and
 **refresh**. The navigation has grown a section: **Automation Content**, alongside Automation
 Execution.
 
 Nothing about the UI changed — no rebuild, no redeploy, not even a restart. You added rows to the
 gateway's service registry, envoy picked up the new route within five seconds, and the console
 asked `GET /api/` and drew what it found. That is the service registry doing exactly what
-[Lab 16](16-service-registration.md) built it for.
+[Lab 6](06-controller.md) built it for.
 
-Next: [Event-Driven Ansible](19-eda.md)
+Next: [Event-Driven Ansible](08-eda.md)

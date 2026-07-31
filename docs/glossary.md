@@ -50,18 +50,18 @@ Same Django app, two plugs — that's why AWX needs two web servers.
 
 | Term | Meaning |
 |---|---|
-| **gateway (Jewel)** | The platform's front door: single login, one URL, proxies to the controller/hub/EDA (Labs 6–7, joined in 16). |
+| **gateway (Jewel)** | The platform's front door: single login, one URL, proxies to the controller/hub/EDA (Labs 5–7, joined in 16). |
 | **envoy** | The proxy the gateway drives — the actual traffic router in front of the platform services. Learns its routes from the gateway over xDS; opens no listener until a service is registered. |
-| **awx-manage** | AWX's admin command (Django manage.py in a suit): migrations, users, instance registration, all of Lab 10. |
+| **awx-manage** | AWX's admin command (Django manage.py in a suit): migrations, users, instance registration, all of Lab 5. |
 
 ## The other platform services
 
 | Term | Meaning |
 |---|---|
-| **Automation Hub (galaxy_ng)** | The content service — collections and execution-environment images. A Django app (`galaxy_ng`) that is a plugin on top of **pulpcore** (Lab 18). |
+| **Automation Hub (galaxy_ng)** | The content service — collections and execution-environment images. A Django app (`galaxy_ng`) that is a plugin on top of **pulpcore** (Lab 5). |
 | **pulpcore** | The content-management engine under the hub: an API server, a content server, and tasking workers, all sharing one postgres + redis. galaxy_ng, pulp-ansible, and pulp-container are plugins on it. |
-| **EDA (eda-server)** | Event-Driven Ansible — watches event sources and runs **rulebook activations** (automation triggered by events, not by a human clicking launch) in decision-environment containers (Lab 19). |
-| **DAB (django-ansible-base)** | The shared library that carries the platform's JWT and RBAC contract. Every service that sits behind the gateway consumes the gateway's JWT through DAB — which is why their DAB versions must line up (Lab 18's version saga). |
+| **EDA (eda-server)** | Event-Driven Ansible — watches event sources and runs **rulebook activations** (automation triggered by events, not by a human clicking launch) in decision-environment containers (Lab 6). |
+| **DAB (django-ansible-base)** | The shared library that carries the platform's JWT and RBAC contract. Every service that sits behind the gateway consumes the gateway's JWT through DAB — which is why their DAB versions must line up (Lab 5's version saga). |
 | **JWT SSO** | The gateway authenticates you once, mints a signed JWT describing who you are, and attaches it to every proxied request. Each service's DAB JWT consumer trusts the gateway's signature — so one login reaches the controller, the hub, and EDA alike. |
 
 Back to the [README](../README.md)
