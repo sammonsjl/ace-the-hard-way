@@ -107,11 +107,39 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 
 Re-point the gateway's "gateway api" service from the uwsgi port (8080) to this nginx (8446), so
-envoy's catch-all serves the SPA. Reuse Lab 16's `call`/`find` helpers:
+envoy's catch-all serves the SPA.
 
-```python
-svc = find("/services/", "gateway api")
-call("PATCH", f"/services/{svc}/", {"service_port": 8446, "is_service_https": False})
+The rest of this lab edits registry rows the same way, so set these once in the shell you're
+working in — every block below reuses them:
+
+```bash
+GW=http://127.0.0.1:8080/api/gateway/v1
+read -s -p "gateway admin password: " GW_PW; echo
+```
+
+> **These are shell commands, not the Python from Lab 16.** Lab 16's `call`/`find` helpers only
+> exist inside `register.py`; pasting them at a prompt gets you
+> `-bash: syntax error near unexpected token '('`. Everything here is plain `curl`, so it works in
+> any shell with no file to source. (Row IDs are looked up by name rather than hardcoded — they're
+> assigned in creation order and yours may differ.)
+
+```bash
+SVC=$(curl -s -u "admin:${GW_PW}" "$GW/services/?name=gateway%20api" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["id"])')
+
+curl -s -u "admin:${GW_PW}" -X PATCH "$GW/services/$SVC/" \
+  -H 'Content-Type: application/json' \
+  -d '{"service_port": 8446, "is_service_https": false}' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"], "→ port", d["service_port"], "https:", d["is_service_https"])'
+# want: gateway api → port 8446 https: False
+```
+
+Give envoy its five-second xDS poll, then confirm the catch-all serves the SPA instead of the API:
+
+```bash
+sleep 6
+curl -sk https://192.168.56.10:8443/ | grep -o 'PlatformMain-[^"]*\.js' | head -1
+# want: a PlatformMain-*.js filename — JSON here means the route hasn't converged yet
 ```
 
 ## The 443 pivot
@@ -127,9 +155,14 @@ sudo semanage port -a -t http_port_t -p tcp 8043
 sudo firewall-cmd --permanent --add-port=8043/tcp && sudo firewall-cmd --reload
 sudo nginx -t && sudo systemctl reload nginx
 ```
-```python
-svc = find("/services/", "controller api")
-call("PATCH", f"/services/{svc}/", {"service_port": 8043})
+```bash
+SVC=$(curl -s -u "admin:${GW_PW}" "$GW/services/?name=controller%20api" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["id"])')
+
+curl -s -u "admin:${GW_PW}" -X PATCH "$GW/services/$SVC/" \
+  -H 'Content-Type: application/json' -d '{"service_port": 8043}' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"], "→ port", d["service_port"])'
+# want: controller api → port 8043
 ```
 
 **2. Let envoy bind 443.** It runs as the non-root `gateway` user, so grant it the one capability
@@ -149,9 +182,14 @@ sudo systemctl restart automation-gateway-proxy
 **3. Move the envoy listener 8443 → 443** by changing the gateway's `HttpPort` number. Envoy
 picks up the new listener via xDS within a few seconds:
 
-```python
-hp = find("/http_ports/", "API Port")
-call("PATCH", f"/http_ports/{hp}/", {"number": 443})
+```bash
+HP=$(curl -s -u "admin:${GW_PW}" "$GW/http_ports/?name=API%20Port" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["id"])')
+
+curl -s -u "admin:${GW_PW}" -X PATCH "$GW/http_ports/$HP/" \
+  -H 'Content-Type: application/json' -d '{"number": 443}' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print("http port →", d["number"])'
+# want: http port → 443
 ```
 
 ```bash
@@ -171,7 +209,7 @@ sudo sed -i 's#https://192.168.56.10:8443#https://192.168.56.10#g' \
   /etc/tower/conf.d/gateway.py
 
 # the gateway's own proxy-url setting (DB-backed; PUT, not PATCH)
-curl -s -u admin:CHANGE-ME -X PUT http://127.0.0.1:8080/api/gateway/v1/settings/all/ \
+curl -s -u "admin:${GW_PW}" -X PUT http://127.0.0.1:8080/api/gateway/v1/settings/all/ \
   -H 'Content-Type: application/json' -d '{"gateway_proxy_url": "https://192.168.56.10"}' >/dev/null
 
 sudo systemctl restart automation-gateway automation-controller
@@ -192,7 +230,7 @@ curl -sk https://192.168.56.10/ | grep -o 'PlatformMain-[^"]*\.js' | head -1   #
 curl -sk https://192.168.56.10/platform-logo.svg -o /dev/null -w '%{http_code}\n'  # Ansible logo: 200
 
 # one login, reaching the controller — through 443:
-curl -sk -u admin:CHANGE-ME https://192.168.56.10/api/controller/v2/ping/  -o /dev/null -w 'controller: %{http_code}\n'
+curl -sk -u "admin:${GW_PW}" https://192.168.56.10/api/controller/v2/ping/  -o /dev/null -w 'controller: %{http_code}\n'
 ```
 
 Then the real test — a browser to **`https://192.168.56.10`** (accept the lab-CA warning):
@@ -226,7 +264,7 @@ sudo -u awx sed -i "s/^            valid_key=True,$/            valid_key=True,\
   /opt/awx/awx/main/utils/licensing.py
 sudo systemctl restart automation-controller
 
-curl -sk -u admin:CHANGE-ME https://192.168.56.10/api/controller/v2/config/ \
+curl -sk -u "admin:${GW_PW}" https://192.168.56.10/api/controller/v2/config/ \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["license_info"]["compliant"])'   # want: True
 ```
 
