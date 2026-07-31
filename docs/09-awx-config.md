@@ -133,11 +133,21 @@ sudo -u awx bash -c 'AWX_MODE=production /var/lib/awx/venv/awx/bin/awx-manage ch
 # want: warnings only, no errors. On a source build the healthy output is
 #   "System check identified some issues: WARNINGS: ... (staticfiles.W004) ...
 #    System check identified 1 issue (1 silenced)."
-# W004 just means the dev UI dir doesn't exist — Lab 9 builds the real UI elsewhere.
+# W004 is permanent and expected — see below.
 # A database or SECRET_KEY problem would be an ERROR and a traceback, not a warning.
 
 sudo -u awx awx-manage --version
 # the Lab 8 wrapper works now that /etc/tower exists — want: the version string
 ```
+
+That `staticfiles.W004` warning about `/opt/awx/awx/ui/build` never goes away, and it is not
+something to fix. There is no controller UI to build — the platform console belongs to the
+gateway and you built it back in [Lab 7](07-platform-ui.md). AWX's `settings/defaults.py` still
+lists that directory in `STATICFILES_DIRS` because a source checkout is *expected* to have a
+front end compiled into it; a release build ships the directory containing a single empty
+`index.html`, which the installer then overwrites with a redirect to the gateway.
+
+So: one warning, permanently, on a correct build. `awx-manage check` reporting nothing else is the
+result you want.
 
 Next: [Database init](10-awx-init.md)
