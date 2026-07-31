@@ -6,7 +6,7 @@ Your laptop back.
 
 ## Before you burn it down
 
-Everything you built lives inside the two VMs — destroying them destroys the platform. Two things are worth saving first:
+Everything you built lives inside the five VMs — destroying them destroys the platform. Two things are worth saving first:
 
 ```bash
 # your recorded pins: the AWX/ansible-ui/jewel commit SHAs, package versions,
@@ -32,7 +32,7 @@ vagrant box remove bento/rockylinux-9    # optional — keep it if you'll rebuil
 Almost nothing — that was the point of building inside Vagrant:
 
 ```bash
-vagrant global-status --prune     # want: no ace-control / ace-exec entries left
+vagrant global-status --prune     # want: no ace-* entries left
 ls /vagrant 2>/dev/null           # (host repo dir) — Lab 5's cert shuttle files were already tidied
 ```
 
