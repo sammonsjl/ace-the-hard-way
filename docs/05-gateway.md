@@ -473,9 +473,20 @@ server {
     listen  [::]:8443 default_server ssl;
     server_name  _;
 
+    keepalive_timeout 65;
+
     ssl_certificate     /etc/ansible-automation-platform/gateway/gateway.cert;
     ssl_certificate_key /etc/ansible-automation-platform/gateway/gateway.key;
     ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         PROFILE=SYSTEM;
+    ssl_prefer_server_ciphers on;
+    ssl_session_timeout 1d;
+    ssl_session_cache   shared:SSL:50m;
+    ssl_session_tickets off;
+
+    add_header Strict-Transport-Security max-age=15768000;
+    add_header X-Frame-Options "DENY";
+    add_header X-Content-Type-Options nosniff;
 
     access_log /var/log/nginx/automation-gateway.access.log main;
     error_log  /var/log/nginx/automation-gateway.error.log;
@@ -495,28 +506,58 @@ server {
         include    /etc/nginx/uwsgi_params;
         uwsgi_param HTTP_X_REQUEST_ID $http_x_request_id;
         uwsgi_read_timeout 120s;
+
+        error_page 504 =503 /json_503;
+        error_page 502 =503 /json_503;
     }
 
+    location = /json_503 {
+        internal;
+        add_header Content-Type application/json;
+
+        if ($http_x_request_id) {
+            return 503 '{"status": "error", "message": "Service Unavailable", "code": 503, "request_id": "$http_x_request_id"}';
+        }
+        return 503 '{"status": "error", "message": "Service Unavailable", "code": 503}';
+    }
+
+    # content-hashed assets: cache forever, and serve the pre-compressed copies
     location ~* \.(json|woff|woff2|jpe?g|png|gif|ico|svg|css|js)$ {
         root      /var/lib/ansible-automation-platform/platform/ui;
+        add_header Cache-Control "public, max-age=31536000, s-maxage=31536000, immutable";
         try_files $uri =404;
+        gzip_static on;
     }
 
+    # the SPA entry point: never cache, or a deploy is invisible until a hard refresh
     location / {
         root      /var/lib/ansible-automation-platform/platform/ui;
+        autoindex off;
+        expires   off;
+        add_header Cache-Control "public, max-age=0, s-maxage=0, must-revalidate" always;
         try_files $uri /index.html =404;
     }
 }
 EOF
 ```
 
-Two things worth noticing:
+Four things worth noticing:
 
 - **`location ~* /(v3|api|o)/`** is the whole API surface: `/api/` for REST, `/o/` for OAuth, `/v3/`
   for the content endpoints hub uses. Everything else is the single-page app.
 - **`try_files $uri /index.html =404`** is the SPA fallback. A browser asking for `/access/users/1`
   gets `index.html` and the app routes it client-side. Without it every URL except `/` is a 404 the
   moment someone hits refresh.
+- **`gzip_static on`** is not an optimisation you can skip. The console build emits a `.gz`
+  alongside every asset — `PlatformMain-<hash>.js` *and* `PlatformMain-<hash>.js.gz`. Without this
+  directive nginx serves the uncompressed file and every one of those `.gz` files is dead weight on
+  disk. With it, nginx hands the pre-compressed copy straight to any client that asked for gzip,
+  compressing nothing at request time.
+- **The two `Cache-Control` headers are opposites, deliberately.** Asset filenames contain a content
+  hash, so a given URL's bytes can never change — those get `immutable` and a year. `index.html` has
+  no hash and is the file that names the current assets, so it gets `must-revalidate` and zero
+  seconds. Cache that one and a deploy is invisible until users hard-refresh; fail to cache the
+  assets and every page load re-downloads Monaco.
 
 ```bash
 sudo install -d -o root -g nginx -m 0755 /var/lib/ansible-automation-platform/platform/ui
@@ -548,6 +589,7 @@ sudo bash -c 'umask 022 && aap-gateway-manage collectstatic --noinput --clear'
 ```bash
 sudo -u gateway tee /etc/ansible-automation-platform/gateway/uwsgi.ini >/dev/null <<'EOF'
 [uwsgi]
+log-format = [pid: %(pid)|app: -|req: -/-] %(addr) (%(user)) {%(vars) vars in %(pktsize) bytes} [%(ctime)] %(method) %(uri) => generated %(rsize) bytes in %(msecs) msecs (%(proto) %(status)) %(headers) headers in %(hsize) bytes (%(switches) switches on core %(core)) x-request-id: %(var.HTTP_X_REQUEST_ID)
 uid = gateway
 socket = 127.0.0.1:8050
 processes = 2
