@@ -1,4 +1,4 @@
-# Lab 7 — Automation hub
+# Lab 8 — Automation hub
 
 ## What this is
 
@@ -460,4 +460,4 @@ gateway's service registry, envoy picked up the new route within five seconds, a
 asked `GET /api/` and drew what it found. That is the service registry doing exactly what
 [Lab 6](06-controller.md) built it for.
 
-Next: [Event-Driven Ansible](08-eda.md)
+Next: [Event-Driven Ansible](09-eda.md)

@@ -269,8 +269,8 @@ That single `openssl verify` proves three things at once: the CA signed it, the 
 |---|---|---|
 | [5 — the gateway](05-gateway.md) | ace-gateway | `gateway.cert` in `/etc/ansible-automation-platform/gateway` |
 | [6 — the controller](06-controller.md) | ace-controller | `tower.cert` in `/etc/tower` |
-| [7 — hub](07-hub.md) | ace-hub | `pulp_webserver.crt` |
-| [8 — EDA](08-eda.md) | ace-eda | `server.cert` |
+| [7 — hub](08-hub.md) | ace-hub | `pulp_webserver.crt` |
+| [8 — EDA](09-eda.md) | ace-eda | `server.cert` |
 
 Note the inconsistent extensions — `.cert` for some, `.crt` for others. That is not a typo here;
 the services genuinely disagree about what to call a certificate and their configuration files

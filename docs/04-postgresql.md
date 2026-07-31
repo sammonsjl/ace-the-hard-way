@@ -148,8 +148,8 @@ one other machine, several labs apart:
 |---|---|---|
 | `gateway` | `/etc/ansible-automation-platform/gateway/settings.py` | [Lab 5](05-gateway.md), ace-gateway |
 | `awx` | `/etc/tower/conf.d/postgres.py` | [Lab 6](06-controller.md), ace-controller |
-| `pulp` | pulp's settings | [Lab 7](07-hub.md), ace-hub |
-| `eda` | EDA's settings | [Lab 8](08-eda.md), ace-eda |
+| `pulp` | pulp's settings | [Lab 8](08-hub.md), ace-hub |
+| `eda` | EDA's settings | [Lab 9](09-eda.md), ace-eda |
 
 Confirm:
 

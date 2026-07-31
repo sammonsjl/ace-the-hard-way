@@ -1,4 +1,4 @@
-# Lab 8 — Event-Driven Ansible
+# Lab 9 — Event-Driven Ansible
 
 ## What this is
 
@@ -43,7 +43,7 @@ envoy :443 ──/api/eda/…──► nginx :443 ──┬── unix:/run/eda/
                                            aap-eda-manage dispatcherd       (DefaultWorker — pg_notify tasking, like AWX)
 ```
 
-> **The good news up front:** after the hub's version-alignment saga ([Lab 7](07-hub.md)),
+> **The good news up front:** after the hub's version-alignment saga ([Lab 8](08-hub.md)),
 > EDA is a relief. `eda-server`'s `main` pins **django-ansible-base from git devel** — the
 > *same* DAB the gateway (jewel-devel) uses — so JWT single sign-on lines up on the first try.
 > Track `main`, not a stable branch, for exactly this reason.
@@ -160,7 +160,7 @@ sudo vim /etc/eda/settings.yaml    # set the real DB password
 
 EDA addresses redis by **host:port** for its channels and websocket layer.
 [Lab 5](05-gateway.md) already turned that port on and firewalled it to the lab network, and
-[Lab 7](07-hub.md) is already using it. Confirm the path before trusting it:
+[Lab 8](08-hub.md) is already using it. Confirm the path before trusting it:
 
 ```bash
 sudo dnf -y install redis          # for redis-cli

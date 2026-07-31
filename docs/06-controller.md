@@ -3,12 +3,10 @@
 ## What this is
 
 The controller is the automation engine: it stores your projects, inventories and credentials,
-decides when a job should run, hands that job to a mesh for execution, and streams the output back
-to whoever is watching.
+decides when a job should run, and streams the output back to whoever is watching.
 
 Its API is AWX. Around that sit seven other processes — a task dispatcher, a callback receiver, a
-websocket relay, a heartbeat, a log shipper — plus receptor, which is how work actually leaves the
-controller and reaches a machine that will run it.
+websocket relay, a heartbeat, a log shipper.
 
 ## Where it fits
 
@@ -23,33 +21,22 @@ supports it: the gateway fronts it, the database stores it, hub feeds it content
                               │  daphne (ws)      callback receiver      │
                               │  wsrelay          ws-heartbeat           │
                               │  rsyslogd + configurer                   │
-                              └─────────────────────────┬────────────────┘
-                                                        │ signed work unit
-                                                   receptor
+                              └─────────────────────────────────────────-┘
                                                         │
-                                                 ansible-runner
-                                                        │
-                                              EE container (podman)
+                                                   ??? ──► [Lab 7]
 ```
 
-**This node is a hybrid.** A production deployment of this topology splits that last column onto a
-separate execution VM and keeps the controller control-only, so execution capacity can scale
-independently. We fold the two together to save a machine. The work still travels the same path —
-the controller signs a work unit, submits it to receptor, receptor spawns `ansible-runner`, and
-ansible-runner starts a container — it just never crosses a network to do it.
-
-> **What that costs, stated plainly.** With one node in the mesh there is no peer, no listener, and
-> no TLS between nodes, so this lab does not build a mesh CA or issue node certificates. If you
-> want that lesson, add a sixth VM as an execution node: give it receptor, a mesh CA-signed
-> certificate pair, a `tcp-listener`, and a `work-command` of `worktype: ansible-runner`, then add
-> a matching `tcp-peer` here. Everything else in this lab is unchanged. Work signing is kept
-> regardless — the controller signs every unit it submits, including to itself.
+Note what is missing from that picture. This lab builds a controller that can **schedule** work
+and cannot **run** it. Deciding a job should happen and actually running a playbook are two
+different jobs done by two different pieces of software, and this tutorial builds them in two
+labs: the engine here, the execution path in [Lab 7](07-execution.md).
 
 ## What you will have at the end
 
-The controller registered behind the gateway, appearing in the console you built in
-[Lab 5](05-gateway.md), and a job launched from that console running to completion in a container
-on this machine.
+The controller registered behind the gateway and visible in the console — projects, templates and
+inventories all browsable — reporting healthy capacity, and **completely unable to run anything**.
+
+That last part is deliberate, and the end of this lab shows you exactly what it looks like.
 
 All commands on **ace-controller** unless stated otherwise.
 
@@ -353,239 +340,9 @@ processes are up and heartbeating, which happens in section 7.
 
 ---
 
-## 5. podman, and why it is here
-
-An execution environment **is** a container image. AWX has had no containerless job execution since
-version 18, so every node that runs work needs a container runtime. That is not a compromise of the
-bare-metal rule — nothing you *build* runs in a container; the runtime is the job sandbox.
-
-```bash
-sudo dnf -y install podman crun
-grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
-sudo loginctl enable-linger awx
-loginctl show-user awx --property=Linger        # want: Linger=yes
-
-cd /tmp    # rootless podman cannot start from a 0700 home dir, and sudo -u keeps your cwd
-sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
-```
-
-> **Do not skip `enable-linger`, and understand why.** `/run/user/<uid>` is created by
-> `systemd-logind` when a user gets their first login session and destroyed when their last session
-> exits. The `awx` user never logs in — it runs services — so on a freshly booted box that directory
-> does not exist. `loginctl enable-linger awx` tells logind to treat `awx` as permanently logged in:
-> the directory is created at boot and kept for the life of the machine. The flag is persistent
-> state on disk (`/var/lib/systemd/linger/awx`).
->
-> Rootless podman keeps all its per-user state under `XDG_RUNTIME_DIR` — container state, conmon
-> pid files, and the pause process holding the user namespace open. Point it at a directory that
-> does not exist and it cannot start a container.
->
-> **The failure is nasty because of its timing.** It works while you are SSH'd in testing (your own
-> session created the directory), then fails after a reboot — or works for days and breaks the
-> moment the last session on the box closes and logind tears the directory down under a running
-> service. Jobs fail at container start, looking like an image problem.
-
-Smoke-test the sandbox, and make it exercise **crypto** rather than just the shell:
-
-```bash
-sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
-  podman run --rm quay.io/ansible/awx-ee:latest ansible-playbook --version
-echo $?    # want: 0
-```
-
-> On an aarch64 host this can exit **132** — a SIGILL from OpenSSL taking an accelerated code path
-> that traps under the hypervisor. The fix inside containers is an environment variable AWX passes
-> through: set `AWX_TASK_ENV['OPENSSL_armcap'] = '0'` in a settings fragment. x86_64 readers never
-> see this.
-
 ---
 
-## 6. Receptor
-
-AWX's dispatcher has no "receptor URL" setting. It **reads `/etc/receptor/receptor.conf`
-directly** — the path is hardcoded in `awx/main/tasks/receptor.py` — finds the `control-service`
-entry, and connects to whatever socket `filename:` names. Two more behaviours follow from the same
-file: if it contains a `work-signing` section, AWX signs every work unit it submits; if it contains
-a `tls-client` section, AWX uses it for TLS-peered nodes.
-
-**Hand-writing this file IS configuring AWX.** No AWX setting changes in this section.
-
-```bash
-RECEPTOR_VERSION=1.6.5
-ARCH=$(uname -m); case $ARCH in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
-curl -fsSL -o /tmp/receptor.tgz \
-  "https://github.com/ansible/receptor/releases/download/v${RECEPTOR_VERSION}/receptor_${RECEPTOR_VERSION}_linux_${ARCH}.tar.gz"
-sudo tar -xzf /tmp/receptor.tgz -C /usr/local/bin receptor
-/usr/local/bin/receptor --version    # want: 1.6.5
-```
-
-Directories. The datadir must be writable and **not** on tmpfs — work units have to survive a
-restart:
-
-```bash
-sudo install -d -o awx -g awx -m 0750 /etc/receptor
-sudo install -d -o awx -g awx -m 0700 /var/lib/receptor
-
-sudo tee /etc/tmpfiles.d/awx-receptor.conf >/dev/null <<'EOF'
-D /run/awx-receptor 0750 awx awx -
-EOF
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/awx-receptor.conf
-
-df --output=fstype /var/lib/receptor | tail -1    # want: xfs or ext4 — NOT tmpfs
-```
-
-> Left unset, receptor's datadir falls back to `/tmp/receptor` — periodically swept, and on some
-> hosts tmpfs-backed, taking in-flight work units with it at reboot.
-
-Raised file limits, because jobs open a lot of files:
-
-```bash
-sudo tee /etc/security/limits.d/awx.conf >/dev/null <<'EOF'
-# AWX limits
-awx soft nofile 4096
-awx hard nofile 8192
-EOF
-```
-
-### Work-signing keys
-
-Even with one node, the controller signs the work it submits and verifies it before running it.
-That closes a real loop: a work unit is an instruction to execute a command, and receptor will
-refuse one that is not signed by a key it trusts.
-
-```bash
-sudo -u awx openssl genrsa -out /etc/receptor/work_private_key.pem 4096
-sudo -u awx openssl rsa -in /etc/receptor/work_private_key.pem \
-  -pubout -out /etc/receptor/work_public_key.pem
-sudo chmod 0600 /etc/receptor/work_private_key.pem
-sudo chmod 0644 /etc/receptor/work_public_key.pem
-```
-
-The private key must be readable by `awx` — signing happens client-side, in `receptorctl`, running
-as the service user.
-
-### receptor.conf
-
-The format is a YAML **list** of single-key sections, not a mapping:
-
-```bash
-sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
----
-- node:
-    id: ace-controller
-    datadir: /var/lib/receptor
-    firewallrules:
-      - action: reject
-        tonode: ace-controller
-        toservice: control
-
-- work-signing:
-    privatekey: /etc/receptor/work_private_key.pem
-    tokenexpiration: 1m
-
-- work-verification:
-    publickey: /etc/receptor/work_public_key.pem
-
-- log-level: info
-
-# One node, no peers: this declares an isolated mesh. The `: null` is load-bearing —
-# see the war story below.
-- local-only: null
-
-- control-service:
-    service: control
-    filename: /run/awx-receptor/receptor.sock
-    permissions: 0660
-
-- work-command:
-    worktype: local
-    command: /var/lib/awx/venv/awx/bin/ansible-runner
-    params: worker
-    allowruntimeparams: true
-    verifysignature: true
-EOF
-```
-
-- **`node.id`** must equal `CLUSTER_HOST_ID` from section 2.
-- **`firewallrules`** is receptor's own rule, not firewalld: reject traffic *from the mesh* aimed at
-  this node's control service. Only local socket clients — the dispatcher — issue control commands.
-- **Both `work-signing` and `work-verification`** are here because this node both submits and runs.
-- **`work-command` with `worktype: local`** is how work executes on this node. This entry, not any
-  listener, is what makes jobs run.
-
-> **War story 1 — a receptor with no backends exits cleanly, which looks like a crash loop.** With
-> no listener and no peers, receptor decides it has nothing to do: it logs
-> `WARNING Nothing to do - no backends are running` and **exits 0**. systemd reports a service that
-> keeps stopping and `receptorctl` throws `Connection refused`, with nothing anywhere saying "you
-> have no backends." `local-only` declares an isolated node deliberately and is exactly right for a
-> single-node mesh. If you hit the loop, fix the config then
-> `sudo systemctl reset-failed receptor` before restarting.
->
-> **War story 2 — write it the way receptor's own docs do (`- local-only`) and AWX cannot read the
-> file.** Receptor accepts the bare form happily: the daemon starts, `receptorctl status` prints the
-> node, this lab's verify passes. Then the first project sync dies in the *dispatcher*:
-> ```
-> File "/opt/awx/awx/main/tasks/receptor.py", line 142, in get_receptor_sockfile
->     for entry_name, entry_data in section.items():
-> AttributeError: 'str' object has no attribute 'items'
-> ```
-> **Why:** AWX assumes every list item is a mapping — `get_receptor_sockfile()` and
-> `get_tls_client()` both call `section.items()`. YAML parses a bare `- local-only` as the *string*
-> `"local-only"`, and strings have no `.items()`. It is fatal rather than cosmetic because the
-> string sits *before* `control-service`, so the loop blows up before finding the socket path —
-> hence a traceback about parsing rather than about connecting.
->
-> **Fix:** give the key a value so YAML produces a dict. That is what AWX itself writes:
-> `RECEPTOR_CONFIG_STARTER` opens with `{'local-only': None}`. **General lesson, and it applies to
-> every entry in this file:** it has two consumers with different parsers, and the stricter one is
-> AWX — so keep every entry a `key: value` mapping, even where receptor's documentation shows a
-> bare directive.
-
-### The unit
-
-```bash
-AWX_UID=$(id -u awx)
-sudo tee /etc/systemd/system/receptor.service >/dev/null <<EOF
-[Unit]
-Description=Receptor mesh node
-After=network-online.target
-Wants=network-online.target
-PartOf=automation-controller.service
-
-[Service]
-Type=simple
-User=awx
-Group=awx
-Environment=XDG_RUNTIME_DIR=/run/user/${AWX_UID}
-ExecStart=/usr/local/bin/receptor --config /etc/receptor/receptor.conf
-ExecReload=/bin/kill -HUP \$MAINPID
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now receptor
-sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /run/awx-receptor/receptor.sock status
-# want: Node ID ace-controller, and 'local' under Secure Work Types
-```
-
-> **Expect a version warning:** `receptorctl and receptor are different versions, they may not be
-> compatible`. That is not a mistake in the steps above. `receptorctl` is a Python package pinned by
-> AWX's own requirements and installed into its venv; the `receptor` daemon is a release binary you
-> downloaded. The two are versioned independently and rarely match exactly. The control protocol is
-> stable across minor versions, so this is noise — but check it if `receptorctl` ever starts
-> returning malformed output, because then it isn't.
-
-`XDG_RUNTIME_DIR` is baked in because **receptor is the parent of podman here** — the dispatcher
-never launches a container itself; it submits a work unit, receptor's work-command spawns
-`ansible-runner`, and ansible-runner starts the EE. A system service gets no `XDG_RUNTIME_DIR` for
-free.
-
----
-
-## 7. The processes
+## 5. The processes
 
 ```bash
 sudo -u awx /var/lib/awx/venv/awx/bin/pip install uwsgi
@@ -956,7 +713,7 @@ sudo -u awx awx-manage list_instances
 
 ---
 
-## 8. nginx
+## 6. nginx
 
 ```bash
 sudo tee /etc/tower/conf.d/csrf.py >/dev/null <<'EOF'
@@ -1161,7 +918,7 @@ That single command tests the CA chain, the SAN, and the socket path at once.
 
 ---
 
-## 9. Join the platform
+## 7. Join the platform
 
 Two directions of trust, in this order. Getting it backwards is the classic failure.
 
@@ -1293,45 +1050,65 @@ sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 
 ---
 
-## 10. The payoff
+---
 
-Open **`https://192.168.56.11`** — no port — and log in as the **gateway** admin.
+## 8. What you have, and what you don't
 
-The console has grown a section. **Automation Execution** is there: projects, templates,
-inventories, jobs. You did not rebuild the UI, restart it, or edit a line of its config. The
-navigation is assembled from the gateway's service registry at page load, and you just added a row.
+Open **`https://192.168.56.11`** and log in as the **gateway** admin.
 
-### Run a job
+The console has grown a section: **Automation Execution** — projects, templates, inventories,
+jobs. You did not rebuild the UI or restart it; the navigation is assembled from the gateway's
+service registry at page load, and you just added a row.
 
-In the left navigation: **Automation Execution → Projects → Demo Project**, then click **sync** (the
-circular-arrows icon).
+Browse around. Everything reads correctly. The controller is genuinely healthy:
 
-Watch it go `Pending → Running → Successful`, live, with no page refresh. That live update is your
-websocket stack — daphne, wsrelay, and the third nginx prefix — working end to end.
+```bash
+sudo -u awx awx-manage list_instances
+# want: capacity > 0, node_type=hybrid, a real version, and a recent heartbeat — in green
+```
 
-Then **Automation Execution → Templates → Demo Job Template → Launch**.
+Now try to use it. **Automation Execution → Projects → Demo Project**, and click **sync**.
 
-Output streams in as the playbook runs. What just happened, in order: envoy took the request on 443,
-authorised it against the gateway over gRPC, attached a JWT, and routed to this node's nginx; uwsgi
-handed it to the API; the dispatcher scheduled it; receptor received a **signed** work unit and
-spawned `ansible-runner`; ansible-runner started an EE container under podman; and the output came
-back through the callback receiver and out over the websocket. Every hop hand-built.
+It goes `Pending → Running → Error`, and the traceback ends:
 
-| Symptom | Where to look |
-|---|---|
-| Job stuck in `pending` forever | `devonly.py` still present (section 1), or the dispatcher is down |
-| Fails instantly, empty `result_traceback` | EE cannot start — linger (section 5), or exit 132 on aarch64 |
-| `Execution Node` blank, or job never dispatched | `register_queue` for `default` (section 4) |
-| Console shows no **Automation Execution** | the registry row from section 9 is missing or envoy hasn't polled yet |
-| Live output never updates | websocket path — check the `/api/controller/v2/websocket/` prefix |
+```
+  File ".../receptorctl/socket_interface.py", line 101, in connect
+    self._socket.connect(path)
+ConnectionRefusedError: [Errno 111] Connection refused
+```
+
+**That is the correct result for this lab.** Nothing is broken. The dispatcher did its job: it
+picked up the work, decided this node should run it, and tried to hand it to a local receptor —
+which does not exist yet.
+
+Two things are worth taking from that error.
+
+**Capacity is not capability.** The instance reports `capacity=13` and shows green, because
+capacity is computed from this machine's CPU and memory. It says how much work the node *could*
+take, not whether any path exists to run it. A node can look perfectly healthy and be unable to
+execute a single playbook.
+
+**And the split is real, not an artifact of this tutorial.** Scheduling and execution are separate
+concerns joined by a signed message over a socket. That is what makes it possible to put execution
+on other machines, in other networks, behind firewalls you do not control — and it is why the
+thing you are missing is a *connection refused* rather than a missing feature.
+
+[Lab 7](07-execution.md) builds the other end of that socket.
 
 ## Verify
 
 ```bash
 sudo supervisorctl status                     # eight programs RUNNING
 sudo -u awx awx-manage list_instances         # capacity > 0, node_type=hybrid
-systemctl is-active nginx supervisord receptor automation-controller
-curl -sk -u "admin:$GW_PW" https://192.168.56.11/api/controller/v2/ping/ | python3 -m json.tool | head -5
+systemctl is-active nginx supervisord automation-controller
+curl -s https://ace-controller/api/v2/ping/ | python3 -m json.tool | head -5
 ```
 
-Next: [Automation hub](07-hub.md)
+From **ace-gateway**, through the platform door:
+
+```bash
+curl -sk -u "admin:$GW_PW" https://192.168.56.11/api/controller/v2/ping/ | python3 -m json.tool | head -5
+# want: AWX's ping JSON — via envoy, gateway authorisation, this node's nginx, uwsgi
+```
+
+Next: [Execution — receptor and podman](07-execution.md)

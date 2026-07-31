@@ -28,14 +28,22 @@ flowchart TB
         gwnginx["nginx :8443<br/>gateway API + the console SPA"]
         gwuwsgi["uwsgi 127.0.0.1:8050<br/>REST API + the service registry"]
         gwgrpc["gRPC control plane :50051<br/>authorises every proxied request"]
-        redis[("Redis<br/>unix socket locally · :6379 for EDA")]
+        redis[("Redis<br/>unix socket locally · :6379 for hub and EDA")]
     end
 
-    subgraph CTL["ace-controller · 192.168.56.12 — hybrid node"]
+    subgraph CTL["ace-controller · 192.168.56.12 — HYBRID node"]
+        direction TB
         ctlnginx["nginx :443"]
-        ctlsup["supervisord · tower-processes<br/>awx-uwsgi · awx-daphne · awx-dispatcher<br/>awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat<br/>awx-rsyslogd · awx-rsyslog-configurer"]
-        rcontrol["receptor<br/>control socket · work signing · local work type"]
-        podmanc["podman — EE containers<br/>project syncs, system jobs AND your jobs"]
+
+        subgraph CONTROL["control plane — Lab 6"]
+            ctlsup["supervisord · tower-processes<br/>awx-uwsgi · awx-daphne · awx-dispatcher<br/>awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat<br/>awx-rsyslogd · awx-rsyslog-configurer"]
+        end
+
+        subgraph EXEC["execution plane — Lab 7"]
+            rcontrol["receptor<br/>control socket · work signing · worktype: local"]
+            runner["ansible-runner worker"]
+            podmanc["podman — EE container<br/>project syncs, system jobs AND your jobs"]
+        end
     end
 
     subgraph HUB["ace-hub · 192.168.56.13"]
@@ -74,12 +82,14 @@ flowchart TB
     edaproc -.->|"5432"| pg
 
     gwuwsgi -.->|"unix socket"| redis
-    edaproc -.->|"6379 across the network"| redis
+    ctlsup -.->|"6379"| redis
+    hubproc -.->|"6379 · db 2"| redis
+    edaproc -.->|"6379 · db 5"| redis
 
-    ctlsup -->|"signed work units, control socket"| rcontrol
-    rcontrol -->|"work-command → ansible-runner"| podmanc
+    ctlsup ==>|"signed work unit<br/>over a local socket"| rcontrol
+    rcontrol --> runner
+    runner --> podmanc
 
-    classDef box fill:#f6f8fa,stroke:#57606a,color:#24292f
     classDef front fill:#ddf4ff,stroke:#0969da,color:#0a3069
     classDef store fill:#fff8c5,stroke:#9a6700,color:#4d2d00
     classDef sandbox fill:#fbefff,stroke:#8250df,color:#3b1e63
@@ -88,7 +98,7 @@ flowchart TB
     class podmanc sandbox
 ```
 
-A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches. **But envoy is only the data plane — the gateway is what assembles the platform.** Envoy knows nothing on its own: every route it serves is a row in the gateway's service registry, fetched over xDS every five seconds; every request it proxies is checked against the gateway's gRPC control plane; and the identity that comes back is a JWT signed by the gateway, which the controller, hub and EDA each validate against a public key they fetch from it at runtime (`ANSIBLE_BASE_JWT_KEY`). That is what "one login for the whole platform" means mechanically — three independently built services trusting one issuer. Rotate the key at the gateway and all three follow. **Every component serves 443 on its own host**, because it has a host to itself; only the gateway uses 8443, and only because envoy shares its machine and owns 443 there. **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear once, as the EE sandbox** (purple) — never as a service you build. **Receptor is the parent of podman:** the dispatcher never launches a container itself, it submits a *signed* work unit to receptor, and receptor's work-command spawns `ansible-runner`, which starts the EE. The controller is a **hybrid** node, so project syncs, system jobs and your jobs all take that path on the same machine — a production build of this topology splits execution onto its own VM and changes nothing else. And the one thing every VM shares is the CA in [Lab 3](docs/03-internal-ca.md): five trust stores, one root, and no private key that ever crossed a machine boundary.
+A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches. **But envoy is only the data plane — the gateway is what assembles the platform.** Every route it serves is a row in the gateway's service registry, fetched over xDS every five seconds; every request is checked against the gateway's gRPC control plane; and the identity that comes back is a JWT signed by the gateway, which the controller, hub and EDA each validate against a public key they fetch from it at runtime. That is what "one login for the whole platform" means mechanically — three independently built services trusting one issuer. **Every component serves 443 on its own host**, because it has a host to itself; only the gateway uses 8443, and only because envoy shares its machine. **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **The controller box is split in two on purpose:** the control plane decides a job should run, the execution plane runs it, and the only thing joining them is a *signed work unit over a local socket*. That is why they are two labs — and why on a production build of this topology the execution half is a sixth VM instead, with nothing else changing. **Receptor is the parent of podman**, never the reverse: the dispatcher hands receptor a work unit, receptor's work-command spawns `ansible-runner`, and ansible-runner starts the container (purple — the only container in the build). And the one thing every VM shares is the CA in [Lab 3](docs/03-internal-ca.md): five trust stores, one root, and no private key that ever crossed a machine boundary.
 
 ## Who this is for
 
@@ -112,9 +122,10 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 
 4. [PostgreSQL](docs/04-postgresql.md) — `ace-db`; four roles, four databases, one server
 5. [The platform gateway](docs/05-gateway.md) — `ace-gateway`; jewel, Redis, nginx, the console, envoy — then it registers itself and 443 opens
-6. [The automation controller](docs/06-controller.md) — `ace-controller`; AWX, receptor as a hybrid node, podman — then it registers, and you run a job from the console
-7. [Automation hub](docs/07-hub.md) — `ace-hub`; galaxy_ng on pulpcore
-8. [Event-Driven Ansible](docs/08-eda.md) — `ace-eda`; eda-server, and the loop closes
+6. [The automation controller](docs/06-controller.md) — `ace-controller`; AWX, its eight processes, nginx — registered and browsable, and unable to run a thing
+7. [Execution: receptor and podman](docs/07-execution.md) — the other end of that; the controller becomes a hybrid node and the first job runs
+8. [Automation hub](docs/08-hub.md) — `ace-hub`; galaxy_ng on pulpcore
+9. [Event-Driven Ansible](docs/09-eda.md) — `ace-eda`; eda-server, and the loop closes
 
 **Appendix labs — break it on purpose**
 

@@ -109,7 +109,7 @@ sudo systemctl enable --now redis
 systemctl is-active redis    # want: active
 ```
 
-> **EDA will need TCP later.** [Lab 8](08-eda.md) connects to redis from another machine, which
+> **EDA will need TCP later.** [Lab 9](09-eda.md) connects to redis from another machine, which
 > means turning the TCP port back on and firewalling it to the lab network. It is left off here
 > deliberately: start closed, open only what a component actually proves it needs.
 
