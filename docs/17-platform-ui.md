@@ -117,12 +117,6 @@ GW=http://127.0.0.1:8080/api/gateway/v1
 read -s -p "gateway admin password: " GW_PW; echo
 ```
 
-> **These are shell commands, not the Python from Lab 16.** Lab 16's `call`/`find` helpers only
-> exist inside `register.py`; pasting them at a prompt gets you
-> `-bash: syntax error near unexpected token '('`. Everything here is plain `curl`, so it works in
-> any shell with no file to source. (Row IDs are looked up by name rather than hardcoded — they're
-> assigned in creation order and yours may differ.)
-
 ```bash
 SVC=$(curl -s -u "admin:${GW_PW}" "$GW/services/?name=gateway%20api" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["id"])')
@@ -138,8 +132,9 @@ Give envoy its five-second xDS poll, then confirm the catch-all serves the SPA i
 
 ```bash
 sleep 6
-curl -sk https://192.168.56.10:8443/ | grep -o 'PlatformMain-[^"]*\.js' | head -1
-# want: a PlatformMain-*.js filename — JSON here means the route hasn't converged yet
+curl -sk https://192.168.56.10:8443/ -o /dev/null -w 'root: %{http_code} %{content_type}\n'
+# want: root: 200 text/html   — the SPA. `application/json` means envoy is still
+#       sending / to the gateway API; give the xDS poll another few seconds.
 ```
 
 ## The 443 pivot
@@ -226,7 +221,7 @@ sudo systemctl restart automation-gateway automation-controller
 ## Verify — the platform on 443
 
 ```bash
-curl -sk https://192.168.56.10/ | grep -o 'PlatformMain-[^"]*\.js' | head -1   # the SPA is the platform build
+curl -sk https://192.168.56.10/ | grep -oE '/assets/index-[^"]+\.js' | head -1   # the SPA's entry bundle
 curl -sk https://192.168.56.10/platform-logo.svg -o /dev/null -w '%{http_code}\n'  # Ansible logo: 200
 
 # one login, reaching the controller — through 443:
