@@ -302,6 +302,7 @@ startsecs=0
 stopsignal=TERM
 stopasgroup=true
 killasgroup=true
+redirect_stderr=true
 stdout_logfile=/var/log/supervisor/awx-rsyslog.log
 
 [program:awx-rsyslog-configurer]
@@ -345,5 +346,31 @@ sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf stat
 ```bash
 sudo ls -l /var/lib/awx/rsyslog/rsyslog.conf
 ```
+
+**Then check it actually stayed up**, because a permanent flap looks almost identical to a brief one in `status` — the state says `RUNNING` either way, and only the uptime gives it away:
+
+```bash
+sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf status tower-processes:awx-rsyslogd
+sleep 8
+sudo /var/lib/awx/venv/awx/bin/supervisorctl -c /etc/tower/supervisord.conf status tower-processes:awx-rsyslogd
+# want: the uptime GREW and the pid is unchanged. A fresh pid with uptime 0:00:00
+#       both times means it is restarting in a loop.
+```
+
+> **War story — the flap you can't see.** If it is looping, the usual cause is the runtime directory: skip the `/etc/tmpfiles.d/awx-rsyslog.conf` step above (or reboot without it, since `/run` is tmpfs) and rsyslogd cannot create its socket or pid file. It exits immediately, supervisor restarts it, forever.
+>
+> What makes it expensive is that **the log is empty**: rsyslogd writes that error to *stderr*, and without `redirect_stderr=true` supervisor throws it away — which is why the directive is in the program block above. Add it and the reason is right there in `/var/log/supervisor/awx-rsyslog.log`:
+>
+> ```
+> rsyslogd: cannot create '/var/run/awx-rsyslog/rsyslog.sock': No such file or directory
+> rsyslogd: imuxsock does not run because we could not acquire any socket
+> rsyslogd: run failed with error -3000
+> ```
+>
+> The fix is the tmpfiles.d entry, then `supervisorctl restart tower-processes:awx-rsyslogd`. You can always reproduce the real error by running the command by hand, which is how you find it when stderr is going nowhere:
+>
+> ```bash
+> sudo -u awx timeout 5 rsyslogd -n -i /var/run/awx-rsyslog/rsyslog.pid -f /var/lib/awx/rsyslog/rsyslog.conf
+> ```
 
 Next: [Building the UI](09-awx-ui.md)
