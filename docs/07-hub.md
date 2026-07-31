@@ -1,14 +1,40 @@
-# Lab 18 — Automation Hub (galaxy_ng from source)
+# Lab 7 — Automation hub
+
+## What this is
+
+Automation hub is the platform's private content repository: the place your automation gets its
+collections and execution-environment images from, instead of reaching out to the public internet
+every time a job runs.
+
+It is **galaxy_ng** — a set of Ansible-specific plugins — running on **pulpcore**, a general content
+management engine. Pulp does the heavy lifting (storage, versioning, syncing, signing); galaxy_ng
+adds the Ansible concepts on top.
+
+## Where it fits
+
+The controller pulls collections from here when it builds a project's environment, and pulls EE
+images from here when it runs a job. Without a hub, both of those come from `galaxy.ansible.com`
+and `quay.io` — which works, until you need an air-gapped network, a curated set of collections, or
+a guarantee that yesterday's job and today's job used the same content.
+
+```
+   console ──► envoy :443 ──► /api/galaxy/ ──► ace-hub :443 nginx ──┬── pulpcore-api      (REST)
+                                                                    ├── pulpcore-content  (downloads)
+                                                                    └── pulpcore-worker   (syncs, imports)
+```
+
+Like every other component, it joins the platform by inserting rows into the gateway's registry —
+and this lab ends with it appearing in the console.
 
 ## What you will have at the end
 
 Automation Hub — **galaxy_ng** on **pulpcore** — built from source, running as a
 pulp service family (API + content + workers), fronted by its own nginx, and
-registered behind the gateway so `https://192.168.56.10/api/galaxy/…`
+registered behind the gateway so `https://192.168.56.11/api/galaxy/…`
 authenticates with the same platform login as the controller.
 
 ```
-envoy :443 ──/api/galaxy/…──► nginx :8444 ──┬── unix:/…/pulpcore-api.sock      (gunicorn, the REST API + galaxy_ng)
+envoy :443 ──/api/galaxy/…──► nginx :443 ──┬── unix:/…/pulpcore-api.sock      (gunicorn, the REST API + galaxy_ng)
    (gateway JWT)                              └── unix:/…/pulpcore-content.sock  (gunicorn, artifact serving)
                                               pulpcore-worker@1, @2              (tasking)
 ```
@@ -20,7 +46,7 @@ envoy :443 ──/api/galaxy/…──► nginx :8444 ──┬── unix:/…/
 > the version notes below before you `pip install` anything; getting them wrong costs a
 > full rebuild.
 
-All commands on **ace-control** (hub is a control-plane service in this single-box lab).
+All commands on **ace-hub** unless stated otherwise.
 
 ## Foundation: user, dirs, database
 
@@ -111,10 +137,10 @@ REDIS_URL = "unix:///var/run/redis/redis.sock?db=2"
 SECRET_KEY = "CHANGE-ME-RANDOM"
 DB_ENCRYPTION_KEY = "/etc/pulp/certs/database_fields.symmetric.key"
 
-CONTENT_ORIGIN = "https://192.168.56.10"
-ANSIBLE_API_HOSTNAME = "https://192.168.56.10"
-ANSIBLE_CONTENT_HOSTNAME = "https://192.168.56.10/pulp/content"
-TOKEN_SERVER = "https://192.168.56.10/token/"
+CONTENT_ORIGIN = "https://192.168.56.11"
+ANSIBLE_API_HOSTNAME = "https://192.168.56.11"
+ANSIBLE_CONTENT_HOSTNAME = "https://192.168.56.11/pulp/content"
+TOKEN_SERVER = "https://192.168.56.11/token/"
 API_ROOT = "/api/galaxy/pulp/"
 CONTENT_PATH_PREFIX = "/pulp/content/"
 STATIC_ROOT = "/var/lib/pulp/assets"
@@ -138,9 +164,9 @@ STORAGES = {
 # gateway integration (galaxy_ng JWT consumer)
 ANSIBLE_BASE_JWT_REDIRECT_TYPE = "hub"
 ANSIBLE_BASE_JWT_VALIDATE_CERT = False
-ANSIBLE_BASE_JWT_KEY = "https://192.168.56.10"
+ANSIBLE_BASE_JWT_KEY = "https://192.168.56.11"
 ANSIBLE_BASE_ROLES_REQUIRE_VIEW = False
-CSRF_TRUSTED_ORIGINS = ["https://192.168.56.10"]
+CSRF_TRUSTED_ORIGINS = ["https://192.168.56.11"]
 ENABLE_SERVICE_BACKED_SSO = False
 GALAXY_AUTHENTICATION_CLASSES = [
     "galaxy_ng.app.auth.session.SessionAuthentication",
@@ -271,21 +297,34 @@ curl -s --unix-socket /run/pulpcore-api/pulpcore-api.sock \
 # want: components core/galaxy/container/ansible/…, online_workers and online_content_apps > 0
 ```
 
-## nginx front on 8444 (443 belongs to the controller)
+## nginx
 
-Hub gets its own server block and its own lab-CA-signed cert, on **8444** — the controller's
-nginx already owns 443 on this shared box.
+Hub has a host to itself, so it serves **443** like the controller and EDA do. Only the gateway
+uses a non-standard port, and only because envoy shares its machine.
+
+The certificate comes from [Lab 3](03-internal-ca.md)'s two-step procedure — the key is generated
+here and never leaves:
 
 ```bash
-sudo /usr/local/sbin/ace-sign-service pulp_webserver /etc/pulp/certs pulp ace-control
-sudo chown pulp:pulp /etc/pulp/certs
+# on ace-hub
+sudo /usr/local/sbin/ace-request-cert pulp_webserver /etc/pulp/certs pulp
+```
+```bash
+# on ace-gateway
+sudo /usr/local/sbin/ace-sign-request ace-hub-pulp_webserver
+```
+```bash
+# back on ace-hub
+sudo install -o root -g pulp -m 0644 /vagrant/ace-hub-pulp_webserver.crt /etc/pulp/certs/pulp_webserver.crt
+sudo rm -f /vagrant/ace-hub-pulp_webserver.crt
+sudo openssl verify /etc/pulp/certs/pulp_webserver.crt      # want: OK
 
 sudo tee /etc/nginx/conf.d/automation-hub.nginx.conf >/dev/null <<'EOF'
 upstream pulp-api     { server unix:/run/pulpcore-api/pulpcore-api.sock; }
 upstream pulp-content { server unix:/run/pulpcore-content/pulpcore-content.sock; }
 
 server {
-    listen 8444 ssl default_server;
+    listen 443 ssl default_server;
     server_name _;
     ssl_certificate     /etc/pulp/certs/pulp_webserver.crt;
     ssl_certificate_key /etc/pulp/certs/pulp_webserver.key;
@@ -313,17 +352,16 @@ server {
 EOF
 ```
 
-> **SELinux port trap.** nginx (`httpd_t`) may only bind ports labeled `http_port_t`, and 8444
-> isn't one of them by default — `nginx -t` passes but the reload fails with
-> `bind() to 0.0.0.0:8444 failed (13: Permission denied)`. Label the port first:
-> ```bash
-> sudo semanage port -a -t http_port_t -p tcp 8444
-> ```
+> No `semanage port` step is needed: 443 is already labelled `http_port_t`. That is one of the
+> quieter benefits of every component having its own host — a non-standard port would need
+> labelling, and the failure when you forget is silent (`nginx -t` passes, the reload succeeds,
+> nothing binds, and the only evidence is `bind() … (13: Permission denied)` in the *main* error
+> log).
 
 ```bash
-sudo firewall-cmd --permanent --add-port=8444/tcp && sudo firewall-cmd --reload
+sudo firewall-cmd --permanent --add-port=443/tcp && sudo firewall-cmd --reload
 sudo nginx -t && sudo systemctl reload nginx
-curl -sk https://127.0.0.1:8444/api/galaxy/pulp/api/v3/status/ -o /dev/null -w "hub via nginx: %{http_code}\n"  # want: 200
+curl -sk https://127.0.0.1:443/api/galaxy/pulp/api/v3/status/ -o /dev/null -w "hub via nginx: %{http_code}\n"  # want: 200
 ```
 
 ## Register the hub behind the gateway
@@ -336,17 +374,17 @@ a `galaxy` service under `/api/galaxy/`, plus the container-registry routes. Sav
 st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
 hp  = find("/http_ports/", "API Port")
 hub = ensure("/service_clusters/", "hub", {"name": "hub", "service_type": st["hub"]})
-ensure("/service_nodes/", "Node hub - ace-control",
-       {"name": "Node hub - ace-control", "address": "192.168.56.10", "service_cluster": hub})
+ensure("/service_nodes/", "Node hub - ace-hub",
+       {"name": "Node hub - ace-hub", "address": "192.168.56.10", "service_cluster": hub})
 ensure("/services/", "galaxy api",
        {"name": "galaxy api", "api_slug": "galaxy", "http_port": hp, "service_cluster": hub,
-        "is_service_https": True, "service_path": "/api/galaxy/", "service_port": 8444, "order": 2})
+        "is_service_https": True, "service_path": "/api/galaxy/", "service_port": 443, "order": 2})
 for nm, gp in [("hub container registry", "/v2/"), ("pulp content", "/pulp/"),
                ("hub ui static", "/static/galaxy_ng/"), ("pulp container tokens", "/token/")]:
     if find("/routes/", nm):
         continue
     call("POST", "/routes/", {"name": nm, "gateway_path": gp, "service_path": gp, "http_port": hp,
-        "service_cluster": hub, "is_service_https": True, "service_port": 8444, "enable_gateway_auth": True})
+        "service_cluster": hub, "is_service_https": True, "service_port": 443, "enable_gateway_auth": True})
 ```
 
 Then mint the hub's service secret and add it to the pulp settings so galaxy_ng trusts the
@@ -357,7 +395,7 @@ sudo -u gateway aap-gateway-manage generate_service_secret galaxy   # RECORD it
 
 sudo tee -a /etc/pulp/settings.py >/dev/null <<'EOF'
 RESOURCE_SERVER = {
-    "URL": "https://192.168.56.10",
+    "URL": "https://192.168.56.11",
     "SECRET_KEY": "PASTE-THE-GALAXY-SECRET",
     "VALIDATE_HTTPS": False,
 }
@@ -370,10 +408,10 @@ sudo systemctl restart pulpcore-api pulpcore-content pulpcore-worker@1 pulpcore-
 
 ```bash
 # unauthenticated status, proxied through envoy → nginx → pulp
-curl -sk https://192.168.56.10/api/galaxy/pulp/api/v3/status/ | python3 -m json.tool | grep component
+curl -sk https://192.168.56.11/api/galaxy/pulp/api/v3/status/ | python3 -m json.tool | grep component
 
 # the real test: JWT SSO. one platform login reaches galaxy_ng as the platform admin:
-curl -skL -u "admin:CHANGE-ME" https://192.168.56.10/api/galaxy/_ui/v1/me/ \
+curl -skL -u "admin:CHANGE-ME" https://192.168.56.11/api/galaxy/_ui/v1/me/ \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["username"], d["is_superuser"])'
 # want: admin True — the gateway minted a JWT, galaxy_ng's HubJWTAuth validated it,
 #       and mapped it to the platform admin. SSO across the whole platform.
@@ -386,7 +424,7 @@ curl -skL -u "admin:CHANGE-ME" https://192.168.56.10/api/galaxy/_ui/v1/me/ \
 
 ## The payoff — it appears in the console
 
-Now open the platform UI from [Lab 7](07-platform-ui.md) at **`https://192.168.56.10`** and
+Now open the platform UI from [Lab 7](07-platform-ui.md) at **`https://192.168.56.11`** and
 **refresh**. The navigation has grown a section: **Automation Content**, alongside Automation
 Execution.
 

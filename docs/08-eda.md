@@ -1,14 +1,43 @@
-# Lab 19 — Event-Driven Ansible (eda-server from source)
+# Lab 8 — Event-Driven Ansible
+
+## What this is
+
+Event-Driven Ansible turns the platform from something you *tell* to run automation into something
+that runs automation *because something happened*.
+
+It is **eda-server**: an API and a set of workers that run **rulebooks** — sources that listen
+(a webhook, a Kafka topic, an alert stream), conditions that match, and actions that fire. The
+usual action is "launch a job template on the controller".
+
+## Where it fits
+
+This is the last component, and it is the one that closes the loop. The controller runs automation
+on demand; EDA decides when demand exists.
+
+```
+   an event ──► eda-server rulebook ──► condition matches
+                                              │
+                                              └──► launches a job template
+                                                   on ace-controller, through the gateway
+
+   console ──► envoy :443 ──► /api/eda/ ──► ace-eda :443 nginx ──┬── API + websockets
+                                                                 ├── scheduler
+                                                                 └── activation workers
+```
+
+It depends on more of the platform than anything else: PostgreSQL on ace-db, Redis on ace-gateway,
+the gateway for identity, and the controller as the thing it ultimately triggers. That makes it a
+good last build — if EDA works, everything underneath it does.
 
 ## What you will have at the end
 
 Event-Driven Ansible — **eda-server** — built from source, running as its systemd
 service family (API, websockets, scheduler, worker), fronted by its own nginx, and
-registered behind the gateway so `https://192.168.56.10/api/eda/…` authenticates
+registered behind the gateway so `https://192.168.56.11/api/eda/…` authenticates
 with the same platform login as the controller and the hub.
 
 ```
-envoy :443 ──/api/eda/…──► nginx :8445 ──┬── unix:/run/eda/eda-api.sock   (gunicorn, aap_eda.wsgi — REST API)
+envoy :443 ──/api/eda/…──► nginx :443 ──┬── unix:/run/eda/eda-api.sock   (gunicorn, aap_eda.wsgi — REST API)
    (gateway JWT)                           └── unix:/run/eda/eda-ws.sock    (daphne, aap_eda.asgi — websockets)
                                            aap-eda-manage scheduler         (periodic)
                                            aap-eda-manage dispatcherd       (DefaultWorker — pg_notify tasking, like AWX)
@@ -19,18 +48,25 @@ envoy :443 ──/api/eda/…──► nginx :8445 ──┬── unix:/run/eda
 > *same* DAB the gateway (jewel-devel) uses — so JWT single sign-on lines up on the first try.
 > Track `main`, not a stable branch, for exactly this reason.
 
-All commands on **ace-control**.
+All commands on **ace-eda**.
 
 ## Foundation
 
 ```bash
 sudo useradd --system --home-dir /var/lib/eda --create-home --shell /bin/bash eda
 sudo install -d -o eda -g eda /var/lib/eda /var/lib/eda/media /var/lib/eda/static /etc/eda
-sudo usermod -aG redis eda
-
-sudo -iu postgres psql -c "CREATE USER eda WITH PASSWORD 'CHANGE-ME';"
-sudo -iu postgres psql -c "CREATE DATABASE eda OWNER eda;"
 ```
+
+The database role already exists — [Lab 4](04-postgresql.md) created all four up front. Confirm
+this node can reach it before building anything:
+
+```bash
+sudo dnf -y install postgresql
+PGPASSWORD='CHANGE-ME-eda' psql -h ace-db -U eda -d eda -c 'SELECT 1'   # want: one row
+```
+
+There is no `usermod -aG redis` here, because redis is on **ace-gateway** — this is the one
+component that reaches the cache across the network, and the next section opens that path.
 
 ## Clone and build
 
@@ -104,7 +140,7 @@ MQ_HOST: localhost
 MQ_PORT: 6379
 MQ_DB: 5
 # gateway integration (JWT consumer)
-ANSIBLE_BASE_JWT_KEY: https://192.168.56.10
+ANSIBLE_BASE_JWT_KEY: https://192.168.56.11
 ANSIBLE_BASE_JWT_VALIDATE_CERT: false
 ANSIBLE_BASE_JWT_REDIRECT_TYPE: eda
 ANSIBLE_BASE_MANAGED_ROLE_REGISTRY:
@@ -120,17 +156,39 @@ sudo chmod 0640 /etc/eda/settings.yaml
 sudo vim /etc/eda/settings.yaml    # set the real DB password
 ```
 
-## Redis: a loopback TCP listener
+## Redis over the network
 
-EDA addresses redis by **host:port** (for the channels/websocket layer), but Lab 5's redis is
-**socket-only** (`port 0`). Add a loopback TCP listener *alongside* the socket — the socket
-stays for the controller and hub, EDA gets its port:
+EDA addresses redis by **host:port** for its channels and websocket layer, and
+[Lab 5](05-gateway.md) deliberately left redis socket-only (`port 0`). This is the component that
+needs it opened, so this is where it gets opened — on **ace-gateway**, not here:
 
 ```bash
-sudo sed -i 's/^port 0/port 6379\nbind 127.0.0.1 -::1/' /etc/redis/redis.conf
+# on ace-gateway
+sudo sed -i 's/^port 0/port 6379/' /etc/redis/redis.conf
+grep -E '^(port|bind|unixsocket) ' /etc/redis/redis.conf
+# want: port 6379, bind 127.0.0.1 192.168.56.11, and the unixsocket line intact
 sudo systemctl restart redis
-sudo -u awx redis-cli -s /var/run/redis/redis.sock ping    # want: PONG — socket still works
+
+sudo firewall-cmd --permanent --add-port=6379/tcp
+sudo firewall-cmd --reload
 ```
+
+The socket stays — the gateway keeps using it locally, which is both faster and unreachable from
+the network. EDA gets the TCP port, firewalled to the lab network by the `bind` line.
+
+```bash
+# back on ace-eda — prove the path before trusting it
+sudo dnf -y install redis          # for redis-cli
+redis-cli -h ace-gateway -p 6379 ping     # want: PONG
+```
+
+> **Start closed, open what a component proves it needs.** Redis was socket-only for two labs
+> because nothing needed more. Opening it now, for one named consumer, with a `bind` that names one
+> interface, is a smaller decision than having left it open since Lab 5 — and you can say exactly
+> which component justified it.
+>
+> This is also the only cross-node cache dependency in the build, which is worth noticing: if
+> ace-gateway is down, EDA's websockets stop, but the controller and hub carry on.
 
 ## Migrate, init, admin, static
 
@@ -247,16 +305,16 @@ curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ 
 > EEs. Add it as a fifth unit when you want to run activations; the API, scheduler, and
 > default worker above are enough to bring EDA up and register it with the platform.
 
-## nginx front on 8445
+## nginx
 
 ```bash
-sudo /usr/local/sbin/ace-sign-service server /etc/ansible-automation-platform/eda eda ace-control cert
+sudo /usr/local/sbin/ace-sign-service server /etc/ansible-automation-platform/eda eda ace-eda cert
 
 sudo tee /etc/nginx/conf.d/automation-eda.nginx.conf >/dev/null <<'EOF'
 upstream eda-api { server unix:/run/eda/eda-api.sock; }
 upstream eda-ws  { server unix:/run/eda/eda-ws.sock; }
 server {
-    listen 8445 ssl default_server;
+    listen 443 ssl default_server;
     server_name _;
     ssl_certificate     /etc/ansible-automation-platform/eda/server.cert;
     ssl_certificate_key /etc/ansible-automation-platform/eda/server.key;
@@ -281,10 +339,10 @@ server {
 }
 EOF
 
-sudo semanage port -a -t http_port_t -p tcp 8445    # nginx may only bind labeled ports (Lab 18)
-sudo firewall-cmd --permanent --add-port=8445/tcp && sudo firewall-cmd --reload
+sudo semanage port -a -t http_port_t -p tcp 443    # nginx may only bind labeled ports (Lab 18)
+sudo firewall-cmd --permanent --add-port=443/tcp && sudo firewall-cmd --reload
 sudo nginx -t && sudo systemctl reload nginx
-curl -sk https://127.0.0.1:8445/api/eda/v1/status/ -o /dev/null -w "eda via nginx: %{http_code}\n"  # want: 200
+curl -sk https://127.0.0.1:443/api/eda/v1/status/ -o /dev/null -w "eda via nginx: %{http_code}\n"  # want: 200
 ```
 
 ## Register behind the gateway
@@ -296,11 +354,11 @@ helpers). One EDA cluster/node/service, then the service secret:
 st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
 hp  = find("/http_ports/", "API Port")
 eda = ensure("/service_clusters/", "eda", {"name": "eda", "service_type": st["eda"]})
-ensure("/service_nodes/", "Node eda - ace-control",
-       {"name": "Node eda - ace-control", "address": "192.168.56.10", "service_cluster": eda, "tags": "api"})
+ensure("/service_nodes/", "Node eda - ace-eda",
+       {"name": "Node eda - ace-eda", "address": "192.168.56.10", "service_cluster": eda, "tags": "api"})
 ensure("/services/", "eda api",
        {"name": "eda api", "api_slug": "eda", "http_port": hp, "service_cluster": eda,
-        "is_service_https": True, "service_path": "/api/eda/", "service_port": 8445,
+        "is_service_https": True, "service_path": "/api/eda/", "service_port": 443,
         "order": 3, "node_tags": "api"})
 ```
 
@@ -309,7 +367,7 @@ sudo -u gateway aap-gateway-manage generate_service_secret eda   # RECORD it
 
 sudo tee -a /etc/eda/settings.yaml >/dev/null <<'EOF'
 RESOURCE_SERVER:
-  URL: https://192.168.56.10
+  URL: https://192.168.56.11
   SECRET_KEY: PASTE-THE-EDA-SECRET
   VALIDATE_HTTPS: false
 EOF
@@ -320,9 +378,9 @@ sudo systemctl restart automation-eda-api automation-eda-default-worker
 ## Verify — EDA through the platform door
 
 ```bash
-curl -sk https://192.168.56.10/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"  # 200
+curl -sk https://192.168.56.11/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"  # 200
 
-curl -sk -u "admin:CHANGE-ME" https://192.168.56.10/api/eda/v1/users/me/ \
+curl -sk -u "admin:CHANGE-ME" https://192.168.56.11/api/eda/v1/users/me/ \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["username"], d["is_superuser"], d["resource"]["resource_type"])'
 # want: admin True shared.user — the gateway minted a JWT, EDA's DAB JWT consumer validated
 #       it, and resolved the platform's shared user. SSO across controller + hub + EDA.
@@ -334,7 +392,7 @@ from source.
 
 ## The payoff — the console is complete
 
-Refresh the platform UI at **`https://192.168.56.10`** one last time. **Automation Decisions**
+Refresh the platform UI at **`https://192.168.56.11`** one last time. **Automation Decisions**
 joins Automation Execution and Automation Content, and the navigation you saw in Lab 7 with a
 single entry is now the full platform — one login reaching three services you built from source,
 on three different Python versions, sharing one identity.
