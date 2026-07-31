@@ -297,7 +297,7 @@ The CA is on this machine ([Lab 3](03-internal-ca.md)), so both halves of the si
 here:
 
 ```bash
-sudo /usr/local/sbin/ace-request-cert gateway /etc/ansible-automation-platform/gateway gateway cert client
+sudo /usr/local/sbin/ace-request-cert gateway /etc/ansible-automation-platform/gateway gateway cert
 sudo /usr/local/sbin/ace-sign-request ace-gateway-gateway cert
 sudo install -o root -g gateway -m 0644 \
   /vagrant/ace-gateway-gateway.cert /etc/ansible-automation-platform/gateway/gateway.cert

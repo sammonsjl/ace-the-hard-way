@@ -287,16 +287,32 @@ That single `openssl verify` proves three things at once: the CA signed it, the 
 
 | Lab | Node | Certificate | Role |
 |---|---|---|---|
-| [5 — the gateway](05-gateway.md) | ace-gateway | `gateway.cert` | server **and client** |
+| [5 — the gateway](05-gateway.md) | ace-gateway | `gateway.cert` | server only |
 | [6 — the controller](06-controller.md) | ace-controller | `tower.cert` | server only |
 | [8 — hub](08-hub.md) | ace-hub | `pulp_webserver.crt` | server only |
-| [9 — EDA](09-eda.md) | ace-eda | `server.cert` | server **and client** |
+| [9 — EDA](09-eda.md) | ace-eda | `server.cert` | server only |
 
-The gateway and EDA pass `client` as the fifth argument, because both *initiate* TLS connections as
-well as accepting them — the gateway calls every service it proxies to, and EDA calls the
-controller to launch jobs. Their certificates carry `extendedKeyUsage=clientAuth` as a result. The
-controller and hub only ever answer, so theirs do not. Handing every service `clientAuth` because
-it is easier would be a small, permanent overreach.
+Every certificate here is a **server** certificate, so none of them passes `client` and none carries
+`extendedKeyUsage=clientAuth`. The fifth argument exists anyway, because it is the one distinction
+worth being able to make — and getting it wrong is instructive.
+
+> **Do not add `client` to these.** A certificate whose `extendedKeyUsage` lists *only* `clientAuth`
+> is not usable as a server certificate: OpenSSL verifies a server cert against the `serverAuth`
+> purpose, and an EKU that omits it fails the check. nginx and envoy will still load and serve such
+> a cert quite happily — `curl -k` works, a browser complains vaguely — but any client that verifies
+> properly dies with
+> ```
+> [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unsuitable certificate purpose
+> ```
+> and the failure surfaces far from the cause. Ours surfaced in `migrate_service_data` in
+> [Lab 6](06-controller.md), one lab and two components later.
+>
+> The upstream deployment this build follows *does* mark the gateway and EDA as clients — but it
+> does so for a **second, separate certificate** on those hosts, a `cache` keypair used as an mTLS
+> *client* credential to Redis. That is a different file with a different job from the one nginx
+> serves. Our build talks to Redis over a plain socket and port, so it has no `cache` certificate at
+> all, and therefore nothing that should carry `clientAuth`. If you ever add Redis mTLS, that is
+> where the flag belongs — on its own certificate, never on the server's.
 
 Note the inconsistent extensions — `.cert` for some, `.crt` for others. That is not a typo here;
 the services genuinely disagree about what to call a certificate and their configuration files

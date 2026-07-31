@@ -373,6 +373,10 @@ sudo install -o root -g pulp -m 0644 /vagrant/ace-hub-pulp_webserver.crt /etc/pu
 sudo rm -f /vagrant/ace-hub-pulp_webserver.crt
 sudo openssl verify /etc/pulp/certs/pulp_webserver.crt      # want: OK
 
+sudo dnf -y module enable nginx:1.24
+sudo dnf -y install nginx
+sudo setsebool -P httpd_can_network_connect on
+
 sudo tee /etc/nginx/conf.d/automation-hub.nginx.conf >/dev/null <<'EOF'
 upstream pulp-api     { server unix:/run/pulpcore-api/pulpcore-api.sock; }
 upstream pulp-content { server unix:/run/pulpcore-content/pulpcore-content.sock; }
@@ -414,22 +418,113 @@ EOF
 
 ```bash
 sudo firewall-cmd --permanent --add-port=443/tcp && sudo firewall-cmd --reload
-sudo nginx -t && sudo systemctl reload nginx
+```
+
+nginx reaches both pulpcore sockets over unix, which crosses the same pair of SELinux checks
+[Lab 6](06-controller.md) hit — `write` on the socket inode and `connectto` against the domain
+that bound it. Same two-rule module, same reason:
+
+```bash
+sudo dnf -y install setools-console
+sudo tee /tmp/ace-nginx-upstream.te >/dev/null <<'EOF'
+module ace-nginx-upstream 1.1;
+
+require {
+    type httpd_t;
+    type unconfined_service_t;
+    type var_run_t;
+    class unix_stream_socket connectto;
+    class sock_file write;
+}
+
+allow httpd_t var_run_t:sock_file write;
+allow httpd_t unconfined_service_t:unix_stream_socket connectto;
+EOF
+checkmodule -M -m -o /tmp/ace-nginx-upstream.mod /tmp/ace-nginx-upstream.te
+semodule_package -o /tmp/ace-nginx-upstream.pp -m /tmp/ace-nginx-upstream.mod
+sudo semodule -i /tmp/ace-nginx-upstream.pp
+
+sudo nginx -t && sudo systemctl enable --now nginx
 curl -sk https://127.0.0.1:443/api/galaxy/pulp/api/v3/status/ -o /dev/null -w "hub via nginx: %{http_code}\n"  # want: 200
 ```
 
+> Skip the module and you get a **502** with `connect() to unix:/run/pulpcore-api/pulpcore-api.sock
+> failed (13: Permission denied)` in the error log — while `ausearch` reports *nothing*, because the
+> `sock_file` denial sits behind a `dontaudit` rule.
+
 ## Register the hub behind the gateway
 
-Same REST-with-PKs pattern as [Lab 6](06-controller.md) — a `hub` cluster and node,
-a `galaxy` service under `/api/galaxy/`, plus the container-registry routes. Save as
-`reghub.py` (the same shape as the gateway's own registration in [Lab 5](05-gateway.md)):
+Same registry rows as [Lab 5](05-gateway.md) and [Lab 6](06-controller.md) — a `hub` cluster and
+node, a `galaxy` service under `/api/galaxy/`, plus the container-registry routes. Those two labs
+did it with `curl`, which was fine for four calls. The hub needs nine, every one of them
+referencing another row by primary key, so from here on it is worth a small helper.
+
+Save this as `register.py` on **ace-gateway** — Lab 9 reuses it as-is:
+
+```python
+#!/usr/bin/env python3
+"""Helpers for registering a service with the gateway's REST API.
+
+Everything the gateway routes is a row in its registry, and each row references
+others by primary key. Nothing here hard-codes a PK: look them up by name.
+Idempotent — re-running creates nothing twice.
+"""
+import base64, getpass, json, os, ssl, urllib.error, urllib.request
+
+GW = "https://127.0.0.1:8443/api/gateway/v1"
+PW = os.environ.get("GW_PW") or getpass.getpass("gateway admin password: ")
+
+# 127.0.0.1 is not in the certificate's SAN — the name is. Verification is off for
+# this loopback call only; every cross-host call in these labs verifies properly.
+CTX = ssl.create_default_context()
+CTX.check_hostname = False
+CTX.verify_mode = ssl.CERT_NONE
+
+AUTH = "Basic " + base64.b64encode(f"admin:{PW}".encode()).decode()
+
+
+def call(method, path, body=None):
+    req = urllib.request.Request(
+        GW + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None)
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", AUTH)
+    try:
+        with urllib.request.urlopen(req, context=CTX) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"{method} {path} -> {e.code}: {e.read().decode()[:300]}")
+
+
+def find(path, name):
+    """Return the id of the row with this name, or None."""
+    for row in call("GET", path)["results"]:
+        if row.get("name") == name:
+            return row["id"]
+    return None
+
+
+def ensure(path, name, body):
+    """Create the row if it isn't there; return its id either way."""
+    existing = find(path, name)
+    if existing is not None:
+        print(f"  = {name} (id {existing})")
+        return existing
+    new = call("POST", path, body)["id"]
+    print(f"  + {name} (id {new})")
+    return new
+```
+
+Then append the hub's own rows to the bottom of that same file and run it with
+`python3 register.py`:
 
 ```python
 st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
 hp  = find("/http_ports/", "API Port")
 hub = ensure("/service_clusters/", "hub", {"name": "hub", "service_type": st["hub"]})
 ensure("/service_nodes/", "Node hub - ace-hub",
-       {"name": "Node hub - ace-hub", "address": "192.168.56.10", "service_cluster": hub})
+       {"name": "Node hub - ace-hub", "address": "192.168.56.13", "service_cluster": hub})
 ensure("/services/", "galaxy api",
        {"name": "galaxy api", "api_slug": "galaxy", "http_port": hp, "service_cluster": hub,
         "is_service_https": True, "service_path": "/api/galaxy/", "service_port": 443, "order": 2})

@@ -352,28 +352,48 @@ back through the callback receiver and out over the websocket. Every hop hand-bu
 
 ```bash
 sudo supervisorctl status                     # eight programs RUNNING
-sudo -u awx awx-manage list_instances         # capacity > 0, node_type=hybrid
 systemctl is-active nginx supervisord receptor automation-controller
-curl -sk -u "admin:$GW_PW" https://192.168.56.11/api/controller/v2/ping/ | python3 -m json.tool | head -5
-```
-
-Next: [Automation hub](08-hub.md)
-
-## Verify
-
-```bash
-systemctl is-active receptor
 sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /run/awx-receptor/receptor.sock status
 # want: Node ID ace-controller, 'local' under Secure Work Types
 
-sudo -u awx awx-manage list_instances         # capacity > 0, node_type=hybrid
+sudo -u awx awx-manage list_instances
+# want: capacity > 0 and node_type=hybrid, in both the controlplane and default queues
 ```
 
-And the check that actually matters — the one that failed at the end of Lab 6:
+And the check that actually matters — the one that failed at the end of Lab 6. In the console:
+**Automation Execution → Projects → Demo Project → sync**, and watch it go
+`Pending → Running → Successful`.
+
+The same thing from a terminal, if you would rather not click — through the platform door, which
+also proves the gateway route while you are here:
 
 ```bash
-# Automation Execution -> Projects -> Demo Project -> sync
-# want: Pending -> Running -> Successful
+GW=https://192.168.56.11/api/controller/v2
+read -s -p "gateway admin password: " GW_PW; echo
+
+ID=$(curl -sk -u "admin:$GW_PW" $GW/projects/ \
+     | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["id"])')
+J=$(curl -sk -u "admin:$GW_PW" -X POST $GW/projects/$ID/update/ \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+
+for i in $(seq 30); do
+  curl -sk -u "admin:$GW_PW" $GW/project_updates/$J/ \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])'
+  sleep 6
+done
+# want: running -> successful
 ```
+
+Then confirm it really was a container, and really was this node doing both jobs:
+
+```bash
+sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
+  podman events --since 10m --until 1s --format '{{.Status}} {{.Image}}'
+# want: init / start / died / remove against quay.io/ansible/awx-ee:latest
+```
+
+A hybrid node shows the same hostname for both `controller_node` and `execution_node` on the
+finished job — the decision and the execution happened on one machine, joined only by that signed
+work unit.
 
 Next: [Automation hub](08-hub.md)

@@ -313,8 +313,8 @@ curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ 
 ## nginx
 
 ```bash
-# on ace-eda — EDA is a TLS client as well as a server
-sudo /usr/local/sbin/ace-request-cert server /etc/ansible-automation-platform/eda eda cert client
+# on ace-eda
+sudo /usr/local/sbin/ace-request-cert server /etc/ansible-automation-platform/eda eda cert
 ```
 ```bash
 # on ace-gateway
@@ -327,7 +327,11 @@ sudo install -o root -g eda -m 0640 /vagrant/ace-eda-server.cert \
 sudo rm -f /vagrant/ace-eda-server.cert
 sudo openssl verify /etc/ansible-automation-platform/eda/server.cert      # want: OK
 
-sudo tee /etc/nginx/conf.d/automation-eda.nginx.conf >/dev/null <<'EOF'
+sudo dnf -y module enable nginx:1.24
+sudo dnf -y install nginx
+sudo setsebool -P httpd_can_network_connect on
+
+sudo tee /etc/nginx/conf.d/automation-eda-controller-api.conf >/dev/null <<'EOF'
 upstream eda-api { server unix:/run/eda/eda-api.sock; }
 upstream eda-ws  { server unix:/run/eda/eda-ws.sock; }
 server {
@@ -357,21 +361,53 @@ server {
 EOF
 
 sudo firewall-cmd --permanent --add-port=443/tcp && sudo firewall-cmd --reload
-sudo nginx -t && sudo systemctl reload nginx
+```
+
+nginx reaches the API over a unix socket, and that crosses the same pair of SELinux checks
+[Lab 6](06-controller.md) hit — `write` on the socket inode and `connectto` against the domain
+that bound it. Same two-rule module, same reason:
+
+```bash
+sudo dnf -y install setools-console
+sudo tee /tmp/ace-nginx-upstream.te >/dev/null <<'EOF'
+module ace-nginx-upstream 1.1;
+
+require {
+    type httpd_t;
+    type unconfined_service_t;
+    type var_run_t;
+    class unix_stream_socket connectto;
+    class sock_file write;
+}
+
+allow httpd_t var_run_t:sock_file write;
+allow httpd_t unconfined_service_t:unix_stream_socket connectto;
+EOF
+checkmodule -M -m -o /tmp/ace-nginx-upstream.mod /tmp/ace-nginx-upstream.te
+semodule_package -o /tmp/ace-nginx-upstream.pp -m /tmp/ace-nginx-upstream.mod
+sudo semodule -i /tmp/ace-nginx-upstream.pp
+
+sudo nginx -t && sudo systemctl enable --now nginx
 curl -sk https://127.0.0.1:443/api/eda/v1/status/ -o /dev/null -w "eda via nginx: %{http_code}\n"  # want: 200
 ```
 
+> Skip the module and you get a **502** with `connect() to unix:/run/eda/eda-api.sock failed
+> (13: Permission denied)` in `/var/log/nginx/error.log` — while `ausearch` reports *nothing*,
+> because the `sock_file` denial sits behind a `dontaudit` rule. The socket is mode 0777; it was
+> never a permissions problem.
+
 ## Register behind the gateway
 
-Same REST-with-PKs pattern as [Lab 6](06-controller.md) (reuse its `register.py`
-helpers). One EDA cluster/node/service, then the service secret:
+Same REST-with-PKs pattern as everything before it. Reuse [Lab 8](08-hub.md)'s `register.py`
+helpers — swap its hub rows for these, or append these to a copy. One EDA cluster/node/service,
+then the service secret:
 
 ```python
 st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
 hp  = find("/http_ports/", "API Port")
 eda = ensure("/service_clusters/", "eda", {"name": "eda", "service_type": st["eda"]})
 ensure("/service_nodes/", "Node eda - ace-eda",
-       {"name": "Node eda - ace-eda", "address": "192.168.56.10", "service_cluster": eda, "tags": "api"})
+       {"name": "Node eda - ace-eda", "address": "192.168.56.14", "service_cluster": eda, "tags": "api"})
 ensure("/services/", "eda api",
        {"name": "eda api", "api_slug": "eda", "http_port": hp, "service_cluster": eda,
         "is_service_https": True, "service_path": "/api/eda/", "service_port": 443,
@@ -392,6 +428,18 @@ sudo systemctl restart automation-eda-api automation-eda-default-worker
 ```
 
 ## Verify — EDA through the platform door
+
+> **Expect a 503 for the first ~45 seconds.** envoy actively health-checks each backend, and a
+> node stays out of rotation until the checks pass consistently — so the restart you just did puts
+> EDA briefly out of service *through the gateway* even though `curl -sk https://ace-eda/...`
+> answers 200 locally. Watch it flip rather than guessing:
+> ```bash
+> curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep membership_healthy
+> # 0 while it settles, 1 once envoy will route to it
+> ```
+> `membership_total: 1` with `membership_healthy: 0` means registration worked and the health check
+> has not passed yet — a different problem from an empty cluster, which would mean the node tag on
+> the service and the node disagree.
 
 ```bash
 curl -sk https://192.168.56.11/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"  # 200
