@@ -258,10 +258,26 @@ unlimited; there's nothing to be out of compliance *with*. Make it say so:
 sudo -u awx sed -i "s/^            valid_key=True,$/            valid_key=True,\n            compliant=True,/" \
   /opt/awx/awx/main/utils/licensing.py
 sudo systemctl restart automation-controller
-
-curl -sk -u "admin:${GW_PW}" https://192.168.56.10/api/controller/v2/config/ \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["license_info"]["compliant"])'   # want: True
 ```
+
+The controller takes several seconds to come back, and until uwsgi is answering, envoy replies
+`no healthy upstream` — **plain text, not JSON**. So poll rather than asking once:
+
+```bash
+for i in $(seq 1 12); do
+  OUT=$(curl -sk -u "admin:${GW_PW}" https://192.168.56.10/api/controller/v2/config/)
+  echo "$OUT" | python3 -c 'import json,sys; print("compliant:", json.load(sys.stdin)["license_info"]["compliant"])' 2>/dev/null && break
+  echo "  not back yet: $(echo "$OUT" | head -c 40)"; sleep 3
+done
+# want: compliant: True
+```
+
+> **If it never turns True**, the two failure modes read differently. A traceback ending in
+> `JSONDecodeError: Expecting value: line 1 column 1` means the body wasn't JSON at all — the
+> controller was still restarting (`no healthy upstream`), so just wait. A `KeyError: 'license_info'`
+> with a `{"detail": "Authentication credentials were not provided..."}` body means `$GW_PW` is
+> empty or wrong in this shell. Only `compliant: False` means the `sed` didn't land — check the file:
+> `sudo grep -n 'compliant=True' /opt/awx/awx/main/utils/licensing.py`.
 
 Refresh the console and the banner is gone. (This is a source patch like Lab 5's `devonly` removal —
 it doesn't survive a `git pull` of `/opt/awx`, so re-apply it if you rebuild.)
