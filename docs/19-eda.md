@@ -250,15 +250,7 @@ curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ 
 ## nginx front on 8445
 
 ```bash
-sudo install -d -o eda -g eda -m 0750 /etc/eda/certs
-sudo openssl genrsa -out /etc/eda/certs/eda.key 2048
-sudo openssl req -new -key /etc/eda/certs/eda.key -subj "/CN=ace-control" -out /tmp/eda.csr
-printf "subjectAltName=DNS:ace-control,DNS:localhost,IP:192.168.56.10,IP:127.0.0.1\n" | sudo tee /tmp/eda_ext.cnf >/dev/null
-sudo openssl x509 -req -in /tmp/eda.csr -CA /etc/tower/ca/ca.crt -CAkey /etc/tower/ca/ca.key \
-  -CAcreateserial -days 825 -sha256 -out /etc/eda/certs/eda.crt -extfile /tmp/eda_ext.cnf
-sudo chown eda:eda /etc/eda/certs/eda.crt /etc/eda/certs/eda.key
-sudo chmod 0640 /etc/eda/certs/eda.key
-sudo rm -f /tmp/eda.csr /tmp/eda_ext.cnf
+sudo ace-sign-service server /etc/ansible-automation-platform/eda eda ace-control cert
 
 sudo tee /etc/nginx/conf.d/automation-eda.nginx.conf >/dev/null <<'EOF'
 upstream eda-api { server unix:/run/eda/eda-api.sock; }
@@ -266,8 +258,8 @@ upstream eda-ws  { server unix:/run/eda/eda-ws.sock; }
 server {
     listen 8445 ssl default_server;
     server_name _;
-    ssl_certificate     /etc/eda/certs/eda.crt;
-    ssl_certificate_key /etc/eda/certs/eda.key;
+    ssl_certificate     /etc/ansible-automation-platform/eda/server.cert;
+    ssl_certificate_key /etc/ansible-automation-platform/eda/server.key;
     ssl_ciphers         PROFILE=SYSTEM;
     client_max_body_size 20m;
     root /var/lib/eda/static;

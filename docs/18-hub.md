@@ -277,15 +277,8 @@ Hub gets its own server block and its own lab-CA-signed cert, on **8444** — th
 nginx already owns 443 on this shared box.
 
 ```bash
-sudo install -d -o pulp -g pulp -m 0750 /etc/pulp/certs
-sudo openssl genrsa -out /etc/pulp/certs/pulp_webserver.key 2048
-sudo openssl req -new -key /etc/pulp/certs/pulp_webserver.key -subj "/CN=ace-control" -out /tmp/hub.csr
-printf "subjectAltName=DNS:ace-control,DNS:localhost,IP:192.168.56.10,IP:127.0.0.1\n" | sudo tee /tmp/hub_ext.cnf >/dev/null
-sudo openssl x509 -req -in /tmp/hub.csr -CA /etc/tower/ca/ca.crt -CAkey /etc/tower/ca/ca.key \
-  -CAcreateserial -days 825 -sha256 -out /etc/pulp/certs/pulp_webserver.crt -extfile /tmp/hub_ext.cnf
-sudo chown pulp:pulp /etc/pulp/certs/pulp_webserver.crt /etc/pulp/certs/pulp_webserver.key
-sudo chmod 0640 /etc/pulp/certs/pulp_webserver.key
-sudo rm -f /tmp/hub.csr /tmp/hub_ext.cnf
+sudo ace-sign-service pulp_webserver /etc/pulp/certs pulp ace-control
+sudo chown pulp:pulp /etc/pulp/certs
 
 sudo tee /etc/nginx/conf.d/automation-hub.nginx.conf >/dev/null <<'EOF'
 upstream pulp-api     { server unix:/run/pulpcore-api/pulpcore-api.sock; }

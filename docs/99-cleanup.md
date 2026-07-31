@@ -36,7 +36,7 @@ vagrant global-status --prune     # want: no ace-control / ace-exec entries left
 ls /vagrant 2>/dev/null           # (host repo dir) — Lab 14's cert shuttle files were already tidied
 ```
 
-If you imported the lab CA into your laptop's browser or trust store during Lab 12, remove it — it signed things; don't leave stray CAs installed:
+If you imported the internal CA into your laptop's browser or trust store during Lab 3, remove it — it signed things; don't leave stray CAs installed:
 
 - macOS: Keychain Access → search "ACE Lab CA" → delete
 - Firefox: Settings → Certificates → Authorities → remove

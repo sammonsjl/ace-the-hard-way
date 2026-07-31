@@ -29,7 +29,7 @@ flowchart TB
         subgraph GATEWAY["Platform gateway (jewel) — the integrator"]
             gwgrpc["gRPC control plane :50051<br/>authenticates every proxied request"]
             gwuwsgi["uwsgi :8080<br/>REST API + the service registry"]
-            gwnginx["nginx :8446<br/>serves the platform UI SPA"]
+            gwnginx["nginx :8443<br/>serves the platform UI SPA"]
         end
 
         subgraph HUB["Automation hub"]
@@ -119,7 +119,7 @@ flowchart TB
     class i1,i2,g1,g2,p1,p2,r1,r2,m1,m2 dot
 ```
 
-A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches; the four services behind it sit on internal ports (8043/8444/8445/8446). **But envoy is only the data plane — the gateway is what actually assembles the platform.** Envoy knows nothing on its own: every route it serves is a row in the gateway's service registry, fetched over xDS every five seconds; every request it proxies is checked against the gateway's gRPC control plane; and the identity that comes back is a JWT signed by the gateway, which the controller, hub, and EDA each validate against a public key they fetch from it at runtime (`ANSIBLE_BASE_JWT_KEY`). That is what "one login for the whole platform" means mechanically — three independently built services trusting one issuer. Rotate the key at the gateway and all three follow. **The ports are a single-box tax:** the real design gives the controller, hub, and EDA each their own host on 443 — here they share one VM, so they move aside ([Lab 7](docs/07-platform-ui.md) does that pivot). **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear twice, both times as EE sandboxes** (purple) — never as a service. **Receptor is the parent of podman on both nodes:** the dispatcher never launches a container itself, it submits a signed work unit to receptor, and receptor's work-command spawns `ansible-runner`, which starts the EE. Control-plane work (project syncs, system jobs) takes that path locally through `ace-control`'s own receptor; job work takes the identical path across the mesh on `ace-exec`. And the two VMs are joined by exactly one thing: that mesh, with a CA, certs, and work-signing keys you generated yourself.
+A few things the picture is meant to make obvious. **One front door:** envoy on 443 is the only port a browser touches; the four services behind it sit on internal ports (gateway 8443, controller 8043, hub 8444, EDA 8445). **But envoy is only the data plane — the gateway is what actually assembles the platform.** Envoy knows nothing on its own: every route it serves is a row in the gateway's service registry, fetched over xDS every five seconds; every request it proxies is checked against the gateway's gRPC control plane; and the identity that comes back is a JWT signed by the gateway, which the controller, hub, and EDA each validate against a public key they fetch from it at runtime (`ANSIBLE_BASE_JWT_KEY`). That is what "one login for the whole platform" means mechanically — three independently built services trusting one issuer. Rotate the key at the gateway and all three follow. **The ports are a single-box tax:** the real design gives each service its own host on 443 — here they share one VM, so they take internal ports. Nothing ever moves, because the gateway is built first ([Lab 6](docs/06-gateway.md)) and every service that follows is born on the port it keeps. **nginx-to-app hops are unix sockets, not TCP** — nothing for a remote client to reach. **Containers appear twice, both times as EE sandboxes** (purple) — never as a service. **Receptor is the parent of podman on both nodes:** the dispatcher never launches a container itself, it submits a signed work unit to receptor, and receptor's work-command spawns `ansible-runner`, which starts the EE. Control-plane work (project syncs, system jobs) takes that path locally through `ace-control`'s own receptor; job work takes the identical path across the mesh on `ace-exec`. And the two VMs are joined by exactly one thing: that mesh, with a CA, certs, and work-signing keys you generated yourself.
 
 ## Who this is for
 
@@ -137,33 +137,36 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 
 1. [Prerequisites](docs/01-prerequisites.md)
 2. [Provisioning the VMs](docs/02-vms.md)
-3. [PostgreSQL](docs/04-postgresql.md)
-4. [Redis](docs/05-redis.md)
+3. [The internal CA](docs/03-internal-ca.md) — one root, trusted by both nodes, signing every service certificate
+4. [PostgreSQL](docs/04-postgresql.md)
+5. [Redis](docs/05-redis.md)
+
+**The front door, first**
+
+6. [The gateway](docs/06-gateway.md) — jewel from source, plus envoy on 443 with an empty registry
+7. [The platform UI](docs/07-platform-ui.md) — the unified console, served by the gateway
 
 **AWX from source**
 
-5. [AWX from source](docs/08-awx-source.md)
-6. [Configuring AWX](docs/09-awx-config.md)
-7. [Database init](docs/10-awx-init.md)
-8. [Running the services](docs/11-awx-services.md)
-9. [Building the UI](docs/09-awx-ui.md)
-10. [nginx front door](docs/12-nginx.md)
-11. [Receptor](docs/13-receptor.md)
+8. [AWX from source](docs/08-awx-source.md)
+9. [Configuring AWX](docs/09-awx-config.md)
+10. [Database init](docs/10-awx-init.md)
+11. [Running the services](docs/11-awx-services.md)
+12. [nginx front door](docs/12-nginx.md)
+13. [Receptor](docs/13-receptor.md)
 
 **Jobs on the mesh**
 
-12. [The execution plane](docs/14-execution-plane.md)
-13. [Instance registration](docs/15-instance-registration.md)
-14. [Smoke test: run a job on the execution plane](docs/17-smoke-test.md)
+14. [The execution plane](docs/14-execution-plane.md)
+15. [Instance registration](docs/15-instance-registration.md)
 
-**The platform layer**
+**Joining it to the platform**
 
-15. [The gateway](docs/06-gateway.md)
-16. [Service registration](docs/16-service-registration.md)
+16. [Service registration](docs/16-service-registration.md) — the controller joins the gateway, and 443 opens
+17. [Smoke test: run a job on the execution plane](docs/17-smoke-test.md)
 
 **The other platform services**
 
-17. [The platform UI](docs/07-platform-ui.md) — the unified Ansible console (`@ansible/platform-ui`), served by the gateway on 443
 18. [Automation Hub](docs/18-hub.md) — galaxy_ng on pulpcore from source, behind the gateway
 19. [Event-Driven Ansible](docs/19-eda.md) — eda-server from source, behind the gateway
 

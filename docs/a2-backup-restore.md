@@ -18,7 +18,8 @@ Before backing anything up, know what you're protecting. Most of this box is reb
 | **The secret key** | `/etc/tower/SECRET_KEY` (`0400 awx`) | The database survives but **every encrypted field in it is unreadable** — credentials become permanent noise. Irreplaceable |
 | Service config | `/etc/tower/conf.d/*.py` | DB password, `CLUSTER_HOST_ID`, websocket secret — rewritable from Lab 9, but the DB password has to match what postgres expects |
 | Hand-written config | `/etc/tower/settings.py`, `uwsgi.ini`, `supervisord.conf` | Rewritable from Labs 9 and 11 |
-| Web TLS + its CA | `/etc/tower/tower.cert`, `tower.key`, `/etc/tower/ca/` | Reissuable (Lab 12) — but `ca.key` also signs the gateway's cert later, so reissuing means re-trusting in more than one place |
+| The internal CA | `/etc/ansible-automation-platform/ca/` | **Back this up.** It signs every service certificate; lose it and you reissue and re-trust all of them (Lab 3) |
+| Service TLS | `/etc/tower/tower.cert` + `.key`, and each service's pair | Reissuable in one line each with `ace-sign-service`, as long as the CA above survives |
 | **Mesh PKI** | `/etc/receptor/tls/ca/mesh-CA.key` + `.crt` | Lose the CA key and **every node cert must be reissued** — the mesh gets rebuilt from scratch |
 | Mesh node cert | `/etc/receptor/tls/ace-control.{crt,key}` | Reissuable, *if* you still have the CA key |
 | **Work signing keypair** | `/etc/receptor/work_{private,public}_key.pem` | Regenerable, but the new public key must reach every execution node or all work fails verification |

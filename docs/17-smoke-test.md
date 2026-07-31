@@ -2,19 +2,22 @@
 
 ## What you will have at the end
 
-The whole point: a job launched **from the web UI you built**, dispatched over YOUR receptor mesh, executed in an EE container on the execution plane you built. Labs 1–14 = a complete, working controller.
+The whole point: a job launched **from the platform console you built**, authorised by your gateway, dispatched over your receptor mesh, and executed in an EE container on the execution plane you built. Every hop hand-made.
 
-This lab is deliberately click-driven. Everything up to now has been command line; the test of a platform is whether a person can use it. Every button press below travels through nginx → uwsgi → the dispatcher → receptor → podman, and the live output comes back through daphne and wsrelay — all yours.
+This lab is deliberately click-driven. Everything up to now has been command line; the test of a platform is whether a person can use it. Every button press below travels through envoy → the gateway's gRPC authorisation → nginx → uwsgi → the dispatcher → receptor → podman, and the live output comes back through daphne and wsrelay — all yours.
 
 ## Log in
 
-Open **`https://192.168.56.10`** and log in as `admin` with the password from Lab 10.
+Open **`https://192.168.56.10`** and log in as `admin` — the **gateway** admin from Lab 6, not the controller's own admin from Lab 10. Since [Lab 16](16-service-registration.md) the controller only accepts gateway-issued JWTs, so the platform account is the only one that works.
 
-> Accept the browser warning about the self-signed cert from Lab 12 — that's expected. If the login page renders but the login *does nothing*, and you've already done Lab 16, that's the `RESOURCE_SERVER` JWT lockout described there, not a broken password.
+> No certificate warning, if you imported [Lab 3](03-internal-ca.md)'s root CA into your browser. If you didn't, accept the interstitial — the CA is at
+> `/etc/ansible-automation-platform/ca/ansible-automation-platform-managed-ca-cert.crt`.
 
 ## Sync the Demo Project
 
-`Resources → Projects → Demo Project`, then click the **sync** button (the circular-arrows icon on the project's row or its detail page).
+In the left-hand navigation: **Automation Execution → Projects → Demo Project**, then click the **sync** button (the circular-arrows icon on the project's row or its detail page).
+
+> That whole navigation section only exists because Lab 16 registered the controller. If you don't see **Automation Execution**, the registry row is missing or envoy hasn't picked it up yet — give it five seconds and reload before debugging anything else.
 
 Watch the status go `Pending → Running → Successful`, live — no page refresh. That live update is your websocket stack working.
 
@@ -84,6 +87,6 @@ That's an automation platform, by hand, from source.
 
 AWX ships default system-job schedules (Cleanup Job Details, Cleanup Activity Stream, ...). System jobs are `local` work — control-plane EE, podman — so with Lab 13's sandbox in place they run on schedule, unprompted. Nothing to configure; just know that the weekly cleanup jobs you'll see in the jobs list are these.
 
-> Milestone: **Labs 1–14 are a complete, working controller.** The gateway labs (15–16) add the single-login platform layer on top — and they're the risky tail. Ship this milestone first: commit your notes, tag your fork, take the win.
+> Milestone: **Labs 1–17 are a complete, working platform** — gateway, console, controller, and a two-node execution mesh, all from source. Labs 18–19 add hub and EDA, which join in exactly the same way and are strictly additive. Ship this milestone first: commit your notes, tag your fork, take the win.
 
 Next: [Automation Hub](18-hub.md)
