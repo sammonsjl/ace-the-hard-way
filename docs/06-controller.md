@@ -511,8 +511,15 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now receptor
 sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /run/awx-receptor/receptor.sock status
-# want: the node listed, with 'local' in its known work types
+# want: Node ID ace-controller, and 'local' under Secure Work Types
 ```
+
+> **Expect a version warning:** `receptorctl and receptor are different versions, they may not be
+> compatible`. That is not a mistake in the steps above. `receptorctl` is a Python package pinned by
+> AWX's own requirements and installed into its venv; the `receptor` daemon is a release binary you
+> downloaded. The two are versioned independently and rarely match exactly. The control protocol is
+> stable across minor versions, so this is noise — but check it if `receptorctl` ever starts
+> returning malformed output, because then it isn't.
 
 `XDG_RUNTIME_DIR` is baked in because **receptor is the parent of podman here** — the dispatcher
 never launches a container itself; it submits a work unit, receptor's work-command spawns
