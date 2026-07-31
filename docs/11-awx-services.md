@@ -175,7 +175,7 @@ module = awx.wsgi:application
 home = /var/lib/awx/venv/awx
 env = AWX_MODE=production
 stats = /var/lib/awx/uwsgi.stats
-processes = 4
+processes = 8
 listen = 128
 master = true
 no-orphans = true
@@ -198,10 +198,17 @@ sudo chown root:awx /etc/tower/uwsgi.ini
 sudo chmod 0640 /etc/tower/uwsgi.ini
 ```
 
-`cheaper-algo = busyness` with `cheaper = 4` is adaptive worker scaling — uwsgi runs four workers
-and adds more under load rather than pre-forking a fixed pool. `max-worker-lifetime = 3600` and
-`reload-on-rss = 1024` recycle workers on age and memory, which is how a long-running Django app
-survives a slow leak without anyone noticing.
+`cheaper-algo = busyness` is adaptive worker scaling: uwsgi starts `cheaper-initial = 4` workers
+and grows toward `processes = 8` under load rather than pre-forking a fixed pool.
+`max-worker-lifetime = 3600` and `reload-on-rss = 1024` recycle workers on age and memory, which is
+how a long-running Django app survives a slow leak without anyone noticing.
+
+> **`cheaper` must be strictly lower than `processes`.** It is the floor, not the target. Set them
+> equal — `processes = 4` with `cheaper = 4` is the obvious mistake — and uwsgi refuses to start
+> with `invalid cheaper value: must be lower than processes`, then exits fast enough that
+> supervisor reports `FATAL Exited too quickly` and you go looking at supervisor instead of at
+> uwsgi. A real install derives `processes` from the CPU count, which is why the collision never
+> shows up there.
 
 `listen = 128` is the socket backlog. If you raise it, raise `net.core.somaxconn` to match or the
 kernel silently truncates it.
@@ -471,7 +478,10 @@ sudo supervisorctl status tower-processes:awx-rsyslogd
 #       both times means it is restarting in a loop.
 ```
 
-`awx-rsyslog-configurer` showing `EXITED` is expected — that's what `startsecs = 0` is for.
+`awx-rsyslog-configurer` may show either `RUNNING` or `EXITED` — it configures and then either
+stays resident watching for changes or exits, depending on the devel commit. Both are fine;
+`startsecs = 0` is what stops supervisor calling the exiting case a failure. What you do *not*
+want is a climbing pid with a resetting uptime, which is a restart loop.
 
 > **War story — the flap you can't see.** If `awx-rsyslogd` is looping, the cause is almost always
 > the runtime directory: skip the tmpfiles.d entry above (or reboot without it, since `/run` is
