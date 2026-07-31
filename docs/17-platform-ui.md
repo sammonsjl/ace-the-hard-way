@@ -1,20 +1,26 @@
-# Lab 19 — The platform UI (and the 443 pivot)
+# Lab 17 — The platform UI (and the 443 pivot)
 
 ## What you will have at the end
 
-The **unified platform UI** — `@ansible/platform-ui`, one login, Controller +
-Hub + EDA in a single navigation — served by the gateway on **port 443**. This is the pivot
-the whole tutorial has been building toward: the gateway becomes the front door, and the
-controller steps back behind it.
+The **unified platform UI** — `@ansible/platform-ui`, one login, the Ansible console — served by
+the gateway on **port 443**. This is the pivot the whole tutorial has been building toward: the
+gateway becomes the front door, and the controller steps back behind it.
 
 ```
 browser ── https://192.168.56.10  (443)
-            envoy ──┬── /            → platform UI SPA          (Ansible console)
-                    ├── /api/gateway/ → gateway uwsgi
-                    ├── /api/controller/ → controller nginx :8043
-                    ├── /api/galaxy/     → hub nginx :8444
-                    └── /api/eda/        → eda nginx :8445
+            envoy ──┬── /                  → platform UI SPA    (Ansible console)
+                    ├── /api/gateway/      → gateway uwsgi
+                    └── /api/controller/   → controller nginx :8043
+
+                    (/api/galaxy/ and /api/eda/ appear as Labs 18–19 register them)
 ```
+
+> **One service is enough.** The console's navigation is not hardcoded — it comes from `GET /api/`,
+> the gateway's **service registry**. With only the controller registered you get a working platform
+> UI showing **Automation Execution**, and nothing else. Hub and EDA are not prerequisites; each one
+> you register later simply appears in the nav. That's why this lab now comes before them: the pivot
+> to 443 is a controller-and-gateway affair, and doing it first means Labs 18–19 are written against
+> the final layout instead of being rewritten by it.
 
 > **Two UIs, and why this one needs the gateway.** [Lab 9](09-awx-ui.md) built the *standalone*
 > AWX UI (`frontend/awx` + `AWX_SERVER`) — single-service, no gateway, AWX-branded. This lab
@@ -23,7 +29,8 @@ browser ── https://192.168.56.10  (443)
 > registry). Point it at a bare controller and every one of those calls 404s — it genuinely
 > cannot run without the gateway. That's not a limitation to work around; it *is* the platform.
 
-All commands on **ace-control**. Assumes Labs 15–18 (gateway + hub + EDA, all on :8443).
+All commands on **ace-control**. Assumes Labs 15–16 (the gateway, with the controller registered
+behind it on :8443).
 
 ## Why 443
 
@@ -31,8 +38,9 @@ The design the whole platform layer assumes: **envoy on 443** as the single publ
 gateway's own uwsgi behind it on 8443, and the controller, hub, and EDA each on 443 **on their own
 hosts**. We've been bringing the gateway up on 8443 to keep it side-by-side with the controller
 (which took 443 back in Lab 10) — easy to test both. Now we commit: give envoy 443, and move the
-controller to an internal port behind it. (On one box the three services can't all be 443, so the controller lands on 8043, hub
-stays 8444, EDA 8445 — the single-box tax on a design meant for separate hosts.)
+controller to an internal port behind it. (On one box they can't all be 443, so the controller lands
+on 8043 — and Labs 18–19 will put hub on 8444 and EDA on 8445 for the same reason. The single-box
+tax on a design meant for separate hosts.)
 
 ## Build the platform UI
 
@@ -153,50 +161,50 @@ sudo ss -tlnp | grep -q ':443 ' && echo "envoy on 443" || echo "not yet — chec
 
 ## Re-point every URL from :8443 to :443
 
-Labs 15–18 wrote the platform URL as `https://192.168.56.10:8443` in five places. The front door is
-443 now (the default HTTPS port, no suffix), so rewrite them all — miss one and JWT validation or CSRF
+Labs 15–16 wrote the platform URL as `https://192.168.56.10:8443` in two config files. The front door
+is 443 now (the default HTTPS port, no suffix), so rewrite both — miss one and JWT validation or CSRF
 breaks on that component:
 
 ```bash
 sudo sed -i 's#https://192.168.56.10:8443#https://192.168.56.10#g' \
   /etc/ansible-automation-platform/gateway/settings.py \
-  /etc/tower/conf.d/gateway.py \
-  /etc/pulp/settings.py
-sudo sed -i 's#https://192.168.56.10:8443#https://192.168.56.10#g; s#wss://192.168.56.10:8443#wss://192.168.56.10#g' \
-  /etc/eda/settings.yaml
+  /etc/tower/conf.d/gateway.py
 
 # the gateway's own proxy-url setting (DB-backed; PUT, not PATCH)
 curl -s -u admin:CHANGE-ME -X PUT http://127.0.0.1:8080/api/gateway/v1/settings/all/ \
   -H 'Content-Type: application/json' -d '{"gateway_proxy_url": "https://192.168.56.10"}' >/dev/null
 
-sudo systemctl restart automation-gateway automation-controller \
-  pulpcore-api pulpcore-content pulpcore-worker@1 pulpcore-worker@2 \
-  automation-eda-api automation-eda-default-worker
+sudo systemctl restart automation-gateway automation-controller
 ```
 
-> The controller's `ANSIBLE_BASE_JWT_KEY` (and hub's / EDA's) is the URL where each service fetches
-> the gateway's JWT **public key** at runtime. If it still says `:8443` after the pivot, that fetch
-> fails and every proxied call comes back `403` — the tell that one of these URLs got missed.
+> The controller's `ANSIBLE_BASE_JWT_KEY` is the URL where it fetches the gateway's JWT **public
+> key** at runtime. If it still says `:8443` after the pivot, that fetch fails and every proxied call
+> comes back `403` — the tell that one of these URLs got missed.
+>
+> Labs 18–19 write hub's and EDA's equivalents (`ANSIBLE_BASE_JWT_KEY`, `CONTENT_ORIGIN`,
+> `WEBSOCKET_BASE_URL`) directly as `https://192.168.56.10`, because by then the pivot has already
+> happened — nothing to rewrite.
 
-## Verify — the whole platform on 443
+## Verify — the platform on 443
 
 ```bash
 curl -sk https://192.168.56.10/ | grep -o 'PlatformMain-[^"]*\.js' | head -1   # the SPA is the platform build
 curl -sk https://192.168.56.10/platform-logo.svg -o /dev/null -w '%{http_code}\n'  # Ansible logo: 200
 
-# one login, whole platform — all through 443:
+# one login, reaching the controller — through 443:
 curl -sk -u admin:CHANGE-ME https://192.168.56.10/api/controller/v2/ping/  -o /dev/null -w 'controller: %{http_code}\n'
-curl -skL -u admin:CHANGE-ME https://192.168.56.10/api/galaxy/_ui/v1/me/    -o /dev/null -w 'hub:        %{http_code}\n'
-curl -sk -u admin:CHANGE-ME https://192.168.56.10/api/eda/v1/users/me/      -o /dev/null -w 'eda:        %{http_code}\n'
 ```
 
 Then the real test — a browser to **`https://192.168.56.10`** (accept the lab-CA warning):
 
 - the Ansible-branded platform login page loads;
-- log in as the gateway admin — the console shows **Automation Execution (Controller)**,
-  **Automation Content (Hub)**, and **Automation Decisions (EDA)** in one navigation;
+- log in as the gateway admin — the console shows **Automation Execution (Controller)**. That is
+  the whole navigation for now, and it's correct: the nav is built from the gateway's service
+  registry, and the controller is the only service in it. **Automation Content (Hub)** and
+  **Automation Decisions (EDA)** appear as Labs 18–19 register them — no rebuild of the UI, just a
+  refresh;
 - launch the Demo Job Template from the UI — it runs on ace-exec, exactly as in Lab 14, but now
-  driven from the unified console.
+  driven from the platform console.
 
 The standalone AWX UI from Lab 9 is still there if you want it, on its new internal port
 `https://192.168.56.10:8043` — the same UI, now behind the gateway instead of in front of it.
@@ -231,5 +239,4 @@ it doesn't survive a `git pull` of `/opt/awx`, so re-apply it if you rebuild.)
 > there's no direct login bypassing the platform. Leave it commented if you'd rather keep the
 > standalone :8043 UI usable for debugging.
 
-Back to the [README](../README.md) — you built an automation platform, every service and its
-console, by hand.
+Next: [Automation Hub](18-hub.md)

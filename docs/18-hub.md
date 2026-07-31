@@ -1,4 +1,4 @@
-# Lab 17 — Automation Hub (galaxy_ng from source)
+# Lab 18 — Automation Hub (galaxy_ng from source)
 
 ## What you will have at the end
 
@@ -391,4 +391,4 @@ curl -skL -u "admin:CHANGE-ME" https://192.168.56.10:8443/api/galaxy/_ui/v1/me/ 
 > `main` (top of this lab). A `503 no healthy upstream` right after a restart is just envoy's
 > health check catching up — retry in a few seconds.
 
-Next: [Event-Driven Ansible](18-eda.md)
+Next: [Event-Driven Ansible](19-eda.md)

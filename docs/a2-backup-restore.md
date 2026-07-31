@@ -179,6 +179,6 @@ Each platform service adds state in exactly the same two shapes — a database, 
 | Hub | `pulp` | `/etc/pulp/certs/database_fields.symmetric.key` | `/etc/pulp/settings.py`, uploaded content under `/var/lib/pulp/media` |
 | EDA | `eda` | `/etc/eda/SECRET_KEY` | `/etc/eda/settings.yaml` |
 
-Same pattern: `pg_dump` each database, archive each config directory with `--numeric-owner -p`, and treat those three key files exactly the way you treat `/etc/tower/SECRET_KEY`. The platform UI's static files (`/var/lib/ansible-automation-platform/platform/ui`) are rebuildable from Lab 19 — don't bother.
+Same pattern: `pg_dump` each database, archive each config directory with `--numeric-owner -p`, and treat those three key files exactly the way you treat `/etc/tower/SECRET_KEY`. The platform UI's static files (`/var/lib/ansible-automation-platform/platform/ui`) are rebuildable from Lab 17 — don't bother.
 
 Back to the [README](../README.md)

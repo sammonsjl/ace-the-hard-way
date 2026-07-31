@@ -1,4 +1,4 @@
-# Lab 18 — Event-Driven Ansible (eda-server from source)
+# Lab 19 — Event-Driven Ansible (eda-server from source)
 
 ## What you will have at the end
 
@@ -14,7 +14,7 @@ envoy :8443 ──/api/eda/…──► nginx :8445 ──┬── unix:/run/ed
                                            aap-eda-manage dispatcherd       (DefaultWorker — pg_notify tasking, like AWX)
 ```
 
-> **The good news up front:** after the hub's version-alignment saga ([Lab 17](17-hub.md)),
+> **The good news up front:** after the hub's version-alignment saga ([Lab 18](18-hub.md)),
 > EDA is a relief. `eda-server`'s `main` pins **django-ansible-base from git devel** — the
 > *same* DAB the gateway (jewel-devel) uses — so JWT single sign-on lines up on the first try.
 > Track `main`, not a stable branch, for exactly this reason.
@@ -289,7 +289,7 @@ server {
 }
 EOF
 
-sudo semanage port -a -t http_port_t -p tcp 8445    # nginx may only bind labeled ports (Lab 17)
+sudo semanage port -a -t http_port_t -p tcp 8445    # nginx may only bind labeled ports (Lab 18)
 sudo firewall-cmd --permanent --add-port=8445/tcp && sudo firewall-cmd --reload
 sudo nginx -t && sudo systemctl reload nginx
 curl -sk https://127.0.0.1:8445/api/eda/v1/status/ -o /dev/null -w "eda via nginx: %{http_code}\n"  # want: 200
@@ -343,4 +343,5 @@ from source.
 All three services are wired to the gateway. The last lab gives them a face: the unified
 platform console, served on 443.
 
-Next: [The platform UI](19-platform-ui.md)
+Back to the [README](../README.md) — you built an automation platform, every service and its
+console, by hand.

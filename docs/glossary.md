@@ -58,10 +58,10 @@ Same Django app, two plugs — that's why AWX needs two web servers.
 
 | Term | Meaning |
 |---|---|
-| **Automation Hub (galaxy_ng)** | The content service — collections and execution-environment images. A Django app (`galaxy_ng`) that is a plugin on top of **pulpcore** (Lab 17). |
+| **Automation Hub (galaxy_ng)** | The content service — collections and execution-environment images. A Django app (`galaxy_ng`) that is a plugin on top of **pulpcore** (Lab 18). |
 | **pulpcore** | The content-management engine under the hub: an API server, a content server, and tasking workers, all sharing one postgres + redis. galaxy_ng, pulp-ansible, and pulp-container are plugins on it. |
-| **EDA (eda-server)** | Event-Driven Ansible — watches event sources and runs **rulebook activations** (automation triggered by events, not by a human clicking launch) in decision-environment containers (Lab 18). |
-| **DAB (django-ansible-base)** | The shared library that carries the platform's JWT and RBAC contract. Every service that sits behind the gateway consumes the gateway's JWT through DAB — which is why their DAB versions must line up (Lab 17's version saga). |
+| **EDA (eda-server)** | Event-Driven Ansible — watches event sources and runs **rulebook activations** (automation triggered by events, not by a human clicking launch) in decision-environment containers (Lab 19). |
+| **DAB (django-ansible-base)** | The shared library that carries the platform's JWT and RBAC contract. Every service that sits behind the gateway consumes the gateway's JWT through DAB — which is why their DAB versions must line up (Lab 18's version saga). |
 | **JWT SSO** | The gateway authenticates you once, mints a signed JWT describing who you are, and attaches it to every proxied request. Each service's DAB JWT consumer trusts the gateway's signature — so one login reaches the controller, the hub, and EDA alike. |
 
 Back to the [README](../README.md)

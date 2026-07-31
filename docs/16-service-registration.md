@@ -184,4 +184,4 @@ That second curl is the whole platform in one line: envoy took the request on th
 
 The controller is behind the gateway. The next two labs bring the other platform services in the same way — each built from source, each joining the same single sign-on.
 
-Next: [Automation Hub](17-hub.md)
+Next: [The platform UI](17-platform-ui.md)
