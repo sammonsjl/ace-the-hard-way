@@ -255,8 +255,9 @@ EOF
 sudo tee /etc/systemd/system/pulpcore-api.service >/dev/null <<'EOF'
 [Unit]
 Description=Pulp API Server
-After=network-online.target
+After=network-online.target pulpcore.service
 Wants=network-online.target
+PartOf=pulpcore.service
 [Service]
 Type=notify
 EnvironmentFile=/etc/default/pulpcore
@@ -274,8 +275,9 @@ EOF
 sudo tee /etc/systemd/system/pulpcore-content.service >/dev/null <<'EOF'
 [Unit]
 Description=Pulp Content App
-After=network-online.target
+After=network-online.target pulpcore.service
 Wants=network-online.target
+PartOf=pulpcore.service
 [Service]
 Type=notify
 EnvironmentFile=/etc/default/pulpcore
@@ -294,8 +296,9 @@ EOF
 sudo tee /etc/systemd/system/pulpcore-worker@.service >/dev/null <<'EOF'
 [Unit]
 Description=Pulp Worker %i
-After=network-online.target
+After=network-online.target pulpcore.service
 Wants=network-online.target
+PartOf=pulpcore.service
 [Service]
 EnvironmentFile=/etc/default/pulpcore
 User=pulp
@@ -312,7 +315,29 @@ EOF
 
 sudo semanage fcontext -a -t bin_t '/var/lib/pulp/venv/bin(/.*)?'   # Lab 11's 203/EXEC fix
 sudo restorecon -Rv /var/lib/pulp/venv/bin
+Hub gets the same lifecycle handle the controller has: a unit that runs nothing, with the real
+services declaring `PartOf=` it. `systemctl restart pulpcore` bounces the API, the content app and
+both workers in order; `systemctl stop pulpcore` stops the lot. A packaged install ships exactly
+this, down to the `/bin/true`.
+
+```bash
+sudo tee /etc/systemd/system/pulpcore.service >/dev/null <<'EOF'
+[Unit]
+Description=Pulpcore Application
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+```bash
 sudo systemctl daemon-reload
+sudo systemctl enable pulpcore >/dev/null
 sudo systemctl enable --now pulpcore-api pulpcore-content pulpcore-worker@1 pulpcore-worker@2
 ```
 

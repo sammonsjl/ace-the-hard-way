@@ -131,11 +131,19 @@ sudo install -d -o awx -g awx -m 0700 /var/lib/receptor
 sudo tee /etc/tmpfiles.d/awx-receptor.conf >/dev/null <<'EOF'
 D /run/awx-receptor 0750 awx awx -
 EOF
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/awx-receptor.conf
+sudo tee /etc/tmpfiles.d/receptor.conf >/dev/null <<'EOF'
+D /run/receptor 0750 awx awx -
+EOF
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/awx-receptor.conf /etc/tmpfiles.d/receptor.conf
 
 df --output=fstype /var/lib/receptor | tail -1    # want: xfs or ext4 — NOT tmpfs
 ```
 
+> **Two runtime directories, and both are created.** `/run/receptor` is receptor's own default;
+> `/run/awx-receptor` is where we point the control socket, so it is unambiguous that this daemon
+> belongs to the AWX side of the box. A packaged install creates both for the same reason, and
+> receptor will use its default for anything we have not explicitly redirected.
+>
 > Left unset, receptor's datadir falls back to `/tmp/receptor` — periodically swept, and on some
 > hosts tmpfs-backed, taking in-flight work units with it at reboot.
 

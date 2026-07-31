@@ -138,21 +138,26 @@ sudo vim /usr/local/sbin/ace-request-cert
 
 ```bash
 #!/bin/bash
-# ace-request-cert <name> <dir> <group> [ext]
-#   name   basename for the pair, e.g. "tower"
-#   dir    directory to write them into
-#   group  group that owns the pair (the service's own group)
-#   ext    certificate extension, default "crt" (some services want "cert")
+# ace-request-cert <name> <dir> <group> [ext] [client]
+#   name    basename for the pair, e.g. "tower"
+#   dir     directory to write them into
+#   group   group that owns the pair (the service's own group)
+#   ext     certificate extension, default "crt" (some services want "cert")
+#   client  pass "client" if this service also acts as a TLS *client*
 #
-# Generates a private key that never leaves this host, plus a CSR to carry
-# to the CA. The SAN covers this node's name and its address.
+# Generates a private key that never leaves this host, plus a CSR carrying every
+# extension the certificate should end up with. The CA copies them; it does not
+# invent them.
 set -euo pipefail
 
-NAME=$1; DIR=$2; GROUP=$3; EXT=${4:-crt}
+NAME=$1; DIR=$2; GROUP=$3; EXT=${4:-crt}; CLIENT=${5:-}
 HOST=$(hostname -s)
 # ahostsv4, not `hosts`: the latter returns a link-local fe80:: address first on
 # a multi-homed box, and an fe80:: in a SAN is worse than no SAN at all.
 IP=$(getent ahostsv4 "$HOST" | awk '{print $1; exit}')
+
+EKU=""
+[ "$CLIENT" = client ] && EKU=$'\nextendedKeyUsage=clientAuth'
 
 # only create the directory if it is missing — never re-own one the service already owns
 [ -d "$DIR" ] || install -d -o root -g "$GROUP" -m 0750 "$DIR"
@@ -162,13 +167,14 @@ chown root:"$GROUP" "$DIR/$NAME.key"
 chmod 0640 "$DIR/$NAME.key"
 
 openssl req -new -key "$DIR/$NAME.key" -subj "/CN=$HOST" \
-  -addext "subjectAltName=DNS:$HOST${IP:+,IP:$IP}" \
+  -addext "keyUsage=keyEncipherment,digitalSignature" \
+  -addext "subjectAltName=DNS:$HOST${IP:+,IP:$IP}${EKU}" \
   -out "/vagrant/$HOST-$NAME.csr"
 
 echo "wrote /vagrant/$HOST-$NAME.csr — now sign it on ace-gateway:"
 echo "  sudo /usr/local/sbin/ace-sign-request $HOST-$NAME $EXT"
 echo "then back here:"
-echo "  sudo install -o root -g $GROUP -m 0644 /vagrant/$HOST-$NAME.$EXT $DIR/$NAME.$EXT"
+echo "  sudo install -o root -g $GROUP -m 0640 /vagrant/$HOST-$NAME.$EXT $DIR/$NAME.$EXT"
 ```
 
 ```bash
@@ -190,16 +196,17 @@ set -euo pipefail
 REQ=$1; EXT=${2:-crt}
 CA=/etc/ansible-automation-platform/ca
 
-# -copy_extensions copy carries the SAN over from the request; the requesting
-# node is the only thing that knows its own names.
-openssl x509 -req -in "/vagrant/$REQ.csr" -sha256 -days 365 \
+# -1 day, to survive clock skew between the CA host and the requesting node
+NOT_BEFORE=$(date -u -d '-1 day' +%Y%m%d%H%M%SZ)
+
+openssl x509 -req -in "/vagrant/$REQ.csr" -sha256 \
   -CA "$CA/ansible-automation-platform-managed-ca-cert.crt" \
   -CAkey "$CA/ansible-automation-platform-managed-ca-key.key" \
   -CAcreateserial \
   -copy_extensions copy \
+  -not_before "$NOT_BEFORE" -days 365 \
   -extfile <(printf '%s\n' \
       "basicConstraints=CA:FALSE" \
-      "keyUsage=keyEncipherment,digitalSignature" \
       "subjectKeyIdentifier=hash" \
       "authorityKeyIdentifier=keyid:always") \
   -out "/vagrant/$REQ.$EXT"
@@ -207,28 +214,41 @@ openssl x509 -req -in "/vagrant/$REQ.csr" -sha256 -days 365 \
 chmod 0644 "/vagrant/$REQ.$EXT"
 rm -f "/vagrant/$REQ.csr"
 echo "signed /vagrant/$REQ.$EXT"
-openssl x509 -in "/vagrant/$REQ.$EXT" -noout -subject -ext subjectAltName
+openssl x509 -in "/vagrant/$REQ.$EXT" -noout -subject -dates -ext subjectAltName,keyUsage,extendedKeyUsage
 ```
 
 ```bash
 sudo chmod 0700 /usr/local/sbin/ace-sign-request
 ```
 
-Why each extension is there:
+Where each extension is set matters as much as which ones:
 
-| Extension | Reason |
-|---|---|
-| `basicConstraints=CA:FALSE` | a leaf must not be able to sign further certificates |
-| `keyUsage=keyEncipherment,digitalSignature` | the two things a TLS server key actually does |
-| `subjectKeyIdentifier=hash` | gives the certificate a stable fingerprint |
-| `authorityKeyIdentifier=keyid:always` | pins which CA key signed it, so validators pick the right root after a rotation |
-| `-copy_extensions copy` | carries the **SAN from the request** into the certificate |
+| Extension | Set in | Why |
+|---|---|---|
+| `keyUsage=keyEncipherment,digitalSignature` | **the CSR** | the two things a TLS server key actually does |
+| `subjectAltName` | **the CSR** | the only field modern clients check — and the requesting node is the only thing that knows its own names |
+| `extendedKeyUsage=clientAuth` | **the CSR**, when asked | only for services that also *initiate* TLS connections |
+| `basicConstraints=CA:FALSE` | the signer | a leaf must not be able to sign further certificates, and a CA should never take that on trust from a request |
+| `subjectKeyIdentifier=hash` | the signer | gives the certificate a stable fingerprint |
+| `authorityKeyIdentifier=keyid:always` | the signer | pins which CA key signed it, so validators pick the right root after a rotation |
 
-That last one is the subtle one. `openssl x509 -req` **discards request extensions by default** — a
-deliberate safety measure, since a CSR is attacker-controlled input in the general case. Leave it
-out and your certificates come out with a CN and no SAN at all, and every modern client rejects
-them with a hostname mismatch that says nothing about SANs. Here the requests are ones we generated
-ourselves moments earlier, so copying them is safe.
+**The CSR carries what the requester knows; the CA imposes what only it can vouch for.** That split
+is the whole design. A requesting node knows its own hostnames and what its key is for. It does
+*not* get to assert that it is a certificate authority — so `basicConstraints` is set by the
+signer, and a CSR claiming `CA:TRUE` gets it overwritten rather than honoured.
+
+`-copy_extensions copy` is what carries the first three across. It is off by default in `openssl
+x509 -req`, deliberately, because a CSR is attacker-controlled input in the general case. Leave it
+out and your certificates come out with a CN and nothing else — no SAN, no key usage — and every
+modern client rejects them with a hostname error that never mentions SANs.
+
+**`-not_before` is backdated one day.** Certificates are validated against the *verifier's* clock,
+not the signer's, and a machine whose clock is a few minutes behind will reject a certificate
+issued seconds ago as not-yet-valid. Across five VMs that is a real risk; one day of slack costs
+nothing. This is why [Lab 2](02-vms.md)'s preflight checks `chronyd` on every node.
+
+**Validity is 365 days.** Certificates that outlive the service are how you end up with a ten-year
+key nobody remembers generating.
 
 > **Call both scripts by their full path.** Rocky's `sudo` replaces `PATH` with a `secure_path` of
 > `/sbin:/bin:/usr/sbin:/usr/bin` — no `/usr/local` anywhere
@@ -265,12 +285,18 @@ That single `openssl verify` proves three things at once: the CA signed it, the 
 
 ## What later labs will do with this
 
-| Lab | Node | Certificate |
-|---|---|---|
-| [5 — the gateway](05-gateway.md) | ace-gateway | `gateway.cert` in `/etc/ansible-automation-platform/gateway` |
-| [6 — the controller](06-controller.md) | ace-controller | `tower.cert` in `/etc/tower` |
-| [7 — hub](08-hub.md) | ace-hub | `pulp_webserver.crt` |
-| [8 — EDA](09-eda.md) | ace-eda | `server.cert` |
+| Lab | Node | Certificate | Role |
+|---|---|---|---|
+| [5 — the gateway](05-gateway.md) | ace-gateway | `gateway.cert` | server **and client** |
+| [6 — the controller](06-controller.md) | ace-controller | `tower.cert` | server only |
+| [8 — hub](08-hub.md) | ace-hub | `pulp_webserver.crt` | server only |
+| [9 — EDA](09-eda.md) | ace-eda | `server.cert` | server **and client** |
+
+The gateway and EDA pass `client` as the fifth argument, because both *initiate* TLS connections as
+well as accepting them — the gateway calls every service it proxies to, and EDA calls the
+controller to launch jobs. Their certificates carry `extendedKeyUsage=clientAuth` as a result. The
+controller and hub only ever answer, so theirs do not. Handing every service `clientAuth` because
+it is easier would be a small, permanent overreach.
 
 Note the inconsistent extensions — `.cert` for some, `.crt` for others. That is not a typo here;
 the services genuinely disagree about what to call a certificate and their configuration files

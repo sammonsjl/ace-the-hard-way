@@ -313,7 +313,19 @@ curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ 
 ## nginx
 
 ```bash
-sudo /usr/local/sbin/ace-sign-service server /etc/ansible-automation-platform/eda eda ace-eda cert
+# on ace-eda — EDA is a TLS client as well as a server
+sudo /usr/local/sbin/ace-request-cert server /etc/ansible-automation-platform/eda eda cert client
+```
+```bash
+# on ace-gateway
+sudo /usr/local/sbin/ace-sign-request ace-eda-server cert
+```
+```bash
+# back on ace-eda
+sudo install -o root -g eda -m 0640 /vagrant/ace-eda-server.cert \
+  /etc/ansible-automation-platform/eda/server.cert
+sudo rm -f /vagrant/ace-eda-server.cert
+sudo openssl verify /etc/ansible-automation-platform/eda/server.cert      # want: OK
 
 sudo tee /etc/nginx/conf.d/automation-eda.nginx.conf >/dev/null <<'EOF'
 upstream eda-api { server unix:/run/eda/eda-api.sock; }
