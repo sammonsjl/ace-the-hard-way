@@ -48,8 +48,8 @@ seams made visible, and the seams are the interesting part:
 
 ## Memory
 
-Red Hat's tested configuration for this topology asks for **16 GB per VM**. This is that shape
-shrunk to fit 16 GB *in total*, so the numbers in the `Vagrantfile` are a lab compromise:
+The whole estate has to fit in 16 GB *in total*, so the numbers in the `Vagrantfile` are a lab
+compromise:
 
 ```
 ace-db           1024      postgres alone needs very little
