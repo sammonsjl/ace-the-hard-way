@@ -23,7 +23,16 @@ No installer. No operator. No docker-compose. No Kubernetes.
 
 ## What you end up with
 
-Five VMs, nine labs later. Every box below is a process you started by hand, from a config file you wrote:
+![The platform console: one login, with the controller, hub and EDA all registered behind it](docs/images/console-overview.png)
+
+That is the finish line — one console, one login, on `https://ace-gateway`. The three sections in
+the sidebar are not a theme or a mock-up: **Automation Execution**, **Automation Decisions** and
+**Automation Content** appear because the controller, EDA and hub each *registered themselves* with
+the gateway, and the navigation is assembled from its service registry at page load. The jobs at the
+bottom really ran, in a container, on the hybrid node.
+
+Five VMs, nine labs later. Nothing in that screenshot was installed by a package — every service
+behind it is a process you started by hand, from a config file you wrote:
 
 ```mermaid
 flowchart TB
