@@ -1145,6 +1145,41 @@ The console has grown a section: **Automation Execution** — projects, template
 jobs. You did not rebuild the UI or restart it; the navigation is assembled from the gateway's
 service registry at page load, and you just added a row.
 
+### The red banner is lying to you
+
+Across the top: *"Your subscription is out of compliance."* It is spurious, and the reason is a
+neat illustration of building a product's shape out of upstream parts.
+
+The console renders that banner whenever `!awxConfig.license_info.compliant`, reading the
+controller's `/api/controller/v2/config/`. AWX from source reports itself through `OpenLicense`,
+whose `validate()` returns exactly four keys:
+
+```bash
+sed -n '/^class OpenLicense/,/^$/p' /opt/awx/awx/main/utils/licensing.py
+# license_type='open', valid_key=True, subscription_name='OPEN', product_name="AWX"
+```
+
+No `compliant` key at all — and the console reads *missing* as *non-compliant*. An open license is
+unlimited; there is nothing to be out of compliance with. The UI was written expecting the payload
+a subscription-bearing build sends, and an open build simply doesn't send that field. Make it say
+what is already true:
+
+```bash
+sudo -u awx sed -i "s/^            valid_key=True,$/            valid_key=True,\n            compliant=True,/" \
+  /opt/awx/awx/main/utils/licensing.py
+sudo systemctl restart automation-controller
+
+curl -sk -u admin:CHANGE-ME https://192.168.56.11/api/controller/v2/config/ \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["license_info"]["compliant"])'   # want: True
+```
+
+Refresh, and the banner is gone.
+
+> Like the `devonly.py` removal earlier in this lab, this is a patch to the *source tree* in
+> `/opt/awx`, not to configuration. It does not survive a `git pull` there — re-apply it if you
+> rebuild. If the `sed` matches nothing, upstream has re-indented or reworked `OpenLicense`; open
+> `licensing.py` and add `compliant=True` to that `dict()` by hand.
+
 Browse around. Everything reads correctly. The controller is genuinely healthy:
 
 ```bash
