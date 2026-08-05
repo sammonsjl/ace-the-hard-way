@@ -276,6 +276,36 @@ CHANNEL_LAYERS = {
 EOF
 ```
 
+### Open the path before anything reads it
+
+[Lab 5](05-gateway.md) left redis's TCP listener off on purpose (`port 0`, unix socket only) — right
+for the gateway talking to itself, wrong the moment this node needs the same redis over the
+network. This is that moment:
+
+```bash
+# on ace-gateway
+sudo sed -i 's/^port 0$/port 6379/' /etc/redis/redis.conf
+sudo systemctl restart redis
+sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.56.0/24 port port=6379 protocol=tcp accept'
+sudo firewall-cmd --reload
+```
+
+```bash
+# back on ace-controller — confirm the path before trusting it
+timeout 5 bash -c 'echo > /dev/tcp/ace-gateway/6379' && echo OK
+```
+
+> **Skip this and `awx-manage createsuperuser` does not fail — it hangs.** Not a timeout, not a
+> traceback: minutes of a process sitting at a few percent CPU going nowhere. `pg_stat_activity`
+> on ace-db shows the database connection idle, waiting on the *client* — the database is not the
+> problem. A closed port on ace-gateway produces `No route to host` at the socket layer rather
+> than a fast `Connection refused`, and the cache client retries a connection it cannot open
+> instead of failing it quickly. Every `awx-manage` subcommand does this, not only
+> `createsuperuser`, because the DAB-backed cache is touched during Django app startup before any
+> command-specific code runs. A management command that looks hung rather than crashed means
+> check redis reachability first — low, flat CPU on a live `awx-manage` process is the tell, not a
+> traceback naming redis.
+
 **All three, not just one.** They are separate settings serving separate jobs, and AWX's
 `defaults.py` points each at the same socket independently:
 

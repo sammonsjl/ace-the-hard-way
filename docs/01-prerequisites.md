@@ -77,7 +77,20 @@ The full tutorial was run to completion on KVM/amd64; a few host-side things are
 
 - **Synced folder is NFS.** `vagrant-libvirt` shares `/vagrant` over NFS and edits `/etc/exports` via `sudo`. The Vagrantfile already pins `nfs_version: 4, nfs_udp: false` because modern Rocky guests reject the plugin's default `vers=3,udp` ("an incorrect mount option was specified"). If Vagrant prompts for a password mid-`up`, add a scoped `/etc/sudoers.d` drop-in for the `exportfs`/`mount`/`systemctl` NFS commands it runs.
 - **Keep the repo on local disk** (almost everyone already does — skip this bullet unless your home directory is network-mounted). If your clone lives on an NFS mount itself (e.g. a NAS-backed home), two things break: the kernel can't re-export it for the `/vagrant` share (`exportfs: requires fsid=`), and Vagrant's SSH-key ownership check fails. Clone to a local path and run Vagrant from there. This is unrelated to the NFSv4 mount option above — that one is about how the guest mounts `/vagrant`; this is about where your copy of the repo sits.
-- **Firewall on the libvirt bridge.** If the guest gets no DHCP/DNS, a default-drop firewall (ufw, or Docker's rules) is blocking the `virbrN` bridge. Allow it: `ufw allow in on virbr0` plus `ufw route allow in on virbr0 && ufw route allow out on virbr0`.
+- **Firewall on the libvirt bridges.** If the guest gets no DHCP/DNS, or the VMs come up but can't reach each other on `192.168.56.0/24`, a default-drop firewall (ufw, or Docker's rules) is blocking libvirt's bridges. Note the plural: this lab ends up with **two** networks — vagrant-libvirt's own management network (DHCP and SSH) and the `ace-lab` network the Vagrantfile defines for `192.168.56.0/24` — and neither one is necessarily `virbr0`. Bridge numbers are handed out in creation order, so don't guess; allow the whole family at once:
+
+  ```bash
+  sudo ufw allow in on 'virbr+'
+  sudo ufw route allow in on 'virbr+'
+  sudo ufw route allow out on 'virbr+'
+  ```
+
+  `virbr+` is an iptables prefix wildcard, so those three rules cover every libvirt bridge you have now or create later. (Prefer to scope it tighter? Swap `'virbr+'` for a specific bridge name and repeat per bridge.) To see what you actually got:
+
+  ```bash
+  sudo virsh net-list --all      # the networks libvirt knows about
+  ip -br link show type bridge   # the bridges they created
+  ```
 - **`libvirtd` won't start on a TPM box.** If `virt-secret-init-encryption.service` aborts, seal the key to the host instead of the TPM: `systemd-creds encrypt --with-key=host --name=secrets-encryption-key - /var/lib/libvirt/secrets/secrets-encryption-key`.
 
 ## Verify
