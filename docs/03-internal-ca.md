@@ -23,11 +23,20 @@ Real deployments do the second, and so do we. It is barely more work — the who
 commands — and on a five-node estate it is the difference between a build that works and one that
 spends its life failing certificate checks.
 
-**This is not the receptor mesh CA.** [Lab 6](06-controller.md) builds a *separate*, dedicated CA
-for the execution mesh. That is deliberate: the mesh CA authenticates *nodes* to each other with
-mutual TLS on a private port; this CA authenticates *services* to browsers and to each other.
-Keeping them apart means a compromised web certificate cannot mint a mesh node, and either can be
-rotated without touching the other.
+**This CA does not authenticate receptor nodes to each other.** A multi-node receptor mesh secures
+node-to-node traffic with mutual TLS on a private port, and a real distributed build would give that
+its own dedicated CA — kept separate from this one on purpose, so a compromised web certificate
+could never mint a mesh node, and either could be rotated without touching the other. This tutorial
+runs a single **hybrid** node, so there is no node-to-node traffic and it builds no mesh CA or node
+certificates at all ([Lab 7](07-execution.md) explains why). This CA's only job is to authenticate
+*services* — to browsers and to each other.
+
+**Redis is a third case — it leans on this CA, but only when clustered.** A multi-node Redis cluster
+runs over TLS: each node gets a certificate signed by *this* CA (one cert doing both client- and
+server-auth, covering client connections, the cluster gossip bus, and replication alike), and it
+trusts its peers because the CA already lives in the system trust store every node shares. But this
+tutorial runs a single Redis over a unix socket with no TLS at all — so, like the mesh, the clustered
+path never engages and Redis never presents a certificate here.
 
 ## What you will have at the end
 

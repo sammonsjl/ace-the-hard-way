@@ -23,16 +23,17 @@ control-only. We fold that role into the controller by making it a **hybrid** no
 both schedules work and runs it. That is the single deliberate departure in this tutorial, and it
 is worth understanding rather than skipping past:
 
-- A **control** node schedules jobs and hands them to the mesh. It never runs a playbook itself,
+- A **control** node schedules jobs and hands them to receptor. It never runs a playbook itself,
   except for control-plane work like project syncs.
 - An **execution** node runs jobs and nothing else.
 - A **hybrid** node does both.
 
 Splitting them is what lets you scale execution independently of the control plane, and it is why
 production deployments do it. Combining them costs you that, saves a VM, and changes nothing else
-about how the mesh works — the controller still submits signed work to receptor, receptor still
+about how execution works — the controller still submits signed work to receptor, receptor still
 spawns `ansible-runner`, and jobs still run in containers. The only difference is that the
-receptor on the other end of the mesh is the same one that submitted the work.
+receptor receiving the work is the same one that submitted it — one node, no peer, and no network
+hop between them.
 
 ## Why each component gets its own machine
 
@@ -77,8 +78,8 @@ two things beyond booting: it installs `vim curl jq git`, and it writes `/etc/ho
 node.
 
 The `/etc/hosts` part is not laziness. Every node needs every other node's name from
-[Lab 3](03-internal-ca.md) onward — certificate SANs, database connection strings, the receptor
-mesh — and hand-editing five files five times teaches nothing. It also deletes the box image's own
+[Lab 3](03-internal-ca.md) onward — certificate SANs, database connection strings, the gateway's
+service registry — and hand-editing five files five times teaches nothing. It also deletes the box image's own
 `127.0.1.1` self-mapping first, which matters more than it looks:
 
 ```bash
@@ -137,10 +138,5 @@ done
 
 All five pass on all five nodes = the estate is ready. Any failure = fix it now; every one of
 these produces a confusing failure several labs later if ignored.
-
-> Check 5 is new to the distributed build and it is the one that will actually catch something.
-> On a single box, name resolution was never exercised. Here, a node that cannot resolve `ace-db`
-> fails at database connection time with an error about authentication or timeouts, never about
-> DNS.
 
 Next: [The internal CA](03-internal-ca.md)
