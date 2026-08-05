@@ -109,9 +109,12 @@ sudo systemctl enable --now redis
 systemctl is-active redis    # want: active
 ```
 
-> **EDA will need TCP later.** [Lab 9](09-eda.md) connects to redis from another machine, which
-> means turning the TCP port back on and firewalling it to the lab network. It is left off here
-> deliberately: start closed, open only what a component actually proves it needs.
+> **The controller needs TCP next, and EDA needs it after that.** [Lab 6](06-controller.md) is
+> the first thing to connect to this redis from another machine — its `BROKER_URL`,
+> `CHANNEL_LAYERS` and `CACHES` all point at `ace-gateway:6379` over the network, because a
+> packaged install's redis-on-the-same-box default doesn't apply to a five-node estate. [Lab 9](09-eda.md)
+> reaches it the same way afterwards. It is left off here deliberately: start closed, open only
+> what a component actually proves it needs — which happens in Lab 6, not here.
 
 ---
 

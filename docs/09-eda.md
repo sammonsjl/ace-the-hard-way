@@ -89,6 +89,24 @@ PGPASSWORD='CHANGE-ME-eda' psql -h ace-db -U eda -d eda -c 'SELECT 1'   # want: 
 There is no `usermod -aG redis` here, because redis is on **ace-gateway** — this is the one
 component that reaches the cache across the network, and the next section opens that path.
 
+## Build toolchain
+
+Same native-build story as the gateway and the controller — `cryptography`, `psycopg`, and
+`python-ldap` (pulled in through DAB's authentication extras) all compile against system headers.
+This box has neither Python 3.12 nor a compiler yet; every other component's lab installs its own
+toolchain explicitly, and EDA is no exception even though it is easy to reach this step assuming
+`python3.12` is already there:
+
+```bash
+sudo dnf -y install \
+  gcc gcc-c++ make git \
+  python3.12 python3.12-devel \
+  libffi-devel openssl-devel \
+  libpq-devel postgresql-devel \
+  openldap-devel cyrus-sasl-devel
+python3.12 --version        # record the exact version
+```
+
 ## Clone and build
 
 `eda-server` is a poetry project, but a plain `pip install .` reads its `pyproject.toml`
@@ -169,7 +187,7 @@ ANSIBLE_BASE_MANAGED_ROLE_REGISTRY:
     name: Platform Auditor
     shortname: sys_auditor
 ENABLE_SERVICE_BACKED_SSO: false
-WEBSOCKET_BASE_URL: wss://192.168.56.10
+WEBSOCKET_BASE_URL: wss://192.168.56.14   # this node — ace-eda serves its own websocket
 WEBSOCKET_SSL_VERIFY: "no"
 EOF
 sudo chown eda:eda /etc/ansible-automation-platform/eda/settings.yaml
@@ -180,8 +198,9 @@ sudo vim /etc/ansible-automation-platform/eda/settings.yaml    # set the real DB
 ## Redis
 
 EDA addresses redis by **host:port** for its channels and websocket layer.
-[Lab 5](05-gateway.md) already turned that port on and firewalled it to the lab network, and
-[Lab 8](08-hub.md) is already using it. Confirm the path before trusting it:
+[Lab 6](06-controller.md) already turned that port on and firewalled it to the lab network — the
+controller needed it first — and [Lab 8](08-hub.md) is already using it. Confirm the path before
+trusting it:
 
 ```bash
 sudo dnf -y install redis          # for redis-cli
@@ -189,7 +208,7 @@ redis-cli -h ace-gateway -p 6379 ping     # want: PONG
 ```
 
 > If that times out, the firewall rule on ace-gateway is missing; if it is refused, redis is bound
-> to loopback only. Both are Lab 5 problems, not EDA problems.
+> to loopback only. Both are Lab 6 problems, not EDA problems.
 >
 > Note that EDA and hub use different redis **databases** (`/1` and `/2` in their URLs) on the same
 > server. That is not isolation in any security sense — anyone who can reach the port can select any
@@ -299,10 +318,19 @@ sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-
 
 curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ \
   -H 'Host: 192.168.56.10'
-# want: {"status": ...} JSON. A momentary "degraded / Dispatcherd workers unavailable"
-# right after start is heartbeat lag — `journalctl -u automation-eda-default-worker` will
-# show "pg_notify … established" and tasks running.
+# want: {"status": ...} JSON — see the note below for what "degraded" means with this unit set.
 ```
+
+> **`{"status": "degraded", "message": "Dispatcherd workers unavailable"}` is the correct, permanent
+> answer here — not a startup race that clears on its own.** `check_dispatcherd_workers_health()`
+> in `aap_eda/core/health.py` requires *both* the default worker above and an activation worker
+> listening on `RULEBOOK_WORKER_QUEUES` (`activation`, by default) before it reports healthy. This
+> lab intentionally does not run an `ActivationWorker` — see the note right below — so the second
+> half of that check fails every time it is asked, not only in the few seconds after start.
+> `journalctl -u automation-eda-default-worker` will still show `pg_notify … established` and real
+> tasks running: the default worker is genuinely healthy, and `degraded` is EDA accurately
+> reporting that it can register with the platform but cannot run a rulebook activation — which
+> stays true until the fifth unit below exists.
 
 > **Production note:** the full EDA also runs an **ActivationWorker**
 > (`aap-eda-manage dispatcherd --worker-class ActivationWorker`), which launches rulebook

@@ -196,15 +196,12 @@ set -euo pipefail
 REQ=$1; EXT=${2:-crt}
 CA=/etc/ansible-automation-platform/ca
 
-# -1 day, to survive clock skew between the CA host and the requesting node
-NOT_BEFORE=$(date -u -d '-1 day' +%Y%m%d%H%M%SZ)
-
 openssl x509 -req -in "/vagrant/$REQ.csr" -sha256 \
   -CA "$CA/ansible-automation-platform-managed-ca-cert.crt" \
   -CAkey "$CA/ansible-automation-platform-managed-ca-key.key" \
   -CAcreateserial \
   -copy_extensions copy \
-  -not_before "$NOT_BEFORE" -days 365 \
+  -days 365 \
   -extfile <(printf '%s\n' \
       "basicConstraints=CA:FALSE" \
       "subjectKeyIdentifier=hash" \
@@ -242,10 +239,16 @@ x509 -req`, deliberately, because a CSR is attacker-controlled input in the gene
 out and your certificates come out with a CN and nothing else — no SAN, no key usage — and every
 modern client rejects them with a hostname error that never mentions SANs.
 
-**`-not_before` is backdated one day.** Certificates are validated against the *verifier's* clock,
-not the signer's, and a machine whose clock is a few minutes behind will reject a certificate
-issued seconds ago as not-yet-valid. Across five VMs that is a real risk; one day of slack costs
-nothing. This is why [Lab 2](02-vms.md)'s preflight checks `chronyd` on every node.
+**There is no `-not_before` backdating, and that is a version fact, not a choice.** Certificates
+are validated against the *verifier's* clock, not the signer's, so a machine whose clock is a few
+minutes behind would reject a certificate issued seconds ago as not-yet-valid — the standard fix is
+backdating `notBefore` by a day of slack. `openssl x509 -req` grew a `-not_before` flag for exactly
+this in OpenSSL 3.3. Rocky 9 ships 3.2.2 (`openssl version`), which does not recognise it — and
+because `-req`'s option parser buckets any unrecognised `-word` as a candidate digest name, adding
+it produces `Multiple digest or unknown options: -sha256 and -not_before` and every signing call
+fails outright, not just the edge case it exists to cover. There is nothing here to patch: instead
+this is why [Lab 2](02-vms.md)'s preflight checks `chronyd` on every node — with clocks kept in
+sync, the backdating was only ever a safety margin, not the thing making certificates valid.
 
 **Validity is 365 days.** Certificates that outlive the service are how you end up with a ten-year
 key nobody remembers generating.
