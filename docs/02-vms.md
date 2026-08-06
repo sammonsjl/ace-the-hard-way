@@ -95,6 +95,41 @@ vagrant ssh ace-controller -c 'getent ahostsv4 ace-db ace-gateway | head -2; gre
 > Also note `getent ahostsv4`, not `getent hosts`. On a multi-homed box the latter returns a
 > link-local `fe80::` address first, and an `fe80::` in a certificate SAN is worse than no SAN.
 
+## Bring them current
+
+A box image is a snapshot of some Tuesday months ago, so all five VMs boot well behind their own
+repos — several hundred packages, including a kernel. Update the estate now, in one loop:
+
+```bash
+for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+  echo "───── $vm"
+  vagrant ssh "$vm" -c "sudo dnf -y update" 2>/dev/null
+done
+```
+
+Expect this to be the slowest step in the lab and to print a great deal — 374 packages per box on
+the image current when this was written, downloaded five times over. Then reboot, because that set
+almost always includes a kernel and you are still running the old one:
+
+```bash
+vagrant reload
+
+for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+  printf "%-16s " "$vm"
+  vagrant ssh "$vm" -c 'uname -r' 2>/dev/null
+done
+```
+
+All five should report the same, newer kernel. If one still shows the old version, that box didn't
+come back cleanly — `vagrant reload ace-<name>` it on its own before continuing.
+
+Do this **here**, not later. Three of the things in that backlog are load-bearing for what follows:
+`ca-certificates` and `openssl` decide whether the private CA in [Lab 3](03-internal-ca.md)
+behaves, `glibc` and `python3` decide whether the wheels you compile from Lab 5 onward match the
+interpreter that loads them, and the kernel decides whether podman's rootless plumbing works in
+[Lab 7](07-execution.md). Discovering any of those mid-build means unpicking a component's install
+to find out that the machine, not the component, was wrong.
+
 ## What this lab does NOT do
 
 No service users, no application directories, no packages beyond `vim curl jq git`.
