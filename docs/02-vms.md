@@ -110,33 +110,79 @@ that makes a machine *the controller* or *the hub* happens in that component's l
 
 ## Preflight checks
 
-Each of these is a precondition the rest of the tutorial silently assumes. Run them on **all
-five** VMs:
+Each of these is a precondition the rest of the tutorial silently assumes, and each has to hold on
+**all five** machines. Rather than SSH into each box in turn, run the whole set from your host —
+from the directory holding the `Vagrantfile`:
 
 ```bash
+PREFLIGHT=$(cat <<'EOF'
 # 1. Time sync — clock skew breaks TLS handshakes and job timestamps.
 #    With five machines and a private CA this matters far more than it did on one.
-systemctl is-active chronyd        # want: active
-chronyc tracking | head -3         # want: a real reference ID, small offset
+systemctl is-active --quiet chronyd \
+  && echo "OK   chronyd active" || echo "FAIL chronyd not active"
+ref=$(chronyc tracking 2>/dev/null | awk -F'[ ]*:[ ]*' '/Reference ID/{print $2}')
+case "$ref" in
+  ""|*00000000*) echo "FAIL clock not synchronised" ;;
+  *)             echo "OK   clock synced to $ref" ;;
+esac
 
 # 2. UTF-8 locale — non-UTF-8 breaks Django and postgres init
-locale | grep -c 'UTF-8'           # want: > 0, no errors printed
+[ "$(locale 2>/dev/null | grep -c 'UTF-8')" -gt 0 ] \
+  && echo "OK   UTF-8 locale" || echo "FAIL locale is not UTF-8"
 
 # 3. Hostname is real — receptor refuses 'localhost' node names
-hostnamectl hostname               # want: the ace-* name, NOT localhost
+hn=$(hostnamectl hostname)
+case "$hn" in
+  ace-*) echo "OK   hostname $hn" ;;
+  *)     echo "FAIL hostname is '$hn', expected an ace-* name" ;;
+esac
 
 # 4. No noexec mounts where code runs — jobs and wheels execute from here
+bad=""
 for d in /var /tmp /var/tmp; do
-  findmnt -no OPTIONS --target "$d" | grep -q noexec && echo "FAIL: $d is noexec"
-done; echo "check done (silence above = OK)"
+  findmnt -no OPTIONS --target "$d" | grep -q noexec && bad="$bad $d"
+done
+[ -z "$bad" ] && echo "OK   /var /tmp /var/tmp all exec" \
+              || echo "FAIL noexec on:$bad"
 
 # 5. Every other node is reachable by name
+down=""
 for h in ace-db ace-gateway ace-controller ace-hub ace-eda; do
-  ping -c1 -W2 "$h" >/dev/null && echo "OK   $h" || echo "FAIL $h"
+  ping -c1 -W2 "$h" >/dev/null 2>&1 || down="$down $h"
+done
+[ -z "$down" ] && echo "OK   reaches all five nodes by name" \
+               || echo "FAIL cannot reach:$down"
+EOF
+)
+
+for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+  echo "───── $vm"
+  vagrant ssh "$vm" -c "$PREFLIGHT" 2>/dev/null
 done
 ```
 
-All five pass on all five nodes = the estate is ready. Any failure = fix it now; every one of
-these produces a confusing failure several labs later if ignored.
+The quoted heredoc (`<<'EOF'`) matters: it stops your host's shell expanding `$d`, `$h` and the
+`$(...)` calls before they ever reach a VM. The script travels across as literal text and is
+evaluated by the remote shell, which is where every one of those variables belongs.
+
+Six `OK` lines per machine, thirty in all, and the estate is ready:
+
+```
+───── ace-db
+OK   chronyd active
+OK   clock synced to 40832FB2 (64-131-47-178.metronet.net)
+OK   UTF-8 locale
+OK   hostname ace-db
+OK   /var /tmp /var/tmp all exec
+OK   reaches all five nodes by name
+───── ace-gateway
+...
+```
+
+Any `FAIL` = fix it now; every one of these produces a confusing failure several labs later if
+ignored. Note that check 5 includes each node pinging *itself*, which is deliberate — a box that
+can't resolve its own name will hand you a certificate mismatch in [Lab 3](03-internal-ca.md). To
+re-check a single machine after a fix, drop the loop and run `vagrant ssh ace-db -c "$PREFLIGHT"`
+directly.
 
 Next: [The internal CA](03-internal-ca.md)
