@@ -440,8 +440,13 @@ sudo dnf -y install python3.12-pip
 sudo python3.12 -m pip install supervisor
 sudo ln -sf /usr/local/bin/supervisord  /usr/bin/supervisord
 sudo ln -sf /usr/local/bin/supervisorctl /usr/bin/supervisorctl
-sudo supervisorctl version    # want: a version, not "command not found"
+sudo which supervisord supervisorctl   # want: both resolve (/bin here — same as /usr/bin)
+sudo supervisord --version             # want: a version, not "command not found"
 ```
+
+> **Not `supervisorctl version`** — that asks a *running* supervisord for its version, and there
+> isn't one yet, so it answers `http://localhost:9001 refused connection`. Same trap as
+> [Lab 5](05-gateway.md); `supervisord --version` is answered by the binary itself.
 
 > **The symlinks are required.** AWX restarts its own processes by shelling out to a **bare**
 > `supervisorctl`, resolved from `PATH`, reading its **default** config path — no `-c`, no

@@ -190,8 +190,18 @@ system-wide:
 sudo python3.12 -m pip install supervisor
 sudo ln -sf /usr/local/bin/supervisord  /usr/bin/supervisord
 sudo ln -sf /usr/local/bin/supervisorctl /usr/bin/supervisorctl
-sudo supervisorctl version    # want: a version, not "command not found"
+sudo which supervisord supervisorctl   # want: both resolve (/bin here — same as /usr/bin)
+sudo supervisord --version             # want: a version, not "command not found"
 ```
+
+> **Do not check this with `supervisorctl version`.** That is not a "print your version" flag — it
+> is a command *sent to a running supervisord*, described in supervisorctl's own help as "show the
+> version of the remote supervisord process". No daemon exists yet at this point in the lab, so
+> supervisorctl falls back to its default `serverurl` and answers
+> `http://localhost:9001 refused connection`. That message means the daemon isn't up — which is
+> correct and expected here — not that the install failed. `supervisord --version` is answered by
+> the binary itself and needs nothing running. (`supervisorctl --version` is not an option at all:
+> `Error: option --version not recognized`.)
 
 > **The symlinks are not cosmetic.** Rocky's `sudo` replaces `PATH` with a `secure_path` of
 > `/sbin:/bin:/usr/sbin:/usr/bin` — no `/usr/local`
