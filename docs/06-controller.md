@@ -128,22 +128,59 @@ set -euo pipefail
 source /var/lib/awx/venv/awx/bin/activate
 cd /opt/awx
 
-# 1. toolchain bootstrap — PEP-517-era versions, so builds behave on 3.12
-pip install --upgrade pip setuptools wheel setuptools_scm
+# 1. toolchain bootstrap — upstream's own pins, not "whatever is newest"
+pip install pip==25.3 setuptools==80.9.0 'setuptools_scm[toml]==9.2.2' \
+            wheel==0.46.3 cython==3.1.3
 
 # 2. frozen + git requirements in one resolve, C extensions compiled from source
 cat requirements/requirements.txt requirements/requirements_git.txt \
-  | pip install --no-binary cffi,pycparser,psycopg -r /dev/stdin
+  | pip install --no-binary cffi,pycparser,psycopg,twilio -r /dev/stdin
 
 # 3. upstream removes a few legacy packages after installing
 if [ -f requirements/requirements_tower_uninstall.txt ]; then
   pip uninstall -y -r requirements/requirements_tower_uninstall.txt || true
 fi
 
-# 4. editable install of AWX itself (the modern 'make develop')
+# 4. editable install of AWX itself
 pip install -e .
 AWXEOF
 ```
+
+Two of those four lines are worth pausing on.
+
+> **Step 1 is pinned, and it has to be.** The obvious version of that line —
+> `pip install --upgrade pip setuptools wheel setuptools_scm` — poisons the venv. Unpinned
+> `setuptools_scm` resolves to 10.x, which is a shim that pulls in a *new* package,
+> `vcs-versioning`, requiring `packaging>=26.2`. Step 2 then installs AWX's frozen set, which pins
+> `packaging==25.0` and drags setuptools_scm back to 9.2.2 — but nothing uninstalls
+> `vcs-versioning`. It is left orphaned against a `packaging` it cannot accept, pip prints a red
+> `ERROR: pip's dependency resolver...` block in the middle of an otherwise successful build, and
+> the venv stays permanently inconsistent:
+>
+> ```
+> pip check
+> # vcs-versioning 2.2.3 has requirement packaging>=26.2, but you have packaging 25.0.
+> ```
+>
+> Nothing imports `vcs_versioning` once 9.2.2 is back, so the controller still runs — which is
+> exactly why this is worth fixing rather than shrugging at. **General lesson: `--upgrade` with no
+> version is a pin to "today", and on a `devel` branch today moves.** If you already ran the
+> unpinned line, `pip uninstall -y vcs-versioning` removes the orphan and `pip check` goes quiet.
+
+The pins above are not invented — they are upstream's, and you can re-derive them for whatever
+commit you recorded:
+
+```bash
+grep -E '^(VENV_BOOTSTRAP|SRC_ONLY_PKGS)' /opt/awx/Makefile
+```
+
+`SRC_ONLY_PKGS` is the `--no-binary` list in step 2, and it is the reason `twilio` is in there
+next to the three C-extension packages. If those two lines disagree with this lab, the Makefile
+wins — record what you used alongside the commit hash.
+
+**Step 4 is not `make develop`.** AWX no longer ships a `setup.py` — packaging metadata lives in
+`setup.cfg` and `pyproject.toml` — so upstream's own `develop:` target, which still calls
+`python setup.py develop`, cannot run. `pip install -e .` is the replacement.
 
 ### Make it a release build — delete `devonly`
 
