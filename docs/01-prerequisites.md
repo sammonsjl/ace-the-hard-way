@@ -21,11 +21,28 @@ Pick the track for your platform — both are fully tested end-to-end.
 
 **Linux — KVM/libvirt** (`vagrant-libvirt`, no license, all open source). Install the virtualization stack plus Vagrant for your distro, then run the common steps below.
 
-*Arch* — the host this was tested on:
+*Arch* — the host this was tested on. It takes two commands, because Vagrant isn't in the official repos. First the virtualization stack:
 
 ```bash
-sudo pacman -S --needed qemu-desktop libvirt dnsmasq ebtables dmidecode nfs-utils vagrant
+sudo pacman -S --needed qemu-full libvirt dnsmasq dmidecode nfs-utils
 ```
+
+Then Vagrant itself, which is **AUR-only** on Arch — with an AUR helper:
+
+```bash
+yay -S vagrant        # or: paru -S vagrant
+```
+
+or by hand, if you don't have one:
+
+```bash
+git clone https://aur.archlinux.org/vagrant.git
+cd vagrant && makepkg -si
+```
+
+Either route builds from source and pulls in Go as a build dependency, so give it a few minutes.
+
+> **Don't add `vagrant` or `ebtables` to the `pacman` line.** `vagrant` is AUR-only, and `ebtables` is no longer its own Arch package — `/usr/bin/ebtables` ships in `iptables` now, which libvirt already depends on. pacman aborts the *entire* transaction on a single unknown target, so one bad name means nothing gets installed.
 
 *Fedora / RHEL family* — package names are correct, but this wasn't tested as a **host** (the guest VMs are Rocky, so the tutorial's own `dnf` commands are covered — this line is just the host prep):
 
