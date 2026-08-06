@@ -149,7 +149,6 @@ The gateway does SAML federation, which pulls in `python3-saml` → `xmlsec`, an
 in `python-ldap`. Both compile against native libraries:
 
 ```bash
-sudo dnf -y install epel-release
 sudo dnf config-manager --set-enabled crb
 sudo dnf -y install \
   gcc gcc-c++ make git \
@@ -160,15 +159,21 @@ sudo dnf -y install \
   libxml2-devel xmlsec1-devel xmlsec1-openssl-devel libtool-ltdl-devel
 ```
 
+> **CRB, and *only* CRB.** Rocky's CodeReady Builder repo is off by default and holds exactly three
+> things this list needs — `xmlsec1-devel`, `xmlsec1-openssl-devel` and `libtool-ltdl-devel`.
+> Without it those three are the only ones that fail (`No match for argument: xmlsec1-devel`);
+> everything else comes from BaseOS or AppStream. **Do not enable EPEL here.** Nothing in this
+> tutorial — on any of the five machines — needs a package from it, and an enabled EPEL puts its
+> `uwsgi` one careless `dnf install` away from the venv-built one this platform runs on. That
+> failure is worth understanding, so [Appendix A1](a1-epel-uwsgi-conflict.md) has you enable EPEL
+> deliberately, break the platform with it, and then armor the box.
+
 > **These failures all read as Python problems and none of them are.** Missing `xmlsec1-devel`
 > gives `Failed to build installable wheels … : xmlsec`; missing `openldap-devel` buries
 > `fatal error: lber.h: No such file or directory` a hundred lines into a gcc invocation and then
 > reports `Failed to build python-ldap`. The traceback always names the Python package, never the
 > system header. When a wheel build fails, read *up* past the pip summary to the first
 > `fatal error:` line — that names the header, and the header names the `-devel` package.
->
-> EPEL being enabled is harmless *as long as you never `dnf install uwsgi`* — see
-> [Appendix A1](a1-epel-uwsgi-conflict.md). Every uwsgi in this tutorial is pip-built in a venv.
 
 ---
 
