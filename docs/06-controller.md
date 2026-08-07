@@ -299,42 +299,7 @@ timeout 5 bash -c 'echo > /dev/tcp/ace-gateway/6379' && echo OK
 
 Get that `OK` before continuing. Without it every `awx-manage` command hangs rather than fails.
 
-**All three, not just one.** They are separate settings serving separate jobs, and AWX's
-`defaults.py` points each at the same socket independently:
-
-| Setting | Used by | Symptom if you miss it |
-|---|---|---|
-| `BROKER_URL` | callback receiver, and the **node health check** | node reports `capacity=0`, `errors: Failed to connect to Redis` |
-| `CHANNEL_LAYERS` | daphne, wsrelay, ws-heartbeat | daphne crash-loops; `daphne.sock` never appears |
-| `CACHES` | Django's cache | intermittent failures under load |
-
-> **This is the single most instructive failure in the distributed build**, because two of its
-> three symptoms point somewhere other than redis.
->
-> `CHANNEL_LAYERS` is the loud one: daphne dies on start with
-> `redis.exceptions.ConnectionError: Error 2 connecting to /var/run/redis/redis.sock. No such file
-> or directory`, restarts, dies again. Easy — the message names the file.
->
-> `BROKER_URL` is the quiet one. Everything comes up, all eight processes stay `RUNNING`, the API
-> answers, the node heartbeats with a real version — and `awx-manage list_instances` shows
-> **`capacity=0`**. Nothing crashes. What happened is `Instance.local_health_check()` in
-> `awx/main/models/ha.py` pings redis and, on failure, records the node as zero-capacity:
->
-> ```python
-> try:
->     get_redis_client().ping()
-> except redis.ConnectionError:
->     errors = _('Failed to connect to Redis')
-> ```
->
-> and `get_redis_client()` reads `settings.BROKER_URL`. A zero-capacity node is a node the
-> scheduler will never give work to, so **every job you launch sits in `pending` forever** — the
-> same symptom as the `devonly` trap in section 2, from a completely different cause. Check
-> `capacity` and `node_state` before assuming the scheduler is broken:
->
-> ```bash
-> sudo -u awx awx-manage list_instances     # want: capacity > 0, and no red
-> ```
+All three settings are read independently — set every one of them, not just `BROKER_URL`.
 
 The websocket secret and this node's identity:
 
