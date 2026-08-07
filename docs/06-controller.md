@@ -318,10 +318,15 @@ Then settle permissions in one pass. `postgres.py` holds a password and `sudo te
 world-readable:
 
 ```bash
-sudo chown root:awx /etc/tower/settings.py /etc/tower/conf.d/*.py
-sudo chmod 0640     /etc/tower/settings.py /etc/tower/conf.d/*.py
-sudo -u awx cat /etc/tower/conf.d/channels.py >/dev/null && echo "awx can read conf.d — good"
+sudo sh -c 'chown root:awx /etc/tower/settings.py /etc/tower/conf.d/*.py'
+sudo sh -c 'chmod 0640     /etc/tower/settings.py /etc/tower/conf.d/*.py'
+sudo ls -l /etc/tower/settings.py /etc/tower/conf.d/    # want: root awx, -rw-r----- on every file
 ```
+
+> **The `sudo sh -c` is load-bearing.** `conf.d` is `0750 root:awx` and your login user is in
+> neither, so *your* shell expands the glob, not root's — and it expands to nothing. Without the
+> wrapper both commands fail with `cannot access '/etc/tower/conf.d/*.py'` and the files keep
+> `sudo tee`'s world-readable `root:root 0644`, password included.
 
 ```bash
 sudo -u awx awx-manage check
