@@ -295,16 +295,7 @@ sudo firewall-cmd --reload
 timeout 5 bash -c 'echo > /dev/tcp/ace-gateway/6379' && echo OK
 ```
 
-> **Skip this and `awx-manage createsuperuser` does not fail — it hangs.** Not a timeout, not a
-> traceback: minutes of a process sitting at a few percent CPU going nowhere. `pg_stat_activity`
-> on ace-db shows the database connection idle, waiting on the *client* — the database is not the
-> problem. A closed port on ace-gateway produces `No route to host` at the socket layer rather
-> than a fast `Connection refused`, and the cache client retries a connection it cannot open
-> instead of failing it quickly. Every `awx-manage` subcommand does this, not only
-> `createsuperuser`, because the DAB-backed cache is touched during Django app startup before any
-> command-specific code runs. A management command that looks hung rather than crashed means
-> check redis reachability first — low, flat CPU on a live `awx-manage` process is the tell, not a
-> traceback naming redis.
+Get that `OK` before continuing. Without it every `awx-manage` command hangs rather than fails.
 
 **All three, not just one.** They are separate settings serving separate jobs, and AWX's
 `defaults.py` points each at the same socket independently:
