@@ -1168,20 +1168,36 @@ a subscription-bearing build sends, and an open build simply doesn't send that f
 what is already true:
 
 ```bash
-sudo -u awx sed -i "s/^            valid_key=True,$/            valid_key=True,\n            compliant=True,/" \
-  /opt/awx/awx/main/utils/licensing.py
-sudo systemctl restart automation-controller
+grep -q 'compliant=True' /opt/awx/awx/main/utils/licensing.py || \
+  sudo -u awx sed -i "s/^            valid_key=True,$/            valid_key=True,\n            compliant=True,/" \
+    /opt/awx/awx/main/utils/licensing.py
 
+# exactly one, and the file still compiles
+grep -c 'compliant=True' /opt/awx/awx/main/utils/licensing.py    # want: 1
+sudo -u awx /var/lib/awx/venv/awx/bin/python -c \
+  'compile(open("/opt/awx/awx/main/utils/licensing.py").read(),"x","exec")' && echo "compiles"
+
+sudo systemctl restart automation-controller
+```
+
+> **The `grep -q` guard is why this is safe to re-run.** The `sed` pattern still matches after the
+> line is inserted, so running it twice puts `compliant=True` in the `dict()` twice — a
+> `SyntaxError: keyword argument repeated` that stops the API booting. The symptom is
+> `no healthy upstream` from envoy, which points at the gateway rather than at this file.
+
+Give envoy up to a minute to re-admit the upstream after the restart, then:
+
+```bash
 curl -sk -u admin:CHANGE-ME https://192.168.56.11/api/controller/v2/config/ \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["license_info"]["compliant"])'   # want: True
 ```
 
 Refresh, and the banner is gone.
 
-> Like the `devonly.py` removal earlier in this lab, this is a patch to the *source tree* in
-> `/opt/awx`, not to configuration. It does not survive a `git pull` there — re-apply it if you
-> rebuild. If the `sed` matches nothing, upstream has re-indented or reworked `OpenLicense`; open
-> `licensing.py` and add `compliant=True` to that `dict()` by hand.
+> This is a patch to the *source tree* in `/opt/awx`, not to configuration. It does not survive a
+> `git pull` there — re-apply it if you rebuild. If the `sed` matches nothing, upstream has
+> re-indented or reworked `OpenLicense`; open `licensing.py` and add `compliant=True` to that
+> `dict()` by hand.
 
 Browse around. Everything reads correctly. The controller is genuinely healthy:
 
