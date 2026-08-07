@@ -752,9 +752,13 @@ the relabel and the children die with `203/EXEC`.
 
 ```bash
 sudo -u awx awx-manage list_instances
-# want: capacity > 0 and a real version. capacity=0 means the redis fragment above is
-#       wrong or missing — see the table there, not the scheduler.
+# want: capacity > 0 and a real version
 ```
+
+Re-run it if the first answer is `capacity=0`. The dispatcher's `cluster_node_heartbeat` runs on a
+60-second schedule (`CLUSTER_NODE_HEARTBEAT_PERIOD`), and capacity stays zero until it has fired
+once. If it is still zero after a couple of minutes, the redis fragment is wrong or missing — not
+the scheduler.
 
 ---
 
