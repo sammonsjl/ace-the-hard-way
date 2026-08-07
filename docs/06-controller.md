@@ -164,24 +164,12 @@ This one line is the difference between a working controller and one where **eve
 
 ```bash
 sudo rm -f /opt/awx/awx/devonly.py
+ls /opt/awx/awx/devonly.py    # want: No such file or directory
 ```
 
-AWX decides development-vs-production **not** from an environment variable but from a marker file:
-`awx/__init__.py` does `import awx.devonly` and sets `MODE = 'development'` if it succeeds. That
-file ships in a source checkout and is stripped from a release package — its own header says so.
-
-> **Why it's fatal, and why it hides.** `MODE` gates the task manager:
-> ```python
-> if MODE == 'development' and settings.AWX_DISABLE_TASK_MANAGERS:
->     return          # skip scheduling
-> manager().schedule()
-> ```
-> With `devonly` present `MODE` is `'development'` even though you set `AWX_MODE=production`
-> everywhere — the variable picks the *settings files*, the import decides `MODE`. So the guard
-> evaluates `settings.AWX_DISABLE_TASK_MANAGERS`, which **does not exist in production settings**.
-> The scheduled task raises `AttributeError` every tick, the dispatcher swallows it, and jobs sit
-> in `pending` while everything else looks healthy. **General lesson: an `AttributeError` on a
-> settings name means a mode mismatch — check `devonly` and the process environment first.**
+A source checkout ships that marker file; a release package strips it. `awx/__init__.py` imports
+it to decide `MODE`, so leaving it in place means `MODE = 'development'` no matter what
+`AWX_MODE` says.
 
 ### The `awx-manage` wrapper
 
