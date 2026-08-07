@@ -341,11 +341,13 @@ J=$(curl -sk -u "admin:$GW_PW" -X POST $GW/projects/$ID/update/ \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 
 for i in $(seq 30); do
-  curl -sk -u "admin:$GW_PW" $GW/project_updates/$J/ \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])'
+  S=$(curl -sk -u "admin:$GW_PW" $GW/project_updates/$J/ \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
+  echo "$S"
+  case "$S" in successful|failed|error|canceled) break ;; esac
   sleep 6
 done
-# want: running -> successful
+# want: running -> successful, then it stops
 ```
 
 Then confirm it really was a container, and really was this node doing both jobs:
