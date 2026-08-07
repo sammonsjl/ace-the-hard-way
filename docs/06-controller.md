@@ -276,6 +276,8 @@ CHANNEL_LAYERS = {
 EOF
 ```
 
+All three are read independently — set every one of them, not just `BROKER_URL`.
+
 ### Open the path before anything reads it
 
 [Lab 5](05-gateway.md) left redis's TCP listener off on purpose (`port 0`, unix socket only) — right
@@ -298,8 +300,6 @@ timeout 5 bash -c 'echo > /dev/tcp/ace-gateway/6379' && echo OK
 ```
 
 Get that `OK` before continuing. Without it every `awx-manage` command hangs rather than fails.
-
-All three settings are read independently — set every one of them, not just `BROKER_URL`.
 
 The websocket secret and this node's identity:
 
