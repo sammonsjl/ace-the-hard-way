@@ -69,7 +69,7 @@ envoy :443 ──/api/eda/…──► nginx :443 ──┬── unix:/run/eda/
 > *same* DAB the gateway (jewel-devel) uses — so JWT single sign-on lines up on the first try.
 > Track `main`, not a stable branch, for exactly this reason.
 
-All commands on **ace-eda**.
+All commands on **ace-eda** unless stated otherwise.
 
 ## Foundation
 
@@ -340,16 +340,21 @@ curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ 
 
 ## nginx
 
+**On `ace-eda`:**
+
 ```bash
-# on ace-eda
 sudo /usr/local/sbin/ace-request-cert server /etc/ansible-automation-platform/eda eda cert
 ```
+
+**On `ace-gateway`:**
+
 ```bash
-# on ace-gateway
 sudo /usr/local/sbin/ace-sign-request ace-eda-server cert
 ```
+
+**Back on `ace-eda`:**
+
 ```bash
-# back on ace-eda
 sudo install -o root -g eda -m 0640 /vagrant/ace-eda-server.cert \
   /etc/ansible-automation-platform/eda/server.cert
 sudo rm -f /vagrant/ace-eda-server.cert

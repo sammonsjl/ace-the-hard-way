@@ -93,8 +93,9 @@ sudo openssl x509 -in /etc/ansible-automation-platform/ca/ansible-automation-pla
 Publish the root certificate through `/vagrant`, which is the repo directory shared into all five
 VMs — the courier for anything that has to cross machines in this tutorial:
 
+**On `ace-gateway`** — the PUBLIC certificate only, never the key:
+
 ```bash
-# on ace-gateway — the PUBLIC certificate only, never the key:
 sudo cp /etc/ansible-automation-platform/ca/ansible-automation-platform-managed-ca-cert.crt /vagrant/
 ```
 

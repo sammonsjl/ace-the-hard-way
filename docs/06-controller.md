@@ -282,16 +282,18 @@ EOF
 for the gateway talking to itself, wrong the moment this node needs the same redis over the
 network. This is that moment:
 
+**On `ace-gateway`:**
+
 ```bash
-# on ace-gateway
 sudo sed -i 's/^port 0$/port 6379/' /etc/redis/redis.conf
 sudo systemctl restart redis
 sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.56.0/24 port port=6379 protocol=tcp accept'
 sudo firewall-cmd --reload
 ```
 
+**Back on `ace-controller`** — confirm the path before trusting it:
+
 ```bash
-# back on ace-controller — confirm the path before trusting it
 timeout 5 bash -c 'echo > /dev/tcp/ace-gateway/6379' && echo OK
 ```
 
@@ -805,16 +807,21 @@ this node's. That is the entry that matters; the local name is there for direct 
 
 The certificate, via [Lab 3](03-internal-ca.md)'s two-step procedure:
 
+**On `ace-controller`:**
+
 ```bash
-# on ace-controller
 sudo /usr/local/sbin/ace-request-cert tower /etc/tower awx cert
 ```
+
+**On `ace-gateway`:**
+
 ```bash
-# on ace-gateway
 sudo /usr/local/sbin/ace-sign-request ace-controller-tower cert
 ```
+
+**Back on `ace-controller`:**
+
 ```bash
-# back on ace-controller
 sudo install -o root -g awx -m 0644 /vagrant/ace-controller-tower.cert /etc/tower/tower.cert
 sudo rm -f /vagrant/ace-controller-tower.cert
 sudo openssl verify /etc/tower/tower.cert       # want: OK

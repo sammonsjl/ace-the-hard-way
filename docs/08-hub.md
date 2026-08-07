@@ -67,8 +67,9 @@ Pulp stores encrypted fields, so it needs the postgres **`hstore`** extension. C
 extension requires a superuser, and superuser is a thing you have on the database host — so this
 one step runs **on ace-db**, not here:
 
+**On `ace-db`:**
+
 ```bash
-# on ace-db
 sudo dnf -y install postgresql-contrib
 sudo -iu postgres psql -d pulp -c "CREATE EXTENSION IF NOT EXISTS hstore;"
 sudo -iu postgres psql -d pulp -c '\dx' | grep hstore     # want: hstore listed
@@ -359,16 +360,21 @@ uses a non-standard port, and only because envoy shares its machine.
 The certificate comes from [Lab 3](03-internal-ca.md)'s two-step procedure — the key is generated
 here and never leaves:
 
+**On `ace-hub`:**
+
 ```bash
-# on ace-hub
 sudo /usr/local/sbin/ace-request-cert pulp_webserver /etc/pulp/certs pulp
 ```
+
+**On `ace-gateway`:**
+
 ```bash
-# on ace-gateway
 sudo /usr/local/sbin/ace-sign-request ace-hub-pulp_webserver
 ```
+
+**Back on `ace-hub`:**
+
 ```bash
-# back on ace-hub
 sudo install -o root -g pulp -m 0644 /vagrant/ace-hub-pulp_webserver.crt /etc/pulp/certs/pulp_webserver.crt
 sudo rm -f /vagrant/ace-hub-pulp_webserver.crt
 sudo openssl verify /etc/pulp/certs/pulp_webserver.crt      # want: OK
