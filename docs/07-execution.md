@@ -71,21 +71,10 @@ cd /tmp    # rootless podman cannot start from a 0700 home dir, and sudo -u keep
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
 ```
 
-> **Do not skip `enable-linger`, and understand why.** `/run/user/<uid>` is created by
-> `systemd-logind` when a user gets their first login session and destroyed when their last session
-> exits. The `awx` user never logs in — it runs services — so on a freshly booted box that directory
-> does not exist. `loginctl enable-linger awx` tells logind to treat `awx` as permanently logged in:
-> the directory is created at boot and kept for the life of the machine. The flag is persistent
-> state on disk (`/var/lib/systemd/linger/awx`).
->
-> Rootless podman keeps all its per-user state under `XDG_RUNTIME_DIR` — container state, conmon
-> pid files, and the pause process holding the user namespace open. Point it at a directory that
-> does not exist and it cannot start a container.
->
-> **The failure is nasty because of its timing.** It works while you are SSH'd in testing (your own
-> session created the directory), then fails after a reboot — or works for days and breaks the
-> moment the last session on the box closes and logind tears the directory down under a running
-> service. Jobs fail at container start, looking like an image problem.
+> **`enable-linger` is not optional.** `/run/user/<uid>` is created by `systemd-logind` at a user's
+> first login and destroyed at their last logout. The `awx` user never logs in, so without linger
+> that directory does not exist — and rootless podman keeps all its per-user state there. Linger
+> tells logind to create it at boot and keep it, recorded at `/var/lib/systemd/linger/awx`.
 
 Smoke-test the sandbox, and make it exercise **crypto** rather than just the shell:
 
@@ -139,13 +128,10 @@ sudo systemd-tmpfiles --create /etc/tmpfiles.d/awx-receptor.conf /etc/tmpfiles.d
 df --output=fstype /var/lib/receptor | tail -1    # want: xfs or ext4 — NOT tmpfs
 ```
 
-> **Two runtime directories, and both are created.** `/run/receptor` is receptor's own default;
-> `/run/awx-receptor` is where we point the control socket, so it is unambiguous that this daemon
-> belongs to the AWX side of the box. A packaged install creates both for the same reason, and
-> receptor will use its default for anything we have not explicitly redirected.
->
-> Left unset, receptor's datadir falls back to `/tmp/receptor` — periodically swept, and on some
-> hosts tmpfs-backed, taking in-flight work units with it at reboot.
+> **Both runtime directories are created.** `/run/receptor` is receptor's own default;
+> `/run/awx-receptor` is where we point the control socket. Receptor still uses its default for
+> anything not explicitly redirected, and a packaged install creates both. The datadir is set
+> explicitly for the same reason — left unset it falls back to `/tmp/receptor`, which is swept.
 
 Raised file limits, because jobs open a lot of files:
 
@@ -199,7 +185,7 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 - log-level: info
 
 # One node, no peers: this declares an isolated mesh. The `: null` is load-bearing —
-# see the war story below.
+# see the note below.
 - local-only: null
 
 - control-service:
@@ -245,33 +231,16 @@ EOF
   tutorial — they are here because a control or hybrid node always advertises them, and leaving
   them out would quietly narrow what this node claims to be able to do.
 
-> **War story 1 — a receptor with no backends exits cleanly, which looks like a crash loop.** With
-> no listener and no peers, receptor decides it has nothing to do: it logs
-> `WARNING Nothing to do - no backends are running` and **exits 0**. systemd reports a service that
-> keeps stopping and `receptorctl` throws `Connection refused`, with nothing anywhere saying "you
-> have no backends." `local-only` declares an isolated node deliberately and is exactly right for a
-> single-node mesh. If you hit the loop, fix the config then
-> `sudo systemctl reset-failed receptor` before restarting.
+> **Every entry must be a `key: value` mapping — including `local-only: null`.** This file has two
+> consumers with different parsers, and AWX is the stricter one: it calls `.items()` on every list
+> item, so a bare `- local-only` (which receptor itself accepts, and its docs show) parses as a
+> string and takes down the dispatcher. AWX's own `RECEPTOR_CONFIG_STARTER` writes
+> `{'local-only': None}`.
 >
-> **War story 2 — write it the way receptor's own docs do (`- local-only`) and AWX cannot read the
-> file.** Receptor accepts the bare form happily: the daemon starts, `receptorctl status` prints the
-> node, this lab's verify passes. Then the first project sync dies in the *dispatcher*:
-> ```
-> File "/opt/awx/awx/main/tasks/receptor.py", line 142, in get_receptor_sockfile
->     for entry_name, entry_data in section.items():
-> AttributeError: 'str' object has no attribute 'items'
-> ```
-> **Why:** AWX assumes every list item is a mapping — `get_receptor_sockfile()` and
-> `get_tls_client()` both call `section.items()`. YAML parses a bare `- local-only` as the *string*
-> `"local-only"`, and strings have no `.items()`. It is fatal rather than cosmetic because the
-> string sits *before* `control-service`, so the loop blows up before finding the socket path —
-> hence a traceback about parsing rather than about connecting.
->
-> **Fix:** give the key a value so YAML produces a dict. That is what AWX itself writes:
-> `RECEPTOR_CONFIG_STARTER` opens with `{'local-only': None}`. **General lesson, and it applies to
-> every entry in this file:** it has two consumers with different parsers, and the stricter one is
-> AWX — so keep every entry a `key: value` mapping, even where receptor's documentation shows a
-> bare directive.
+> **`local-only` is also what keeps receptor running.** With no listener, no peers and no
+> `local-only`, receptor decides it has nothing to do and exits 0 — which systemd reports as a
+> service that will not stay up. After fixing the config, `sudo systemctl reset-failed receptor`
+> before restarting.
 
 ### The unit
 
@@ -303,17 +272,12 @@ sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /run/awx-receptor/rec
 # want: Node ID ace-controller, and 'local' under Secure Work Types
 ```
 
-> **Expect a version warning:** `receptorctl and receptor are different versions, they may not be
-> compatible`. That is not a mistake in the steps above. `receptorctl` is a Python package pinned by
-> AWX's own requirements and installed into its venv; the `receptor` daemon is a release binary you
-> downloaded. The two are versioned independently and rarely match exactly. The control protocol is
-> stable across minor versions, so this is noise — but check it if `receptorctl` ever starts
-> returning malformed output, because then it isn't.
+> **Expect** `receptorctl and receptor are different versions, they may not be compatible`.
+> `receptorctl` is pinned by AWX's requirements; the daemon is a release binary. They are versioned
+> independently, and the control protocol is stable across minor versions — this is noise.
 
-`XDG_RUNTIME_DIR` is baked in because **receptor is the parent of podman here** — the dispatcher
-never launches a container itself; it submits a work unit, receptor's work-command spawns
-`ansible-runner`, and ansible-runner starts the EE. A system service gets no `XDG_RUNTIME_DIR` for
-free.
+`XDG_RUNTIME_DIR` is baked into the unit because receptor is the parent of podman here, and a
+system service gets no `XDG_RUNTIME_DIR` for free.
 
 ---
 ## 3. Run something
