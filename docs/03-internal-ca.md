@@ -50,7 +50,7 @@ On **ace-gateway**. It could be any node; the gateway is the natural choice beca
 machine every other component already has to trust.
 
 ```bash
-vagrant ssh ace-gateway
+ssh ace-gateway
 sudo install -d -o root -g root -m 0700 /etc/ansible-automation-platform/ca
 ```
 
@@ -90,19 +90,19 @@ sudo openssl x509 -in /etc/ansible-automation-platform/ca/ansible-automation-pla
 
 ## Trust it everywhere
 
-Publish the root certificate through `/vagrant`, which is the repo directory shared into all five
+Publish the root certificate through `/srv/ace`, which is the repo directory shared into all five
 VMs — the courier for anything that has to cross machines in this tutorial:
 
 **On `ace-gateway`** — the PUBLIC certificate only, never the key:
 
 ```bash
-sudo cp /etc/ansible-automation-platform/ca/ansible-automation-platform-managed-ca-cert.crt /vagrant/
+sudo cp /etc/ansible-automation-platform/ca/ansible-automation-platform-managed-ca-cert.crt /srv/ace/
 ```
 
 Then on **each of the other four** (`ace-db`, `ace-controller`, `ace-hub`, `ace-eda`):
 
 ```bash
-sudo cp /vagrant/ansible-automation-platform-managed-ca-cert.crt /etc/pki/ca-trust/source/anchors/
+sudo cp /srv/ace/ansible-automation-platform-managed-ca-cert.crt /etc/pki/ca-trust/source/anchors/
 sudo update-ca-trust
 trust list --filter=ca-anchors | grep -A2 "ACE Managed CA"   # want: a match
 ```
@@ -113,7 +113,7 @@ And on ace-gateway itself, which needs to trust its own root like everyone else:
 sudo cp /etc/ansible-automation-platform/ca/ansible-automation-platform-managed-ca-cert.crt \
         /etc/pki/ca-trust/source/anchors/
 sudo update-ca-trust
-sudo rm -f /vagrant/ansible-automation-platform-managed-ca-cert.crt
+sudo rm -f /srv/ace/ansible-automation-platform-managed-ca-cert.crt
 ```
 
 > Dropping a file into `anchors/` does nothing on its own — `update-ca-trust` rebuilds the
@@ -126,7 +126,7 @@ sudo rm -f /vagrant/ansible-automation-platform-managed-ca-cert.crt
 Here is where a distributed build differs from a single-box one, and it is the whole point of this
 section.
 
-**A private key must never leave the machine that will use it.** Not over `/vagrant`, not over
+**A private key must never leave the machine that will use it.** Not over `/srv/ace`, not over
 `scp`, not "just this once". So signing is split:
 
 1. On the **node that needs the certificate**: generate a private key and a certificate signing
@@ -179,12 +179,12 @@ chmod 0640 "$DIR/$NAME.key"
 openssl req -new -key "$DIR/$NAME.key" -subj "/CN=$HOST" \
   -addext "keyUsage=keyEncipherment,digitalSignature" \
   -addext "subjectAltName=DNS:$HOST${IP:+,IP:$IP}${EKU}" \
-  -out "/vagrant/$HOST-$NAME.csr"
+  -out "/srv/ace/$HOST-$NAME.csr"
 
-echo "wrote /vagrant/$HOST-$NAME.csr — now sign it on ace-gateway:"
+echo "wrote /srv/ace/$HOST-$NAME.csr — now sign it on ace-gateway:"
 echo "  sudo /usr/local/sbin/ace-sign-request $HOST-$NAME $EXT"
 echo "then back here:"
-echo "  sudo install -o root -g $GROUP -m 0640 /vagrant/$HOST-$NAME.$EXT $DIR/$NAME.$EXT"
+echo "  sudo install -o root -g $GROUP -m 0640 /srv/ace/$HOST-$NAME.$EXT $DIR/$NAME.$EXT"
 ```
 
 ```bash
@@ -200,13 +200,13 @@ sudo vim /usr/local/sbin/ace-sign-request
 ```bash
 #!/bin/bash
 # ace-sign-request <basename> [ext]
-# Signs /vagrant/<basename>.csr with the platform CA, writing /vagrant/<basename>.<ext>.
+# Signs /srv/ace/<basename>.csr with the platform CA, writing /srv/ace/<basename>.<ext>.
 set -euo pipefail
 
 REQ=$1; EXT=${2:-crt}
 CA=/etc/ansible-automation-platform/ca
 
-openssl x509 -req -in "/vagrant/$REQ.csr" -sha256 \
+openssl x509 -req -in "/srv/ace/$REQ.csr" -sha256 \
   -CA "$CA/ansible-automation-platform-managed-ca-cert.crt" \
   -CAkey "$CA/ansible-automation-platform-managed-ca-key.key" \
   -CAcreateserial \
@@ -216,12 +216,12 @@ openssl x509 -req -in "/vagrant/$REQ.csr" -sha256 \
       "basicConstraints=CA:FALSE" \
       "subjectKeyIdentifier=hash" \
       "authorityKeyIdentifier=keyid:always") \
-  -out "/vagrant/$REQ.$EXT"
+  -out "/srv/ace/$REQ.$EXT"
 
-chmod 0644 "/vagrant/$REQ.$EXT"
-rm -f "/vagrant/$REQ.csr"
-echo "signed /vagrant/$REQ.$EXT"
-openssl x509 -in "/vagrant/$REQ.$EXT" -noout -subject -dates -ext subjectAltName,keyUsage,extendedKeyUsage
+chmod 0644 "/srv/ace/$REQ.$EXT"
+rm -f "/srv/ace/$REQ.csr"
+echo "signed /srv/ace/$REQ.$EXT"
+openssl x509 -in "/srv/ace/$REQ.$EXT" -noout -subject -dates -ext subjectAltName,keyUsage,extendedKeyUsage
 ```
 
 ```bash
@@ -286,11 +286,11 @@ sudo /usr/local/sbin/ace-sign-request ace-controller-smoketest
 Back on **ace-controller**:
 
 ```bash
-sudo install -o root -g root -m 0644 /vagrant/ace-controller-smoketest.crt /tmp/ca-smoketest/smoketest.crt
+sudo install -o root -g root -m 0644 /srv/ace/ace-controller-smoketest.crt /tmp/ca-smoketest/smoketest.crt
 sudo openssl verify /tmp/ca-smoketest/smoketest.crt
 # want: OK — and note there is no -CAfile: it resolved through the system trust store
 
-sudo rm -rf /tmp/ca-smoketest /vagrant/ace-controller-smoketest.crt
+sudo rm -rf /tmp/ca-smoketest /srv/ace/ace-controller-smoketest.crt
 ```
 
 That single `openssl verify` proves three things at once: the CA signed it, the trust store on a

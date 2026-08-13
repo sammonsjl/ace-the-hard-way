@@ -47,7 +47,7 @@ service has registered yet.
 All commands on **ace-gateway** unless stated otherwise.
 
 ```bash
-vagrant ssh ace-gateway
+ssh ace-gateway
 ```
 
 ---
@@ -309,8 +309,8 @@ here:
 sudo /usr/local/sbin/ace-request-cert gateway /etc/ansible-automation-platform/gateway gateway cert
 sudo /usr/local/sbin/ace-sign-request ace-gateway-gateway cert
 sudo install -o root -g gateway -m 0644 \
-  /vagrant/ace-gateway-gateway.cert /etc/ansible-automation-platform/gateway/gateway.cert
-sudo rm -f /vagrant/ace-gateway-gateway.cert
+  /srv/ace/ace-gateway-gateway.cert /etc/ansible-automation-platform/gateway/gateway.cert
+sudo rm -f /srv/ace/ace-gateway-gateway.cert
 
 sudo openssl verify /etc/ansible-automation-platform/gateway/gateway.cert   # want: OK
 sudo openssl x509 -in /etc/ansible-automation-platform/gateway/gateway.cert -noout -ext subjectAltName
@@ -696,7 +696,7 @@ free -h | grep -i swap        # want: 6.0Gi
 
 > This is a real technique, not a lab hack — memory-hungry build steps on modest machines are
 > exactly what swap is for. It is slow: expect the build to take noticeably longer than it would
-> with real RAM. If you gave this VM more memory in the `Vagrantfile`, you can skip this.
+> with real RAM. If you gave this VM more memory in `terraform/variables.tf`, you can skip this.
 >
 > Keep it or remove it afterwards with `sudo swapoff /swapfile && sudo rm /swapfile`. Nothing later
 > depends on it.

@@ -1,0 +1,43 @@
+#cloud-config
+hostname: ${hostname}
+fqdn: ${hostname}
+preserve_hostname: false
+
+users:
+  - name: ${guest_user}
+    groups: wheel
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_pubkey}
+
+# The same minimal prep the Vagrantfile used to do, and nothing more. Everything
+# else is done BY HAND in the labs — this is a hard-way tutorial, so provisioning
+# stays out of the way.
+packages:
+  - vim
+  - curl
+  - jq
+  - git
+
+# The repo, shared in from the host over virtiofs. Two-way: edit a lab on the
+# host and the change is visible in the VM immediately.
+#
+# `nofail` matters — without it a VM whose share is unavailable drops to an
+# emergency shell at boot instead of coming up degraded.
+mounts:
+  - [ ${share_tag}, ${share_mount}, virtiofs, "defaults,nofail", "0", "0" ]
+
+runcmd:
+  # The cloud image maps its own hostname to a loopback address. Leave it and
+  # `ace-gateway` resolves to 127.0.1.1 *on the gateway itself*, so the
+  # certificate signed in Lab 3 carries IP:127.0.1.1 and every other machine's
+  # TLS connection fails a hostname check for reasons that point at the
+  # certificate rather than at /etc/hosts.
+  - [ sh, -c, "sed -i '/127.0.1.1/d' /etc/hosts" ]
+  # Every node needs every other node's name from Lab 3 onward — certificate
+  # SANs, database connection strings, the gateway's service registry.
+  - [ sh, -c, "grep -q ace-gateway /etc/hosts || printf '%s\\n' ${hosts_entries} >> /etc/hosts" ]
+
+final_message: "ace: ${hostname} ready after $UPTIME seconds"

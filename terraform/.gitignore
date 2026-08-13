@@ -1,0 +1,15 @@
+# Provider plugins and lock-adjacent working state
+.terraform/
+
+# State contains the full resource graph and must not be committed — it is
+# per-machine, and a reader's lab is not the author's.
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Generated per-machine (absolute paths, local key location)
+ssh_config
+
+# Local overrides
+*.auto.tfvars
+terraform.tfvars

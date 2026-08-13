@@ -49,8 +49,8 @@ seams made visible, and the seams are the interesting part:
 
 ## Memory
 
-The whole estate has to fit in 16 GB *in total*, so the numbers in the `Vagrantfile` are a lab
-compromise:
+The whole estate has to fit in 16 GB *in total*, so the numbers in `terraform/variables.tf` are a
+lab compromise:
 
 ```
 ace-db           1024      postgres alone needs very little
@@ -68,60 +68,128 @@ lab sets up.
 
 ## Bring them up
 
+From the `terraform/` directory:
+
 ```bash
-vagrant up
-vagrant status    # all five running
+cd terraform
+terraform init     # first time only — downloads the libvirt provider
+terraform apply
 ```
 
-That takes a while on first run — five boxes, five dnf transactions. The Vagrantfile does only
-two things beyond booting: it installs `vim curl jq git`, and it writes `/etc/hosts` on every
-node.
+That takes a while on first run: it downloads the Rocky 9 cloud image once (~650 MB), gives each
+VM a thin copy-on-write overlay of it, and boots all five.
+
+Terraform prints the addresses when it finishes. To see them again:
+
+```bash
+terraform output
+```
+
+### Reaching them
+
+Terraform writes an `ssh_config` next to the configuration. Include it once and every node is
+reachable by name:
+
+```bash
+echo "Include $(terraform output -raw ssh_config_path)" >> ~/.ssh/config
+```
+
+Order matters in `ssh_config` — if your `~/.ssh/config` already has a catch-all `Host *` block,
+put the `Include` line **above** it, because the first match for a given option wins.
+
+Then, from anywhere:
+
+```bash
+ssh ace-controller
+```
+
+That is the command used throughout the rest of the tutorial. If you would rather not touch
+`~/.ssh/config`, `ssh -F terraform/ssh_config ace-controller` does the same thing.
+
+### What cloud-init did
+
+Beyond booting, each VM does only two things: it installs `vim curl jq git`, and it writes
+`/etc/hosts`.
 
 The `/etc/hosts` part is not laziness. Every node needs every other node's name from
 [Lab 3](03-internal-ca.md) onward — certificate SANs, database connection strings, the gateway's
-service registry — and hand-editing five files five times teaches nothing. It also deletes the box image's own
-`127.0.1.1` self-mapping first, which matters more than it looks:
+service registry — and hand-editing five files five times teaches nothing. It also deletes the cloud
+image's own `127.0.1.1` self-mapping first, which matters more than it looks:
 
 ```bash
-vagrant ssh ace-controller -c 'getent ahostsv4 ace-db ace-gateway | head -2; grep -c 127.0.1.1 /etc/hosts'
+ssh ace-controller 'getent ahostsv4 ace-db ace-gateway | head -2; grep -c 127.0.1.1 /etc/hosts'
 # want: 192.168.56.10 and 192.168.56.11, and a 0
 ```
 
-> **Why the `127.0.1.1` line has to go.** The bento box maps its own hostname to a loopback
+> **Why the `127.0.1.1` line has to go.** The cloud image maps its own hostname to a loopback
 > address. Leave it and `ace-gateway` resolves to `127.0.1.1` *on the gateway itself* — so the
 > certificate you sign in Lab 3 carries `IP:127.0.1.1`, and every other machine's TLS connection
 > fails a hostname check for reasons that point at the certificate rather than at `/etc/hosts`.
 >
-> Also note `getent ahostsv4`, not `getent hosts`. On a multi-homed box the latter returns a
+> Also note `getent ahostsv4`, not `getent hosts`. On a multi-homed machine the latter returns a
 > link-local `fe80::` address first, and an `fe80::` in a certificate SAN is worse than no SAN.
+
+Addresses are pinned in libvirt's own DHCP by MAC rather than configured inside the guests, so each
+node gets the address the labs expect without any guest-side network config to drift.
+
+> **Give cloud-init time to finish.** `terraform apply` returns when the VMs are *defined and
+> booting*, not when they are ready — first boot still has to grow the root filesystem, create your
+> user, and install packages. Roughly two minutes. If `ssh` is refused, or refuses your key, that is
+> almost always cloud-init still working rather than anything broken. To wait properly:
+>
+> ```bash
+> for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+>   printf "%-16s " "$vm"; ssh "$vm" 'sudo cloud-init status --wait'
+> done
+> ```
+>
+> All five should report `status: done`.
+
+### The shared directory
+
+The repo is mounted inside every VM at **`/srv/ace`**, over virtiofs, two-way. Edit a lab on your
+host and the change is visible in the VM immediately — and, more importantly, it is the courier
+that carries certificates between machines in [Lab 3](03-internal-ca.md).
+
+```bash
+ssh ace-db 'ls /srv/ace'     # the repo
+```
+
+Writes to it need `sudo` inside the VM. The share carries the host's file ownership, which will not
+match the in-guest user; every lab that writes there already uses `sudo`.
 
 ## Bring them current
 
-A box image is a snapshot of some Tuesday months ago, so all five VMs boot well behind their own
+A cloud image is a snapshot of some Tuesday months ago, so all five VMs boot well behind their own
 repos — several hundred packages, including a kernel. Update the estate now, in one loop:
 
 ```bash
 for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
   echo "───── $vm"
-  vagrant ssh "$vm" -c "sudo dnf -y update" 2>/dev/null
+  ssh "$vm" 'sudo dnf -y update'
 done
 ```
 
-Expect this to be the slowest step in the lab and to print a great deal — 374 packages per box on
-the image current when this was written, downloaded five times over. Then reboot, because that set
-almost always includes a kernel and you are still running the old one:
+Expect this to be the slowest step in the lab and to print a great deal — several hundred packages
+per VM, downloaded five times over. Then reboot, because that set almost always includes a kernel
+and you are still running the old one:
 
 ```bash
-vagrant reload
+for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+  ssh "$vm" 'sudo systemctl reboot' || true
+done
+
+sleep 45
 
 for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
   printf "%-16s " "$vm"
-  vagrant ssh "$vm" -c 'uname -r' 2>/dev/null
+  ssh "$vm" 'uname -r'
 done
 ```
 
-All five should report the same, newer kernel. If one still shows the old version, that box didn't
-come back cleanly — `vagrant reload ace-<name>` it on its own before continuing.
+All five should report the same, newer kernel. If one still shows the old version, that VM didn't
+come back cleanly — `virsh --connect qemu:///system reboot ace-<name>` it on its own before
+continuing.
 
 Do this **here**, not later. Three of the things in that backlog are load-bearing for what follows:
 `ca-certificates` and `openssl` decide whether the private CA in [Lab 3](03-internal-ca.md)
@@ -140,14 +208,13 @@ in [Lab 8](08-hub.md), EDA in [Lab 9](09-eda.md). That is not tidiness for its o
 user on the hub node would be a lie about what runs there, and a reader who stops after Lab 5
 should have a gateway machine with nothing else pre-seeded on it.
 
-What this lab leaves you is five interchangeable Rocky boxes that can find each other. Everything
+What this lab leaves you is five interchangeable Rocky machines that can find each other. Everything
 that makes a machine *the controller* or *the hub* happens in that component's lab.
 
 ## Preflight checks
 
 Each of these is a precondition the rest of the tutorial silently assumes, and each has to hold on
-**all five** machines. Rather than SSH into each box in turn, run the whole set from your host —
-from the directory holding the `Vagrantfile`:
+**all five** machines. Rather than SSH into each box in turn, run the whole set from your host:
 
 ```bash
 PREFLIGHT=$(cat <<'EOF'
@@ -192,7 +259,7 @@ EOF
 
 for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
   echo "───── $vm"
-  vagrant ssh "$vm" -c "$PREFLIGHT" 2>/dev/null
+  ssh "$vm" "$PREFLIGHT"
 done
 ```
 
@@ -217,7 +284,7 @@ OK   reaches all five nodes by name
 Any `FAIL` = fix it now; every one of these produces a confusing failure several labs later if
 ignored. Note that check 5 includes each node pinging *itself*, which is deliberate — a box that
 can't resolve its own name will hand you a certificate mismatch in [Lab 3](03-internal-ca.md). To
-re-check a single machine after a fix, drop the loop and run `vagrant ssh ace-db -c "$PREFLIGHT"`
+re-check a single machine after a fix, drop the loop and run `ssh ace-db "$PREFLIGHT"`
 directly.
 
 Next: [The internal CA](03-internal-ca.md)

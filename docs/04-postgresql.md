@@ -31,7 +31,7 @@ PostgreSQL 15 on **ace-db**, listening on the lab network, with four roles and f
 All commands on **ace-db** unless stated otherwise.
 
 ```bash
-vagrant ssh ace-db
+ssh ace-db
 ```
 
 ## Install
@@ -59,10 +59,11 @@ listen_addresses = '192.168.56.10,localhost'
 max_connections = 200
 ```
 
-`listen_addresses` is deliberately **not** `'*'`. This VM has two interfaces — the lab network and
-the hypervisor's management network — and only one of them should carry database traffic. Naming
-the address is the difference between a database on your lab network and a database on whatever
-else the host happens to be attached to.
+`listen_addresses` is deliberately **not** `'*'`. Naming the address is the difference between a
+database on your lab network and a database on whatever else the host happens to be attached to.
+This lab gives each VM a single interface, so `'*'` would happen to be harmless here — but it is a
+habit worth keeping: add a second interface later (a management network, a storage network) and
+`'*'` silently starts serving the database on it.
 
 `max_connections` matters more here than it looks. The controller alone opens a connection per
 uwsgi worker, per dispatcher process and per callback receiver; add the gateway, hub and EDA doing

@@ -375,8 +375,8 @@ sudo /usr/local/sbin/ace-sign-request ace-hub-pulp_webserver
 **Back on `ace-hub`:**
 
 ```bash
-sudo install -o root -g pulp -m 0644 /vagrant/ace-hub-pulp_webserver.crt /etc/pulp/certs/pulp_webserver.crt
-sudo rm -f /vagrant/ace-hub-pulp_webserver.crt
+sudo install -o root -g pulp -m 0644 /srv/ace/ace-hub-pulp_webserver.crt /etc/pulp/certs/pulp_webserver.crt
+sudo rm -f /srv/ace/ace-hub-pulp_webserver.crt
 sudo openssl verify /etc/pulp/certs/pulp_webserver.crt      # want: OK
 
 sudo dnf -y module enable nginx:1.24

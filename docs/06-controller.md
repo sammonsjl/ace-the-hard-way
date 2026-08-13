@@ -41,7 +41,7 @@ That last part is deliberate, and the end of this lab shows you exactly what it 
 All commands on **ace-controller** unless stated otherwise.
 
 ```bash
-vagrant ssh ace-controller
+ssh ace-controller
 ```
 
 ---
@@ -796,8 +796,8 @@ sudo /usr/local/sbin/ace-sign-request ace-controller-tower cert
 **Back on `ace-controller`:**
 
 ```bash
-sudo install -o root -g awx -m 0644 /vagrant/ace-controller-tower.cert /etc/tower/tower.cert
-sudo rm -f /vagrant/ace-controller-tower.cert
+sudo install -o root -g awx -m 0644 /srv/ace/ace-controller-tower.cert /etc/tower/tower.cert
+sudo rm -f /srv/ace/ace-controller-tower.cert
 sudo openssl verify /etc/tower/tower.cert       # want: OK
 ```
 

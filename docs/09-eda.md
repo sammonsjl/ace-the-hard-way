@@ -355,9 +355,9 @@ sudo /usr/local/sbin/ace-sign-request ace-eda-server cert
 **Back on `ace-eda`:**
 
 ```bash
-sudo install -o root -g eda -m 0640 /vagrant/ace-eda-server.cert \
+sudo install -o root -g eda -m 0640 /srv/ace/ace-eda-server.cert \
   /etc/ansible-automation-platform/eda/server.cert
-sudo rm -f /vagrant/ace-eda-server.cert
+sudo rm -f /srv/ace/ace-eda-server.cert
 sudo openssl verify /etc/ansible-automation-platform/eda/server.cert      # want: OK
 
 sudo dnf -y module enable nginx:1.24

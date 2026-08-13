@@ -130,9 +130,9 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 
 ## What you need
 
-- **16 GB of RAM, minimum.** The `Vagrantfile` allocates 14.3 GB across the five VMs and leaves ~1.5 GB for the host. More is better; less will not work.
+- **A Linux host on x86_64, with KVM.** The lab is built by [Terraform](https://developer.hashicorp.com/terraform) driving libvirt directly, so it is **Linux-only** — there is no macOS or Windows path. Details and the reasoning in [Lab 1](docs/01-prerequisites.md).
+- **16 GB of RAM, minimum.** `terraform/variables.tf` allocates 14.3 GB across the five VMs and leaves ~1.5 GB for the host. More is better; less will not work.
 - ~60 GB of free disk
-- [Vagrant](https://developer.hashicorp.com/vagrant) with a supported provider — the five-VM estate is built and verified end-to-end on **KVM/libvirt (Linux, x86_64)**; **VMware Fusion (macOS)** ran the earlier single-node shape and the default box publishes both architectures, but the five-machine topology has not been re-run there. Pick your track in [Lab 1](docs/01-prerequisites.md).
 - Patience — that's the "hard way" part
 
 ## Labs

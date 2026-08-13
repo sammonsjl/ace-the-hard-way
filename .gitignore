@@ -1,7 +1,14 @@
-# Vagrant machine state — contains full VM disks, never commit
+# Terraform state and provider plugins. State is per-machine and describes
+# disks on YOUR host — never commit it.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/ssh_config
+*.log
+
+# Vagrant machine state, from the pre-Terraform version of this lab
 .vagrant/
 *.vmdk
-*.log
 
 # Local Claude settings and context — not part of the tutorial
 .claude/settings.local.json
@@ -17,7 +24,7 @@ E2E-TEST.md
 downloads/
 docs/bundle-facts.md
 
-# Lab 12 mesh-cert courier files. /vagrant IS this directory, so anything the
+# Cert courier files. /srv/ace in the VMs IS this directory, so anything the
 # labs hand between the nodes through it lands right here. Root-anchored on
 # purpose — per-deployment key material must never be committed, and a reader
 # must never inherit someone else's CA or work-signing keys from the repo.
