@@ -54,7 +54,6 @@ depends on.
 ```bash
 sudo useradd --system --home-dir /var/lib/awx --create-home --shell /bin/bash awx
 
-# home layout: projects, job output, static files, and the venv's future home
 sudo install -d -o awx -g awx -m 0755 /var/lib/awx
 sudo install -d -o awx -g awx -m 0700 /var/lib/awx/.ssh
 sudo install -d -o awx -g awx -m 0750 /var/lib/awx/projects
@@ -62,11 +61,9 @@ sudo install -d -o awx -g awx -m 0750 /var/lib/awx/job_status
 sudo install -d -o awx -g awx -m 0755 /var/lib/awx/venv
 sudo install -d -o root -g awx -m 0755 /var/lib/awx/public/static
 
-# config root (settings.py, conf.d fragments, SECRET_KEY, TLS pair)
 sudo install -d -o root -g awx -m 0755 /etc/tower
 sudo install -d -o root -g awx -m 0750 /etc/tower/conf.d
 
-# logs
 sudo install -d -o awx  -g awx  -m 0750 /var/log/tower
 sudo install -d -o root -g root -m 0755 /var/log/supervisor
 ```
@@ -109,7 +106,7 @@ sudo dnf -y install \
   libffi-devel openssl-devel \
   libpq-devel postgresql-devel \
   openldap-devel cyrus-sasl-devel
-python3.12 --version        # record the exact version
+python3.12 --version
 ```
 
 `libffi-devel` → `cffi`; `libpq-devel`/`postgresql-devel` → `psycopg`; `openldap-devel` +
@@ -120,7 +117,7 @@ the header names the package.
 ```bash
 sudo install -d -o awx -g awx /opt/awx
 sudo -u awx git clone --branch devel https://github.com/ansible/awx.git /opt/awx
-sudo -u awx git -C /opt/awx rev-parse --short HEAD  # RECORD THIS
+sudo -u awx git -C /opt/awx rev-parse --short HEAD
 
 sudo -u awx python3.12 -m venv /var/lib/awx/venv/awx
 sudo -u awx bash <<'AWXEOF'
@@ -128,26 +125,22 @@ set -euo pipefail
 source /var/lib/awx/venv/awx/bin/activate
 cd /opt/awx
 
-# 1. toolchain bootstrap — upstream's own pins, not "whatever is newest"
 pip install pip==25.3 setuptools==80.9.0 'setuptools_scm[toml]==9.2.2' \
             wheel==0.46.3 cython==3.1.3
 
-# 2. frozen + git requirements in one resolve, C extensions compiled from source
 cat requirements/requirements.txt requirements/requirements_git.txt \
   | pip install --no-binary cffi,pycparser,psycopg,twilio -r /dev/stdin
 
-# 3. upstream removes a few legacy packages after installing
 if [ -f requirements/requirements_tower_uninstall.txt ]; then
   pip uninstall -y -r requirements/requirements_tower_uninstall.txt || true
 fi
 
-# 4. editable install of AWX itself
 pip install -e .
 AWXEOF
 ```
 
 ```bash
-sudo -u awx /var/lib/awx/venv/awx/bin/pip check   # want: No broken requirements found.
+sudo -u awx /var/lib/awx/venv/awx/bin/pip check
 ```
 
 The step 1 pins and the step 2 `--no-binary` list are upstream's. Re-derive them for the commit
@@ -164,7 +157,7 @@ This one line is the difference between a working controller and one where **eve
 
 ```bash
 sudo rm -f /opt/awx/awx/devonly.py
-ls /opt/awx/awx/devonly.py    # want: No such file or directory
+ls /opt/awx/awx/devonly.py
 ```
 
 A source checkout ships that marker file; a release package strips it. `awx/__init__.py` imports
@@ -186,11 +179,8 @@ sudo chmod 0755 /usr/bin/awx-manage
 
 ```bash
 sudo -u awx /var/lib/awx/venv/awx/bin/pip show awx | grep -E '^(Name|Version)'
-# want: the version — this check is settings-free, which is the point
 
 sudo -u awx awx-manage --version 2>&1 | tail -1
-# want (for now): a complaint about missing configuration. That error is the wrapper WORKING:
-# production mode reads /etc/tower, which section 3 hasn't written yet.
 ```
 
 > Every `awx-manage` subcommand fails until section 3, not just `--version`. `manage()` calls
@@ -253,7 +243,7 @@ DATABASES = {
     }
 }
 EOF
-sudo vim /etc/tower/conf.d/postgres.py    # the real password from Lab 4
+sudo vim /etc/tower/conf.d/postgres.py
 ```
 
 ### Redis is on another machine
@@ -320,7 +310,7 @@ world-readable:
 ```bash
 sudo sh -c 'chown root:awx /etc/tower/settings.py /etc/tower/conf.d/*.py'
 sudo sh -c 'chmod 0640     /etc/tower/settings.py /etc/tower/conf.d/*.py'
-sudo ls -l /etc/tower/settings.py /etc/tower/conf.d/    # want: root awx, -rw-r----- on every file
+sudo ls -l /etc/tower/settings.py /etc/tower/conf.d/
 ```
 
 > **The `sudo sh -c` is load-bearing.** `conf.d` is `0750 root:awx` and your login user is in
@@ -337,6 +327,12 @@ warning is permanent and correct — there is no controller UI to build. The con
 gateway, and you built it in Lab 5. AWX keeps that directory in `STATICFILES_DIRS` because a source
 checkout is *expected* to compile a front end into it; a release ships the directory holding a
 single empty `index.html`.
+
+> Django also prints a `RuntimeWarning: Accessing the database during app initialization is
+> discouraged` above that, from `django/db/backends/utils.py`. It is upstream AWX querying in an
+> `AppConfig.ready()`, it appears on every `awx-manage` invocation from here on, and it is not
+> something this build introduced or can fix from configuration. Ignore it — "one warning" means
+> one *check* warning; this one is not part of the check output.
 
 ---
 
@@ -375,7 +371,6 @@ jobs go. On a split deployment the controller is in `controlplane` only and exec
 sudo -u awx awx-manage create_preload_data
 sudo -u awx awx-manage register_default_execution_environments
 sudo -u awx awx-manage list_instances
-# want: ace-controller listed, node_type=hybrid, capacity=0 (nothing is running yet)
 ```
 
 `capacity=0` and `version=?` are expected here — the instance only reports capacity once its
@@ -403,8 +398,8 @@ sudo dnf -y install python3.12-pip
 sudo python3.12 -m pip install supervisor
 sudo ln -sf /usr/local/bin/supervisord  /usr/bin/supervisord
 sudo ln -sf /usr/local/bin/supervisorctl /usr/bin/supervisorctl
-sudo which supervisord supervisorctl   # want: both resolve (/bin here — same as /usr/bin)
-sudo supervisord --version             # want: a version, not "command not found"
+sudo which supervisord supervisorctl
+sudo supervisord --version
 ```
 
 > **The symlinks are required.** AWX restarts its own processes by shelling out to a **bare**
@@ -434,7 +429,7 @@ sudo tee /etc/tmpfiles.d/tower.conf >/dev/null <<'EOF'
 D /run/tower 2775 nginx nginx -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/tower.conf
-ls -ld /var/run/tower          # want: drwxrwsr-x nginx nginx — note the 's'
+ls -ld /var/run/tower
 ```
 
 The directory is `nginx:nginx` with the **setgid** bit, not `awx:awx`. nginx is the one *reading*
@@ -744,7 +739,6 @@ sudo restorecon -Rv /var/lib/awx/venv/awx/bin
 
 sudo systemctl enable --now supervisord
 sudo supervisorctl status
-# want: all eight tower-processes:* RUNNING
 ```
 
 systemd may not execute binaries labelled `var_lib_t`, which is everything under `/var/lib`. Skip
@@ -752,7 +746,6 @@ the relabel and the children die with `203/EXEC`.
 
 ```bash
 sudo -u awx awx-manage list_instances
-# want: capacity > 0 and a real version
 ```
 
 Re-run it if the first answer is `capacity=0`. The dispatcher's `cluster_node_heartbeat` runs on a
@@ -798,7 +791,7 @@ sudo /usr/local/sbin/ace-sign-request ace-controller-tower cert
 ```bash
 sudo install -o root -g awx -m 0644 /srv/ace/ace-controller-tower.cert /etc/tower/tower.cert
 sudo rm -f /srv/ace/ace-controller-tower.cert
-sudo openssl verify /etc/tower/tower.cert       # want: OK
+sudo openssl verify /etc/tower/tower.cert
 ```
 
 Static files for the browsable API, as **root** — `STATIC_ROOT` is a root-owned tree nginx only
@@ -999,7 +992,6 @@ sudo nginx -t
 sudo systemctl enable --now nginx
 
 curl -s https://ace-controller/api/v2/ping/ | python3 -m json.tool | head -6
-# want: JSON — version, active_node "ace-controller". No -k: Lab 3's CA is trusted here.
 ```
 
 That single command tests the CA chain, the SAN, and the socket path at once.
@@ -1044,12 +1036,13 @@ Then mint the controller's service secret:
 
 ```bash
 sudo -u gateway aap-gateway-manage generate_service_secret controller
-# RECORD the output
 ```
 
-> If you script this, grab only the token line: `generate_service_secret` prints a `colorama`
-> deprecation warning to **stdout**, above the token, and an apostrophe from that warning inside
-> your `SECRET_KEY` string surfaces much later as a gateway 500.
+> If you script this, grab only the token line: `generate_service_secret` prints
+> `Failed library import, colors won't be in logs: No module named 'colorama'` to **stdout**, above
+> the token, and an apostrophe from that line inside your `SECRET_KEY` string surfaces much later
+> as a gateway 500. (It is a missing optional dependency, not an error — the gateway venv has no
+> `colorama` and does not need one.)
 
 ### Tell the controller about the gateway
 
@@ -1077,7 +1070,7 @@ RESOURCE_SERVER = {
 
 REMOTE_HOST_HEADERS = ['HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR', 'REMOTE_HOST']
 EOF
-sudo vim /etc/tower/conf.d/gateway.py    # paste the real secret
+sudo vim /etc/tower/conf.d/gateway.py
 sudo chown root:awx /etc/tower/conf.d/gateway.py
 sudo chmod 0640     /etc/tower/conf.d/gateway.py
 sudo systemctl restart automation-controller
@@ -1103,8 +1096,6 @@ Last, and only once trust exists in both directions. Two commands on two machine
 ```bash
 sudo -u gateway REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
   aap-gateway-manage migrate_service_data --api-slug controller --username admin
-# want: "Controller and Gateway superusers are consistent"
-#       "Service authentication is now enabled."
 ```
 
 **Then on ace-controller** — pull the platform's identities back down:
@@ -1112,7 +1103,6 @@ sudo -u gateway REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 ```bash
 sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
   awx-manage resource_sync
-# want: "----- RESOURCE SYNC FINISHED -----"
 ```
 
 > **`REQUESTS_CA_BUNDLE` on both, and it is not optional.** Python's `requests` validates against
@@ -1132,9 +1122,10 @@ sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 > serve its identity index." `migrate_service_data` is what unlocks it — its last line is literally
 > *"Service authentication is now enabled."* Nothing in the 423 hints at which command you skipped.
 >
-> A `503` instead means you are racing the restart above; wait for
-> `curl -sk https://192.168.56.11/api/controller/v2/ping/` to return `200` and re-run. Both
-> commands are idempotent.
+> A `503` or `504` instead means you are racing the restart above — envoy answers `504` while the
+> upstream is still failing its health check, and the wait is a couple of minutes, not seconds.
+> Wait for `curl -sk https://192.168.56.11/api/controller/v2/ping/` to return `200` and re-run.
+> Both commands are idempotent.
 
 ---
 
@@ -1159,7 +1150,6 @@ whose `validate()` returns exactly four keys:
 
 ```bash
 sed -n '/^class OpenLicense/,/^$/p' /opt/awx/awx/main/utils/licensing.py
-# license_type='open', valid_key=True, subscription_name='OPEN', product_name="AWX"
 ```
 
 No `compliant` key at all — and the console reads *missing* as *non-compliant*. An open license is
@@ -1172,8 +1162,7 @@ grep -q 'compliant=True' /opt/awx/awx/main/utils/licensing.py || \
   sudo -u awx sed -i "s/^            valid_key=True,$/            valid_key=True,\n            compliant=True,/" \
     /opt/awx/awx/main/utils/licensing.py
 
-# exactly one, and the file still compiles
-grep -c 'compliant=True' /opt/awx/awx/main/utils/licensing.py    # want: 1
+grep -c 'compliant=True' /opt/awx/awx/main/utils/licensing.py
 sudo -u awx /var/lib/awx/venv/awx/bin/python -c \
   'compile(open("/opt/awx/awx/main/utils/licensing.py").read(),"x","exec")' && echo "compiles"
 
@@ -1185,11 +1174,19 @@ sudo systemctl restart automation-controller
 > `SyntaxError: keyword argument repeated` that stops the API booting. The symptom is
 > `no healthy upstream` from envoy, which points at the gateway rather than at this file.
 
-Give envoy up to a minute to re-admit the upstream after the restart, then:
+Give envoy a couple of minutes to re-admit the upstream after the restart — on the reference build
+this took about **two and a half minutes**, not the few seconds the restart itself takes, so do not
+read a `504` at the one-minute mark as a broken patch. Watch it flip rather than guessing:
+
+```bash
+curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep membership_healthy
+```
+
+Then:
 
 ```bash
 curl -sk -u admin:CHANGE-ME https://192.168.56.11/api/controller/v2/config/ \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["license_info"]["compliant"])'   # want: True
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["license_info"]["compliant"])'
 ```
 
 Refresh, and the banner is gone.
@@ -1203,7 +1200,6 @@ Browse around. Everything reads correctly. The controller is genuinely healthy:
 
 ```bash
 sudo -u awx awx-manage list_instances
-# want: capacity > 0, node_type=hybrid, a real version, and a recent heartbeat — in green
 ```
 
 Now try to use it. **Automation Execution → Projects → Demo Project**, and click **sync**.
@@ -1211,18 +1207,28 @@ Now try to use it. **Automation Execution → Projects → Demo Project**, and c
 It goes `Pending → Running → Error`, and the traceback ends:
 
 ```
-  File ".../receptorctl/socket_interface.py", line 101, in connect
-    self._socket.connect(path)
-ConnectionRefusedError: [Errno 111] Connection refused
+  File "/opt/awx/awx/main/tasks/receptor.py", line 404, in run
+    self.config_data = read_receptor_config()
+  File "/opt/awx/awx/main/tasks/receptor.py", line 129, in read_receptor_config
+    with open(__RECEPTOR_CONF, 'r') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/etc/receptor/receptor.conf'
 ```
 
 **That is the correct result for this lab.** Nothing is broken. The dispatcher did its job: it
-picked up the work, decided this node should run it, and tried to hand it to a local receptor —
+picked up the work, decided this node should run it, and went looking for the local receptor —
 which does not exist yet.
+
+Note *where* it failed, because it is earlier than you might guess. AWX did not try the socket and
+get refused; it never got that far. `read_receptor_config()` opens
+`/etc/receptor/receptor.conf` — the hardcoded path [Lab 7](07-execution.md) explains — before any
+connection is attempted, and this lab has not created that file. You only see a
+`ConnectionRefusedError` from `receptorctl/socket_interface.py` if the config exists and the
+daemon is not listening, which is the *next* failure along: it is what you get if you write
+`receptor.conf` in Lab 7 and then mistype the unit.
 
 Two things are worth taking from that error.
 
-**Capacity is not capability.** The instance reports `capacity=13` and shows green, because
+**Capacity is not capability.** The instance reports `capacity=11` and shows green, because
 capacity is computed from this machine's CPU and memory. It says how much work the node *could*
 take, not whether any path exists to run it. A node can look perfectly healthy and be unable to
 execute a single playbook.
@@ -1230,15 +1236,16 @@ execute a single playbook.
 **And the split is real, not an artifact of this tutorial.** Scheduling and execution are separate
 concerns joined by a signed message over a socket. That is what makes it possible to put execution
 on other machines, in other networks, behind firewalls you do not control — and it is why the
-thing you are missing is a *connection refused* rather than a missing feature.
+thing you are missing is a *missing configuration file for another daemon* rather than a missing
+feature.
 
 [Lab 7](07-execution.md) builds the other end of that socket.
 
 ## Verify
 
 ```bash
-sudo supervisorctl status                     # eight programs RUNNING
-sudo -u awx awx-manage list_instances         # capacity > 0, node_type=hybrid
+sudo supervisorctl status
+sudo -u awx awx-manage list_instances
 systemctl is-active nginx supervisord automation-controller
 curl -s https://ace-controller/api/v2/ping/ | python3 -m json.tool | head -5
 ```
@@ -1247,7 +1254,6 @@ From **ace-gateway**, through the platform door:
 
 ```bash
 curl -sk -u "admin:$GW_PW" https://192.168.56.11/api/controller/v2/ping/ | python3 -m json.tool | head -5
-# want: AWX's ping JSON — via envoy, gateway authorisation, this node's nginx, uwsgi
 ```
 
 Next: [Execution — receptor and podman](07-execution.md)

@@ -55,20 +55,20 @@ Run these in order — each one narrows it down:
 
 2. **Who owns the files?**
    ```bash
-   rpm -qf /usr/sbin/uwsgi                       # exists at all? whose package?
-   dnf list installed 'uwsgi*' 'supervisor*'     # the @repo column: @epel = red flag
+   rpm -qf /usr/sbin/uwsgi
+   dnf list installed 'uwsgi*' 'supervisor*'
    ```
 
 3. **Did an update swap it? (the smoking gun)**
    ```bash
    dnf history list 'uwsgi*' 'supervisor*'
-   dnf history info <transaction-id>             # shows the exact swap and the repo it came from
+   dnf history info <transaction-id>
    ```
 
 4. **Prove the interpreter mismatch:**
    ```bash
    /var/lib/awx/venv/awx/bin/uwsgi --version
-   strings /usr/sbin/uwsgi | grep -oE 'python3\.[0-9]+' | sort -u   # embedded/linked python
+   strings /usr/sbin/uwsgi | grep -oE 'python3\.[0-9]+' | sort -u
    ldd /usr/lib64/uwsgi/python3_plugin.so 2>/dev/null | grep libpython
    ```
    Compare against the venv's Python: `ls /var/lib/awx/venv/awx/lib/`
@@ -82,7 +82,7 @@ Run these in order — each one narrows it down:
 6. **Audit the repos:**
    ```bash
    dnf repolist enabled | grep -i epel
-   grep -rn excludepkgs /etc/yum.repos.d/epel*.repo   # empty = unprotected
+   grep -rn excludepkgs /etc/yum.repos.d/epel*.repo
    ```
 
 **Recovery:** `dnf history undo <id>` (or `dnf downgrade`/`reinstall` the clobbered package), add `excludepkgs`, restart the controller service, THEN re-run whatever update started it.

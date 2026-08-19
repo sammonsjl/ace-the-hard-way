@@ -85,7 +85,6 @@ Three details, all load-bearing:
 ```bash
 sudo openssl x509 -in /etc/ansible-automation-platform/ca/ansible-automation-platform-managed-ca-cert.crt \
   -noout -text | grep -A1 'Basic Constraints\|Key Usage'
-# want: CA:TRUE  and  Certificate Sign
 ```
 
 ## Trust it everywhere
@@ -104,7 +103,7 @@ Then on **each of the other four** (`ace-db`, `ace-controller`, `ace-hub`, `ace-
 ```bash
 sudo cp /srv/ace/ansible-automation-platform-managed-ca-cert.crt /etc/pki/ca-trust/source/anchors/
 sudo update-ca-trust
-trust list --filter=ca-anchors | grep -A2 "ACE Managed CA"   # want: a match
+trust list --filter=ca-anchors | grep -A2 "ACE Managed CA"
 ```
 
 And on ace-gateway itself, which needs to trust its own root like everyone else:
@@ -184,7 +183,9 @@ openssl req -new -key "$DIR/$NAME.key" -subj "/CN=$HOST" \
 echo "wrote /srv/ace/$HOST-$NAME.csr — now sign it on ace-gateway:"
 echo "  sudo /usr/local/sbin/ace-sign-request $HOST-$NAME $EXT"
 echo "then back here:"
-echo "  sudo install -o root -g $GROUP -m 0640 /srv/ace/$HOST-$NAME.$EXT $DIR/$NAME.$EXT"
+# 0644 on the certificate, not the key's 0640 — a certificate is public, and every
+# lab installs it world-readable so nginx can read it without group games.
+echo "  sudo install -o root -g $GROUP -m 0644 /srv/ace/$HOST-$NAME.$EXT $DIR/$NAME.$EXT"
 ```
 
 ```bash
@@ -280,7 +281,6 @@ On **ace-gateway**:
 
 ```bash
 sudo /usr/local/sbin/ace-sign-request ace-controller-smoketest
-# want: subject=CN=ace-controller, SAN with DNS:ace-controller, IP:192.168.56.12
 ```
 
 Back on **ace-controller**:
@@ -288,7 +288,6 @@ Back on **ace-controller**:
 ```bash
 sudo install -o root -g root -m 0644 /srv/ace/ace-controller-smoketest.crt /tmp/ca-smoketest/smoketest.crt
 sudo openssl verify /tmp/ca-smoketest/smoketest.crt
-# want: OK — and note there is no -CAfile: it resolved through the system trust store
 
 sudo rm -rf /tmp/ca-smoketest /srv/ace/ace-controller-smoketest.crt
 ```

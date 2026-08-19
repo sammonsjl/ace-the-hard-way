@@ -30,10 +30,6 @@ host has to be a machine that can run KVM.
 > `dmacvicar/libvirt` talks to libvirt, and libvirt/KVM is Linux-only — the provider publishes a
 > darwin binary, but only so a Mac can drive a *remote* Linux libvirt host, which is not the
 > single-laptop shape this tutorial is built around.
->
-> This is a deliberate trade. An earlier version of this lab used Vagrant, which did support
-> VMware Fusion on macOS. See [Why Terraform and not Vagrant?](#why-terraform-and-not-vagrant)
-> for what that bought and what it cost.
 
 ## Install the tools
 
@@ -74,10 +70,9 @@ Then, on any distro:
 
 ```bash
 sudo systemctl enable --now libvirtd
-sudo usermod -aG libvirt "$USER"     # log out/in for the group to take effect
+sudo usermod -aG libvirt "$USER"
 
-# The lab builds its disks in libvirt's default storage pool.
-sudo virsh pool-start default        # harmless if it is already running
+sudo virsh pool-start default
 sudo virsh pool-autostart default
 ```
 
@@ -119,19 +114,18 @@ Most are distro or firewall specific — you may hit none of them.
   now or create later. To see what you actually got:
 
   ```bash
-  sudo virsh net-list --all      # the networks libvirt knows about
-  ip -br link show type bridge   # the bridges they created
+  sudo virsh net-list --all
+  ip -br link show type bridge
   ```
 
-  Unlike the Vagrant version of this lab, there is only **one** network here (`ace-lab`), carrying
-  both SSH and lab traffic.
+  There is only **one** network here (`ace-lab`), carrying both SSH and lab traffic.
 
 - **`libvirtd` won't start on a TPM box.** If `virt-secret-init-encryption.service` aborts, seal the
   key to the host instead of the TPM:
   `systemd-creds encrypt --with-key=host --name=secrets-encryption-key - /var/lib/libvirt/secrets/secrets-encryption-key`.
 
-- **This repo may live on a NAS.** Unlike the Vagrant version, that now works. `virtiofsd` serves
-  the directory to the guests rather than re-exporting it over NFS, so a network-mounted clone is
+- **This repo may live on a NAS.** `virtiofsd` serves the directory to the guests rather than
+  re-exporting it over NFS, so a network-mounted clone is
   fine. Two caveats: the daemon runs as root, so the export must not squash root; and inside the VM
   the share carries the *host's* ownership, so unprivileged writes may be refused. Every lab that
   writes to the share does so with `sudo`, which is why this doesn't bite in practice.
@@ -141,8 +135,8 @@ Most are distro or firewall specific — you may hit none of them.
 ```bash
 terraform version
 virsh --connect qemu:///system version
-virsh --connect qemu:///system pool-info default   # want: State: running
-ls /usr/lib/virtiofsd || ls /usr/libexec/virtiofsd  # path varies by distro
+virsh --connect qemu:///system pool-info default
+ls /usr/lib/virtiofsd || ls /usr/libexec/virtiofsd
 ```
 
 ## Why VMs?
@@ -156,22 +150,11 @@ database" is a unix socket and a shrug; across five, it is a hostname, a port, a
 certificate whose SAN has to match — and when it breaks you find out which. [Lab 2](02-vms.md) lays
 out the topology and why each component gets its own machine.
 
-## Why Terraform and not Vagrant?
+## Why Terraform and cloud images?
 
-This lab used to be a `Vagrantfile`, and Vagrant is genuinely good at exactly this job. Two things
-moved it.
-
-**The box registry is going away.** Vagrant the CLI is fine and not deprecated — but the lab pulled
-`bento/rockylinux-9` from the Vagrant public registry, and HashiCorp is retiring the hosted service:
-no new boxes after **2026-12-14**, end of support **2027-03-15**, decommissioned **2027-06-07**. A
-tutorial you might follow in 2027 shouldn't have that on its critical path. The Rocky 9 GenericCloud
-image this lab now downloads comes straight from `dl.rockylinux.org`.
-
-**The result is closer to the real thing.** Cloud images and cloud-init are how these machines get
-built everywhere else — a homelab, a hypervisor, a cloud account. The VM definitions are declarative
-and diffable, one network instead of two, and `terraform destroy` is exact about what it removes.
-
-What it cost: **macOS support**. The Vagrant version ran on VMware Fusion; this one is Linux/KVM
-only. If that trade doesn't work for you, the `Vagrantfile` is still in the repo history.
+Cloud images and cloud-init are how these machines get built everywhere else — a homelab, a
+hypervisor, a cloud account. The VM definitions are declarative and diffable, and
+`terraform destroy` is exact about what it removes. The Rocky 9 GenericCloud image this lab
+downloads comes straight from `dl.rockylinux.org`.
 
 Next: [Provisioning the VMs](02-vms.md)

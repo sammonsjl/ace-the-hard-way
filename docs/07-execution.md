@@ -65,9 +65,9 @@ bare-metal rule — nothing you *build* runs in a container; the runtime is the 
 sudo dnf -y install podman crun
 grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
 sudo loginctl enable-linger awx
-loginctl show-user awx --property=Linger        # want: Linger=yes
+loginctl show-user awx --property=Linger
 
-cd /tmp    # rootless podman cannot start from a 0700 home dir, and sudo -u keeps your cwd
+cd /tmp
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
 ```
 
@@ -81,7 +81,7 @@ Smoke-test the sandbox, and make it exercise **crypto** rather than just the she
 ```bash
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
   podman run --rm quay.io/ansible/awx-ee:latest ansible-playbook --version
-echo $?    # want: 0
+echo $?
 ```
 
 > On an aarch64 host this can exit **132** — a SIGILL from OpenSSL taking an accelerated code path
@@ -107,7 +107,7 @@ ARCH=$(uname -m); case $ARCH in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esa
 curl -fsSL -o /tmp/receptor.tgz \
   "https://github.com/ansible/receptor/releases/download/v${RECEPTOR_VERSION}/receptor_${RECEPTOR_VERSION}_linux_${ARCH}.tar.gz"
 sudo tar -xzf /tmp/receptor.tgz -C /usr/local/bin receptor
-/usr/local/bin/receptor --version    # want: 1.6.5
+/usr/local/bin/receptor --version
 ```
 
 Directories. The datadir must be writable and **not** on tmpfs — work units have to survive a
@@ -125,7 +125,7 @@ D /run/receptor 0750 awx awx -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/awx-receptor.conf /etc/tmpfiles.d/receptor.conf
 
-df --output=fstype /var/lib/receptor | tail -1    # want: xfs or ext4 — NOT tmpfs
+df --output=fstype /var/lib/receptor | tail -1
 ```
 
 > **Both runtime directories are created.** `/run/receptor` is receptor's own default;
@@ -269,7 +269,6 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now receptor
 sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /run/awx-receptor/receptor.sock status
-# want: Node ID ace-controller, and 'local' under Secure Work Types
 ```
 
 > **Expect** `receptorctl and receptor are different versions, they may not be compatible`.
@@ -315,13 +314,11 @@ back through the callback receiver and out over the websocket. Every hop hand-bu
 ## Verify
 
 ```bash
-sudo supervisorctl status                     # eight programs RUNNING
+sudo supervisorctl status
 systemctl is-active nginx supervisord receptor automation-controller
 sudo -u awx /var/lib/awx/venv/awx/bin/receptorctl --socket /run/awx-receptor/receptor.sock status
-# want: Node ID ace-controller, 'local' under Secure Work Types
 
 sudo -u awx awx-manage list_instances
-# want: capacity > 0 and node_type=hybrid, in both the controlplane and default queues
 ```
 
 And the check that actually matters — the one that failed at the end of Lab 6. In the console:
@@ -347,16 +344,31 @@ for i in $(seq 30); do
   case "$S" in successful|failed|error|canceled) break ;; esac
   sleep 6
 done
-# want: running -> successful, then it stops
 ```
 
 Then confirm it really was a container, and really was this node doing both jobs:
 
 ```bash
-sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
-  podman events --since 10m --until 1s --format '{{.Status}} {{.Image}}'
-# want: init / start / died / remove against quay.io/ansible/awx-ee:latest
+sudo journalctl _UID=$(id -u awx) --since -10m -o cat \
+  | grep -oE 'container (init|start|died|remove) .*image=[^,]+'
 ```
+
+> **Why not `podman events`?** Because it returns *nothing here*, silently, and the empty output
+> looks exactly like "no container ever ran".
+>
+> ```bash
+> # looks right, prints nothing, tells you nothing
+> sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
+>   podman events --since 10m --until 1s --format '{{.Status}} {{.Image}}'
+> ```
+>
+> Podman's event logger here is **journald** (`podman info --format '{{.Host.EventLogger}}'`), so
+> `podman events` is a journal *reader*. Our `awx` is a system user in groups `awx` and `nginx`
+> only — not `adm`, `systemd-journal` or `wheel` — so it cannot read the journal, and podman
+> reports that as an empty event list rather than an error. The events are there; the service user
+> just cannot see them. Reading the same journal as root, filtered to awx's UID, is the honest
+> check. (Adding `awx` to `systemd-journal` would also work, and a packaged install does not,
+> so neither do we.)
 
 A hybrid node shows the same hostname for both `controller_node` and `execution_node` on the
 finished job — the decision and the execution happened on one machine, joined only by that signed

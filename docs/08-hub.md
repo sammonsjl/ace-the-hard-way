@@ -60,7 +60,7 @@ Confirm this node can reach it:
 
 ```bash
 sudo dnf -y install postgresql
-PGPASSWORD='CHANGE-ME-pulp' psql -h ace-db -U pulp -d pulp -c 'SELECT 1'   # want: one row
+PGPASSWORD='CHANGE-ME-pulp' psql -h ace-db -U pulp -d pulp -c 'SELECT 1'
 ```
 
 Pulp stores encrypted fields, so it needs the postgres **`hstore`** extension. Creating an
@@ -72,7 +72,7 @@ one step runs **on ace-db**, not here:
 ```bash
 sudo dnf -y install postgresql-contrib
 sudo -iu postgres psql -d pulp -c "CREATE EXTENSION IF NOT EXISTS hstore;"
-sudo -iu postgres psql -d pulp -c '\dx' | grep hstore     # want: hstore listed
+sudo -iu postgres psql -d pulp -c '\dx' | grep hstore
 ```
 
 > This is the first time a component needs something done *for* it on another machine, and it is
@@ -122,7 +122,7 @@ set -euo pipefail
 source /var/lib/pulp/venv/bin/activate
 pip install --upgrade pip "setuptools<66" wheel
 pip install "galaxy_ng @ git+https://github.com/ansible/galaxy_ng.git@main" gunicorn
-pip list | grep -iE 'galaxy-ng|pulpcore|django-ansible-base'  # RECORD these — moving tips
+pip list | grep -iE 'galaxy-ng|pulpcore|django-ansible-base'
 EOF
 ```
 
@@ -134,10 +134,14 @@ EOF
 >
 > **Don't panic at a version mismatch, though.** On the amd64 run galaxy_ng `main` pinned DAB
 > `2025.11.24` while the gateway/controller/EDA venvs had already moved to `2026.7.23` — a
-> whole generation newer — and **SSO still worked**. A one-generation lag is tolerated; the
-> `Token is missing the "objects" claim` hard failure comes from the *much* older DAB the
-> `stable-4.x` branches pin, which is why `main` (above), not a stable tag, is the load-bearing
-> choice.
+> whole generation newer — and **SSO still worked**. A later run saw the gap widen further still
+> (hub `2025.11.24.0.dev6`, gateway `2026.8.11.0.dev53`) and SSO was *still* fine. A
+> one-generation lag is tolerated; the `Token is missing the "objects" claim` hard failure comes
+> from the *much* older DAB the `stable-4.x` branches pin, which is why `main` (above), not a
+> stable tag, is the load-bearing choice.
+>
+> Both venvs move independently, so do not expect these exact strings — compare *generations*
+> (the year-month prefix), not full versions.
 
 ## Settings — `/etc/pulp/settings.py`
 
@@ -205,7 +209,7 @@ GALAXY_AUTHENTICATION_CLASSES = [
 EOF
 sudo chown pulp:pulp /etc/pulp/settings.py
 sudo chmod 0640 /etc/pulp/settings.py
-sudo vim /etc/pulp/settings.py    # set the real DB password + a random SECRET_KEY
+sudo vim /etc/pulp/settings.py
 ```
 
 The PATH wrapper — `pulpcore-manager`, with `PULP_SETTINGS`, the Django settings
@@ -226,7 +230,7 @@ sudo chmod 0755 /usr/bin/pulpcore-manager
 ## Migrate, admin, static
 
 ```bash
-sudo -u pulp pulpcore-manager migrate                       # want: long OK run, RoleDefinitions created
+sudo -u pulp pulpcore-manager migrate
 sudo -u pulp pulpcore-manager reset-admin-password --password CHANGE-ME
 sudo bash -c 'umask 022 && OPENSSL_armcap=0 PULP_SETTINGS=/etc/pulp/settings.py \
   DJANGO_SETTINGS_MODULE=pulpcore.app.settings \
@@ -314,7 +318,7 @@ LimitNOFILE=524288
 WantedBy=multi-user.target
 EOF
 
-sudo semanage fcontext -a -t bin_t '/var/lib/pulp/venv/bin(/.*)?'   # the 203/EXEC fix again
+sudo semanage fcontext -a -t bin_t '/var/lib/pulp/venv/bin(/.*)?'
 sudo restorecon -Rv /var/lib/pulp/venv/bin
 ```
 
@@ -349,7 +353,6 @@ Verify the backend before putting nginx in front:
 ```bash
 curl -s --unix-socket /run/pulpcore-api/pulpcore-api.sock \
   http://localhost/api/galaxy/pulp/api/v3/status/ | python3 -m json.tool | grep -E 'component|online'
-# want: components core/galaxy/container/ansible/…, online_workers and online_content_apps > 0
 ```
 
 ## nginx
@@ -377,7 +380,7 @@ sudo /usr/local/sbin/ace-sign-request ace-hub-pulp_webserver
 ```bash
 sudo install -o root -g pulp -m 0644 /srv/ace/ace-hub-pulp_webserver.crt /etc/pulp/certs/pulp_webserver.crt
 sudo rm -f /srv/ace/ace-hub-pulp_webserver.crt
-sudo openssl verify /etc/pulp/certs/pulp_webserver.crt      # want: OK
+sudo openssl verify /etc/pulp/certs/pulp_webserver.crt
 
 sudo dnf -y module enable nginx:1.24
 sudo dnf -y install nginx
@@ -423,8 +426,15 @@ EOF
 > log).
 
 ```bash
+sudo dnf -y install firewalld
+sudo systemctl enable --now firewalld
 sudo firewall-cmd --permanent --add-port=443/tcp && sudo firewall-cmd --reload
 ```
+
+> **firewalld is not on this box yet.** The Rocky GenericCloud image does not ship it, and only
+> [Lab 6](06-controller.md) has installed it so far — on the controller. Skip the install line and
+> the next command is `sudo: firewall-cmd: command not found`, which reads like a broken lab rather
+> than a missing package.
 
 nginx reaches both pulpcore sockets over unix, which crosses the same pair of SELinux checks
 [Lab 6](06-controller.md) hit — `write` on the socket inode and `connectto` against the domain
@@ -451,7 +461,7 @@ semodule_package -o /tmp/ace-nginx-upstream.pp -m /tmp/ace-nginx-upstream.mod
 sudo semodule -i /tmp/ace-nginx-upstream.pp
 
 sudo nginx -t && sudo systemctl enable --now nginx
-curl -sk https://127.0.0.1:443/api/galaxy/pulp/api/v3/status/ -o /dev/null -w "hub via nginx: %{http_code}\n"  # want: 200
+curl -sk https://127.0.0.1:443/api/galaxy/pulp/api/v3/status/ -o /dev/null -w "hub via nginx: %{http_code}\n"
 ```
 
 > Skip the module and you get a **502** with `connect() to unix:/run/pulpcore-api/pulpcore-api.sock
@@ -546,7 +556,7 @@ Then mint the hub's service secret and add it to the pulp settings so galaxy_ng 
 gateway back (the api-slug is **`galaxy`**, not `hub`):
 
 ```bash
-sudo -u gateway aap-gateway-manage generate_service_secret galaxy   # RECORD it
+sudo -u gateway aap-gateway-manage generate_service_secret galaxy
 
 sudo tee -a /etc/pulp/settings.py >/dev/null <<'EOF'
 RESOURCE_SERVER = {
@@ -555,27 +565,30 @@ RESOURCE_SERVER = {
     "VALIDATE_HTTPS": False,
 }
 EOF
-sudo vim /etc/pulp/settings.py    # paste the real secret
+sudo vim /etc/pulp/settings.py
 sudo systemctl restart pulpcore-api pulpcore-content pulpcore-worker@1 pulpcore-worker@2
 ```
 
 ## Verify — hub through the platform door
 
 ```bash
-# unauthenticated status, proxied through envoy → nginx → pulp
 curl -sk https://192.168.56.11/api/galaxy/pulp/api/v3/status/ | python3 -m json.tool | grep component
 
-# the real test: JWT SSO. one platform login reaches galaxy_ng as the platform admin:
 curl -skL -u "admin:CHANGE-ME" https://192.168.56.11/api/galaxy/_ui/v1/me/ \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["username"], d["is_superuser"])'
-# want: admin True — the gateway minted a JWT, galaxy_ng's HubJWTAuth validated it,
-#       and mapped it to the platform admin. SSO across the whole platform.
 ```
 
 > If `me/` returns `401 Token is missing the "objects" claim`, the hub's DAB is older than the
 > gateway's — you installed a stable galaxy_ng branch instead of `main`. Rebuild the venv from
-> `main` (top of this lab). A `503 no healthy upstream` right after a restart is just envoy's
-> health check catching up — retry in a few seconds.
+> `main` (top of this lab).
+>
+> A `503 no healthy upstream` right after the restart is just envoy's health check catching up —
+> but budget **a couple of minutes**, not a few seconds. On the reference run it answered `503`
+> steadily for about two minutes before flipping. Watch it rather than guessing:
+> ```bash
+> # on ace-gateway — 0 while it settles, 1 once envoy will route to it
+> curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep membership_healthy
+> ```
 
 ## The payoff — it appears in the console
 

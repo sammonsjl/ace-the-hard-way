@@ -72,7 +72,7 @@ From the `terraform/` directory:
 
 ```bash
 cd terraform
-terraform init     # first time only — downloads the libvirt provider
+terraform init
 terraform apply
 ```
 
@@ -118,7 +118,6 @@ image's own `127.0.1.1` self-mapping first, which matters more than it looks:
 
 ```bash
 ssh ace-controller 'getent ahostsv4 ace-db ace-gateway | head -2; grep -c 127.0.1.1 /etc/hosts'
-# want: 192.168.56.10 and 192.168.56.11, and a 0
 ```
 
 > **Why the `127.0.1.1` line has to go.** The cloud image maps its own hostname to a loopback
@@ -152,7 +151,7 @@ host and the change is visible in the VM immediately — and, more importantly, 
 that carries certificates between machines in [Lab 3](03-internal-ca.md).
 
 ```bash
-ssh ace-db 'ls /srv/ace'     # the repo
+ssh ace-db 'ls /srv/ace'
 ```
 
 Writes to it need `sudo` inside the VM. The share carries the host's file ownership, which will not
@@ -218,8 +217,6 @@ Each of these is a precondition the rest of the tutorial silently assumes, and e
 
 ```bash
 PREFLIGHT=$(cat <<'EOF'
-# 1. Time sync — clock skew breaks TLS handshakes and job timestamps.
-#    With five machines and a private CA this matters far more than it did on one.
 systemctl is-active --quiet chronyd \
   && echo "OK   chronyd active" || echo "FAIL chronyd not active"
 ref=$(chronyc tracking 2>/dev/null | awk -F'[ ]*:[ ]*' '/Reference ID/{print $2}')
@@ -228,18 +225,15 @@ case "$ref" in
   *)             echo "OK   clock synced to $ref" ;;
 esac
 
-# 2. UTF-8 locale — non-UTF-8 breaks Django and postgres init
 [ "$(locale 2>/dev/null | grep -c 'UTF-8')" -gt 0 ] \
   && echo "OK   UTF-8 locale" || echo "FAIL locale is not UTF-8"
 
-# 3. Hostname is real — receptor refuses 'localhost' node names
 hn=$(hostnamectl hostname)
 case "$hn" in
   ace-*) echo "OK   hostname $hn" ;;
   *)     echo "FAIL hostname is '$hn', expected an ace-* name" ;;
 esac
 
-# 4. No noexec mounts where code runs — jobs and wheels execute from here
 bad=""
 for d in /var /tmp /var/tmp; do
   findmnt -no OPTIONS --target "$d" | grep -q noexec && bad="$bad $d"
@@ -247,7 +241,6 @@ done
 [ -z "$bad" ] && echo "OK   /var /tmp /var/tmp all exec" \
               || echo "FAIL noexec on:$bad"
 
-# 5. Every other node is reachable by name
 down=""
 for h in ace-db ace-gateway ace-controller ace-hub ace-eda; do
   ping -c1 -W2 "$h" >/dev/null 2>&1 || down="$down $h"

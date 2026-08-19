@@ -56,7 +56,7 @@ ssh ace-gateway
 
 ```bash
 sudo dnf -y install redis
-redis-server --version    # record it — Rocky 9 ships 6.2.x, and 6+ is what we need
+redis-server --version
 ```
 
 The socket lives in its own directory, owned by `redis`, mode `0750`:
@@ -68,7 +68,7 @@ D /run/redis 0750 redis redis -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/redis.conf
 sudo restorecon -Rv /var/run/redis
-ls -ld /var/run/redis     # want: drwxr-x--- redis redis
+ls -ld /var/run/redis
 ```
 
 > `/var/run` is a tmpfs — it is empty after every reboot, so a directory you create by hand is gone
@@ -106,7 +106,7 @@ Two of those look wrong together and aren't:
 
 ```bash
 sudo systemctl enable --now redis
-systemctl is-active redis    # want: active
+systemctl is-active redis
 ```
 
 > **The controller needs TCP next, and EDA needs it after that.** [Lab 6](06-controller.md) is
@@ -130,7 +130,7 @@ sudo install -d -o gateway -g gateway -m 0755 /var/lib/ansible-automation-platfo
 sudo install -d -o gateway -g gateway -m 0750 /var/cache/ansible-automation-platform/gateway
 sudo chmod 0755 /var/lib/ansible-automation-platform
 
-id gateway     # want: groups include redis
+id gateway
 ```
 
 The redis group is not optional — the settings below cache on a socket in a directory only that
@@ -190,8 +190,8 @@ system-wide:
 sudo python3.12 -m pip install supervisor
 sudo ln -sf /usr/local/bin/supervisord  /usr/bin/supervisord
 sudo ln -sf /usr/local/bin/supervisorctl /usr/bin/supervisorctl
-sudo which supervisord supervisorctl   # want: both resolve (/bin here — same as /usr/bin)
-sudo supervisord --version             # want: a version, not "command not found"
+sudo which supervisord supervisorctl
+sudo supervisord --version
 ```
 
 > **The symlinks are not cosmetic.** Rocky's `sudo` replaces `PATH` with a `secure_path` of
@@ -263,7 +263,7 @@ being root. On ace-controller the same line names `awx` instead, for the same re
 ```bash
 sudo install -d -o gateway -g gateway /opt/jewel
 sudo -u gateway git clone https://github.com/ansible/jewel.git /opt/jewel
-sudo -u gateway git -C /opt/jewel rev-parse --short HEAD   # RECORD THIS — no tags exist to pin
+sudo -u gateway git -C /opt/jewel rev-parse --short HEAD
 
 sudo -u gateway python3.12 -m venv /var/lib/ansible-automation-platform/venv/gateway
 sudo -u gateway bash <<'EOF'
@@ -271,7 +271,6 @@ set -euo pipefail
 source /var/lib/ansible-automation-platform/venv/gateway/bin/activate
 cd /opt/jewel
 pip install --upgrade pip setuptools wheel setuptools_scm
-# jewel splits frozen deps and git deps — install both in one resolve:
 cat requirements/requirements.txt requirements/requirements_git.txt | pip install -r /dev/stdin
 pip install -e .
 pip install uwsgi
@@ -281,7 +280,7 @@ EOF
 The manage entrypoint is **`aap-gateway-manage`**. Give it a PATH wrapper:
 
 ```bash
-ls /var/lib/ansible-automation-platform/venv/gateway/bin/ | grep -i manage   # confirm the name
+ls /var/lib/ansible-automation-platform/venv/gateway/bin/ | grep -i manage
 sudo tee /usr/bin/aap-gateway-manage >/dev/null <<'EOF'
 #!/bin/bash
 # hand-written PATH wrapper for the venv's aap-gateway-manage.
@@ -312,9 +311,8 @@ sudo install -o root -g gateway -m 0644 \
   /srv/ace/ace-gateway-gateway.cert /etc/ansible-automation-platform/gateway/gateway.cert
 sudo rm -f /srv/ace/ace-gateway-gateway.cert
 
-sudo openssl verify /etc/ansible-automation-platform/gateway/gateway.cert   # want: OK
+sudo openssl verify /etc/ansible-automation-platform/gateway/gateway.cert
 sudo openssl x509 -in /etc/ansible-automation-platform/gateway/gateway.cert -noout -ext subjectAltName
-# want: DNS:ace-gateway, IP:192.168.56.11
 ```
 
 Note the **`.cert`** extension — jewel's configuration expects that name, which is why the scripts
@@ -382,7 +380,7 @@ LOGGING['handlers']['file'] = {
     'filters': ['request_id_filter'],
 }
 EOF
-sudo vim /etc/ansible-automation-platform/gateway/settings.py   # put the real DB password in
+sudo vim /etc/ansible-automation-platform/gateway/settings.py
 ```
 
 The URLs carry **no port**, because envoy will own 443 on this host.
@@ -410,7 +408,6 @@ Then seed the **local authenticator**:
 
 ```bash
 sudo -u gateway aap-gateway-manage authenticators --initialize
-# want: "Created default local authenticator"
 ```
 
 > A superuser row is not enough on its own. The gateway authenticates through pluggable
@@ -659,10 +656,8 @@ sudo restorecon -Rv /var/lib/ansible-automation-platform/venv/gateway/bin
 
 sudo systemctl enable --now supervisord
 sudo supervisorctl status
-# want: gateway-processes:uwsgi and gateway-processes:control-plane both RUNNING
 
 curl -sk https://127.0.0.1:8443/api/gateway/v1/ping/ | python3 -m json.tool
-# want: {"status":"good", ..., "db_connected":true, ...}
 ```
 
 `dispatcherd_connected:false` is expected — the gateway's own task dispatcher isn't wired here and
@@ -691,7 +686,7 @@ sudo fallocate -l 6G /swapfile
 sudo chmod 600 /swapfile
 sudo mkswap /swapfile
 sudo swapon /swapfile
-free -h | grep -i swap        # want: 6.0Gi
+free -h | grep -i swap
 ```
 
 > This is a real technique, not a lab hack — memory-hungry build steps on modest machines are
@@ -707,11 +702,11 @@ free -h | grep -i swap        # want: 6.0Gi
 sudo dnf -y module reset nodejs
 sudo dnf -y module enable nodejs:20
 sudo dnf -y install nodejs
-node --version && npm --version    # want: v20.x — record both
+node --version && npm --version
 
 sudo install -d -o gateway -g gateway /opt/ansible-ui
 sudo -u gateway git clone https://github.com/ansible/ansible-ui.git /opt/ansible-ui
-sudo -u gateway git -C /opt/ansible-ui rev-parse --short HEAD   # RECORD THIS
+sudo -u gateway git -C /opt/ansible-ui rev-parse --short HEAD
 ```
 
 ```bash
@@ -722,7 +717,7 @@ npm ci --ignore-scripts
 
 cd platform
 export PLATFORM_SERVER="https://192.168.56.11"
-npm run build          # -> platform/dist
+npm run build
 EOF
 ```
 
@@ -745,7 +740,7 @@ then fails every request with an opaque CORS error.
 sudo cp -a /opt/ansible-ui/platform/dist/. /var/lib/ansible-automation-platform/platform/ui/
 sudo chown -R root:nginx /var/lib/ansible-automation-platform/platform/ui
 sudo restorecon -Rv /var/lib/ansible-automation-platform/platform/ui
-ls /var/lib/ansible-automation-platform/platform/ui/index.html   # want: it exists
+ls /var/lib/ansible-automation-platform/platform/ui/index.html
 ```
 
 No nginx change, no restart, no route registration — section 9 already pointed a `root` and a
@@ -753,9 +748,7 @@ No nginx change, no restart, no route registration — section 9 already pointed
 
 ```bash
 curl -sk -o /dev/null -w '%{http_code} %{content_type}\n' https://192.168.56.11:8443/
-# want: 200 text/html
 curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.56.11:8443/access/users
-# want: 200 — the SPA fallback
 ```
 
 ---
@@ -768,7 +761,7 @@ ARCH=$(uname -m); case $ARCH in x86_64) EARCH=x86_64 ;; aarch64) EARCH=aarch_64 
 curl -fsSL -o /tmp/envoy \
   "https://github.com/envoyproxy/envoy/releases/download/v${ENVOY_VERSION}/envoy-${ENVOY_VERSION}-linux-${EARCH}"
 sudo install -m 0755 /tmp/envoy /usr/local/bin/envoy
-/usr/local/bin/envoy --version    # want: 1.38.3
+/usr/local/bin/envoy --version
 ```
 
 (The asset naming quirk is real: `aarch_64`, with an underscore.)
@@ -909,9 +902,7 @@ Check the empty state before filling it:
 
 ```bash
 curl -s http://127.0.0.1:19000/clusters | grep -oE '^[a-z_-]+::' | sort -u
-# want: both control-plane clusters
 curl -s http://127.0.0.1:19000/listeners; echo "(end)"
-# want: nothing — no listener has been registered
 ss -tln | grep ':443 ' || echo "nothing on 443 — expected"
 ```
 
@@ -930,15 +921,12 @@ the last:
 read -s -p "gateway admin password: " GW_PW; echo
 GW="https://127.0.0.1:8443/api/gateway/v1"
 
-# 1. the listener envoy will open
 curl -sk -u "admin:$GW_PW" -X POST "$GW/http_ports/" -H 'Content-Type: application/json' \
   -d '{"name":"API Port","number":443,"use_https":true,"is_api_port":true}' | python3 -m json.tool | head -4
 
-# 2. resolve the service-type PK by name — never hard-code it
 ST=$(curl -sk -u "admin:$GW_PW" "$GW/service_types/" \
      | python3 -c 'import json,sys; print({t["name"]:t["id"] for t in json.load(sys.stdin)["results"]}["gateway"])')
 
-# 3. a named backend pool, and this host in it
 CL=$(curl -sk -u "admin:$GW_PW" -X POST "$GW/service_clusters/" -H 'Content-Type: application/json' \
      -d "{\"name\":\"gateway\",\"service_type\":$ST}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 
@@ -946,7 +934,6 @@ curl -sk -u "admin:$GW_PW" -X POST "$GW/service_nodes/" -H 'Content-Type: applic
   -d "{\"name\":\"Node gateway - ace-gateway\",\"address\":\"127.0.0.1\",\"service_cluster\":$CL}" \
   -o /dev/null -w 'service_node: %{http_code}\n'
 
-# 4. the service itself — a catch-all at order 100 that does not authenticate against itself
 HP=$(curl -sk -u "admin:$GW_PW" "$GW/http_ports/?name=API%20Port" \
      | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["id"])')
 
@@ -968,7 +955,7 @@ Watch envoy pick it up:
 
 ```bash
 sleep 6
-ss -tln | grep ':443 '     # want: envoy now listening on 443
+ss -tln | grep ':443 '
 curl -sk https://192.168.56.11/api/gateway/v1/ping/ | python3 -m json.tool | head -5
 ```
 
@@ -991,10 +978,9 @@ curl -sk https://192.168.56.11/api/gateway/v1/ping/ | python3 -m json.tool | hea
 ## Verify
 
 ```bash
-systemctl is-active supervisord nginx automation-gateway-proxy   # want: active × 3
-curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.56.11/       # want: 200 — the console on 443
+systemctl is-active supervisord nginx automation-gateway-proxy
+curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.56.11/
 curl -sk -u "admin:$GW_PW" -o /dev/null -w '%{http_code}\n' https://192.168.56.11/api/gateway/v1/me/
-# want: 200 — a real authenticated session
 ```
 
 Then open **`https://192.168.56.11`** in a browser and log in as `admin`.
