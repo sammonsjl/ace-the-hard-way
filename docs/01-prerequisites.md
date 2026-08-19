@@ -72,6 +72,8 @@ Then, on any distro:
 sudo systemctl enable --now libvirtd
 sudo usermod -aG libvirt "$USER"
 
+sudo virsh pool-define-as default dir --target /var/lib/libvirt/images
+sudo virsh pool-build default
 sudo virsh pool-start default
 sudo virsh pool-autostart default
 ```

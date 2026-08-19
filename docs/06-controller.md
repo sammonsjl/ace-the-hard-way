@@ -183,10 +183,6 @@ sudo -u awx /var/lib/awx/venv/awx/bin/pip show awx | grep -E '^(Name|Version)'
 sudo -u awx awx-manage --version 2>&1 | tail -1
 ```
 
-> Every `awx-manage` subcommand fails until section 3, not just `--version`. `manage()` calls
-> `prepare_env()` first, and that reads `settings.DEBUG` — which forces the settings to load before
-> any argument parsing happens. Use `pip show awx` when you want the version without configuration.
-
 ---
 
 ## 3. Configuration
@@ -328,12 +324,6 @@ gateway, and you built it in Lab 5. AWX keeps that directory in `STATICFILES_DIR
 checkout is *expected* to compile a front end into it; a release ships the directory holding a
 single empty `index.html`.
 
-> Django also prints a `RuntimeWarning: Accessing the database during app initialization is
-> discouraged` above that, from `django/db/backends/utils.py`. It is upstream AWX querying in an
-> `AppConfig.ready()`, it appears on every `awx-manage` invocation from here on, and it is not
-> something this build introduced or can fix from configuration. Ignore it — "one warning" means
-> one *check* warning; this one is not part of the check output.
-
 ---
 
 ## 4. Database initialisation
@@ -375,8 +365,6 @@ sudo -u awx awx-manage list_instances
 
 `capacity=0` and `version=?` are expected here — the instance only reports capacity once its
 processes are up and heartbeating, which happens in section 7.
-
----
 
 ---
 
@@ -801,9 +789,6 @@ reads:
 sudo bash -c 'umask 022 && awx-manage collectstatic --noinput --clear'
 ```
 
-> Run it as `awx` and it dies partway with a `PermissionError` *after copying some files*, which
-> makes a retry look like it worked.
-
 ```bash
 sudo tee /etc/nginx/nginx.conf >/dev/null <<'EOF'
 worker_processes  auto;
@@ -1126,8 +1111,6 @@ sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 > upstream is still failing its health check, and the wait is a couple of minutes, not seconds.
 > Wait for `curl -sk https://192.168.56.11/api/controller/v2/ping/` to return `200` and re-run.
 > Both commands are idempotent.
-
----
 
 ---
 

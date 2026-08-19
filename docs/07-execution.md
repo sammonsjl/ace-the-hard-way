@@ -353,23 +353,6 @@ sudo journalctl _UID=$(id -u awx) --since -10m -o cat \
   | grep -oE 'container (init|start|died|remove) .*image=[^,]+'
 ```
 
-> **Why not `podman events`?** Because it returns *nothing here*, silently, and the empty output
-> looks exactly like "no container ever ran".
->
-> ```bash
-> # looks right, prints nothing, tells you nothing
-> sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
->   podman events --since 10m --until 1s --format '{{.Status}} {{.Image}}'
-> ```
->
-> Podman's event logger here is **journald** (`podman info --format '{{.Host.EventLogger}}'`), so
-> `podman events` is a journal *reader*. Our `awx` is a system user in groups `awx` and `nginx`
-> only — not `adm`, `systemd-journal` or `wheel` — so it cannot read the journal, and podman
-> reports that as an empty event list rather than an error. The events are there; the service user
-> just cannot see them. Reading the same journal as root, filtered to awx's UID, is the honest
-> check. (Adding `awx` to `systemd-journal` would also work, and a packaged install does not,
-> so neither do we.)
-
 A hybrid node shows the same hostname for both `controller_node` and `execution_node` on the
 finished job — the decision and the execution happened on one machine, joined only by that signed
 work unit.

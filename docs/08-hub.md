@@ -39,13 +39,6 @@ envoy :443 ──/api/galaxy/…──► nginx :443 ──┬── unix:/…/p
                                               pulpcore-worker@1, @2              (tasking)
 ```
 
-> **Here be dragons — a version-alignment tale.** Hub is the hardest source build in this
-> tutorial, and not because of native code — because of **django-ansible-base (DAB)**, the
-> shared library that carries the gateway's JWT/RBAC contract. The hub's JWT consumer and the
-> gateway's JWT issuer must speak the *same DAB generation*, or single sign-on fails. Read
-> the version notes below before you `pip install` anything; getting them wrong costs a
-> full rebuild.
-
 All commands on **ace-hub** unless stated otherwise.
 
 ## Foundation: user, dirs, database
@@ -75,11 +68,6 @@ sudo -iu postgres psql -d pulp -c "CREATE EXTENSION IF NOT EXISTS hstore;"
 sudo -iu postgres psql -d pulp -c '\dx' | grep hstore
 ```
 
-> This is the first time a component needs something done *for* it on another machine, and it is
-> worth noticing why: `CREATE EXTENSION` loads a shared library into the database, which is a
-> server-side privilege no application role should hold. The pulp role owns its schema; it does not
-> own the server.
-
 ## Build toolchain, and Python 3.11 rather than 3.12
 
 The galaxy_ng/pulpcore stack of this era pins `setuptools<66`, and that setuptools calls
@@ -96,14 +84,6 @@ sudo dnf -y install \
   openldap-devel cyrus-sasl-devel \
   libxml2-devel libxslt-devel
 ```
-
-> `openldap-devel` and `cyrus-sasl-devel` are the ones people miss, because nothing in "install a
-> content repository" suggests LDAP. galaxy_ng pulls `python-ldap` in through
-> `django-ansible-base`'s authentication extras, and without those headers the build dies a
-> hundred lines into a gcc invocation with
-> `fatal error: lber.h: No such file or directory`, then reports only
-> `Failed to build python-ldap`. The traceback names the Python package; the header names the
-> package you actually need.
 
 ## Install galaxy_ng from git `main` (this version choice is load-bearing)
 
@@ -131,17 +111,6 @@ EOF
 > share the JWT format. If SSO later returns a JWT-claim error, the very first thing to check is
 > whether the hub's DAB and the gateway's DAB are the same generation (`pip show
 > django-ansible-base` in both venvs).
->
-> **Don't panic at a version mismatch, though.** On the amd64 run galaxy_ng `main` pinned DAB
-> `2025.11.24` while the gateway/controller/EDA venvs had already moved to `2026.7.23` — a
-> whole generation newer — and **SSO still worked**. A later run saw the gap widen further still
-> (hub `2025.11.24.0.dev6`, gateway `2026.8.11.0.dev53`) and SSO was *still* fine. A
-> one-generation lag is tolerated; the `Token is missing the "objects" claim` hard failure comes
-> from the *much* older DAB the `stable-4.x` branches pin, which is why `main` (above), not a
-> stable tag, is the load-bearing choice.
->
-> Both venvs move independently, so do not expect these exact strings — compare *generations*
-> (the year-month prefix), not full versions.
 
 ## Settings — `/etc/pulp/settings.py`
 
@@ -586,7 +555,6 @@ curl -skL -u "admin:CHANGE-ME" https://192.168.56.11/api/galaxy/_ui/v1/me/ \
 > but budget **a couple of minutes**, not a few seconds. On the reference run it answered `503`
 > steadily for about two minutes before flipping. Watch it rather than guessing:
 > ```bash
-> # on ace-gateway — 0 while it settles, 1 once envoy will route to it
 > curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep membership_healthy
 > ```
 

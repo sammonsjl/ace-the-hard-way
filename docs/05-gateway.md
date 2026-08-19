@@ -168,13 +168,6 @@ sudo dnf -y install \
 > failure is worth understanding, so [Appendix A1](a1-epel-uwsgi-conflict.md) has you enable EPEL
 > deliberately, break the platform with it, and then armor the box.
 
-> **These failures all read as Python problems and none of them are.** Missing `xmlsec1-devel`
-> gives `Failed to build installable wheels … : xmlsec`; missing `openldap-devel` buries
-> `fatal error: lber.h: No such file or directory` a hundred lines into a gcc invocation and then
-> reports `Failed to build python-ldap`. The traceback always names the Python package, never the
-> system header. When a wheel build fails, read *up* past the pip summary to the first
-> `fatal error:` line — that names the header, and the header names the `-devel` package.
-
 ---
 
 ## 4. supervisord
@@ -585,9 +578,6 @@ Now `collectstatic`, as **root** — `STATIC_ROOT` is a root-owned tree nginx on
 sudo bash -c 'umask 022 && aap-gateway-manage collectstatic --noinput --clear'
 ```
 
-> Run it as `gateway` and it dies with
-> `PermissionError: [Errno 13] Permission denied: '.../static/admin'`.
-
 ---
 
 ## 10. Start the gateway
@@ -663,9 +653,6 @@ curl -sk https://127.0.0.1:8443/api/gateway/v1/ping/ | python3 -m json.tool
 `dispatcherd_connected:false` is expected — the gateway's own task dispatcher isn't wired here and
 isn't needed for the proxy path.
 
-> The SELinux relabel is because systemd may not execute binaries labelled `var_lib_t`, which is
-> everything under `/var/lib`. Skip it and supervisord's children die with `203/EXEC`.
-
 ---
 
 ## 11. The console
@@ -688,13 +675,6 @@ sudo mkswap /swapfile
 sudo swapon /swapfile
 free -h | grep -i swap
 ```
-
-> This is a real technique, not a lab hack — memory-hungry build steps on modest machines are
-> exactly what swap is for. It is slow: expect the build to take noticeably longer than it would
-> with real RAM. If you gave this VM more memory in `terraform/variables.tf`, you can skip this.
->
-> Keep it or remove it afterwards with `sudo swapoff /swapfile && sudo rm /swapfile`. Nothing later
-> depends on it.
 
 ### Build
 
@@ -966,8 +946,8 @@ curl -sk https://192.168.56.11/api/gateway/v1/ping/ | python3 -m json.tool | hea
 > If it is still 404 after fifteen seconds, look at what envoy actually has rather than guessing:
 >
 > ```bash
-> curl -s http://127.0.0.1:19000/config_dump | grep -c virtual_hosts   # want: > 0
-> curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/    # nginx direct — want 200
+> curl -s http://127.0.0.1:19000/config_dump | grep -c virtual_hosts
+> curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/
 > ```
 >
 > nginx answering on 8443 while 443 does not tells you the service is healthy and the *registry*
