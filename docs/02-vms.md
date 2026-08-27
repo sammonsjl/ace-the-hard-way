@@ -10,13 +10,13 @@ Nothing component-specific — that starts in Lab 4.
 A real deployment of this platform is not one machine. Its smallest tested distributed shape puts
 each component on its own host:
 
-| VM | Address | Runs |
-|---|---|---|
-| **ace-db** | 192.168.56.10 | PostgreSQL, and nothing else |
-| **ace-gateway** | 192.168.56.11 | the platform gateway, Redis, envoy, and the console |
+| VM                 | Address       | Runs                                                            |
+| ------------------ | ------------- | --------------------------------------------------------------- |
+| **ace-db**         | 192.168.56.10 | PostgreSQL, and nothing else                                    |
+| **ace-gateway**    | 192.168.56.11 | the platform gateway, Redis, envoy, and the console             |
 | **ace-controller** | 192.168.56.12 | the automation controller — and, as a **hybrid** node, jobs too |
-| **ace-hub** | 192.168.56.13 | automation hub |
-| **ace-eda** | 192.168.56.14 | Event-Driven Ansible |
+| **ace-hub**        | 192.168.56.13 | automation hub                                                  |
+| **ace-eda**        | 192.168.56.14 | Event-Driven Ansible                                            |
 
 The real shape has a **sixth** VM: a dedicated execution node, with the controller kept
 control-only. We fold that role into the controller by making it a **hybrid** node — one that
@@ -91,11 +91,30 @@ Terraform writes an `ssh_config` next to the configuration. Include it once and 
 reachable by name:
 
 ```bash
-echo "Include $(terraform output -raw ssh_config_path)" >> ~/.ssh/config
+printf '\nInclude %s\n' "$(terraform output -raw ssh_config_path)" >> ~/.ssh/config
 ```
 
+The leading newline matters: a plain `echo ... >> ~/.ssh/config` lands on the same line as
+whatever your last line already was if that file doesn't end in a newline — you get a merged,
+unparsable line (`SetEnv TERM=xterm-256colorInclude /path/...`) instead of a new one.
+
+> **Repo on a NAS/NFS mount?** `Include` refuses a config file it doesn't consider owned by you
+> or root. NFS commonly reports every file under the *server's* uid/gid, not your local one, so
+> `terraform/ssh_config` can fail ownership even though you created it. If `ssh` errors with `Bad
+> owner or permissions`, copy the file to somewhere local instead of including it in place:
+> ```bash
+> cp terraform/ssh_config ~/.ssh/ace-lab-ssh-config
+> printf '\nInclude %s\n' ~/.ssh/ace-lab-ssh-config >> ~/.ssh/config
+> ```
+> Re-run the `cp` any time Terraform regenerates `ssh_config` (a new `apply` that changes nodes).
+
 Order matters in `ssh_config` — if your `~/.ssh/config` already has a catch-all `Host *` block,
-put the `Include` line **above** it, because the first match for a given option wins.
+put the `Include` line **below** it, not above. `Host *` here only sets connection-wide options
+(`IdentityAgent`, `ServerAliveInterval`, and the like), never `HostName`/`User`/`IdentityFile`, so
+first-match-wins never causes a conflict — but on at least OpenSSH 10.5p1, an `Include` placed
+*before* a `Host *` block gets parsed without ever applying its `Host` matches (visible as
+`(parse only)` in `ssh -vvv`), so nothing in the included file takes effect at all. Putting
+`Include` after `Host *` avoids this outright.
 
 Then, from anywhere:
 

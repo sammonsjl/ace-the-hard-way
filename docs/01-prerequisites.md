@@ -122,6 +122,13 @@ Most are distro or firewall specific — you may hit none of them.
 
   There is only **one** network here (`ace-lab`), carrying both SSH and lab traffic.
 
+  > Confirmed on the tested Arch host: `ufw` ships active by default (Omarchy enables it), with
+  > `Default: deny (routed)` and no rule for `virbr+`. That's enough to silently drop DHCP with zero
+  > leases ever issued — not a partial failure, `virsh net-dhcp-leases ace-lab` comes back empty.
+  > **If VMs were already running while this was blocking them, adding the `ufw` rules alone is not
+  > enough** — their DHCP clients had already given up retrying. Reboot each domain
+  > (`virsh reboot <name>`) after fixing the firewall to make them ask again.
+
 - **`libvirtd` won't start on a TPM box.** If `virt-secret-init-encryption.service` aborts, seal the
   key to the host instead of the TPM:
   `systemd-creds encrypt --with-key=host --name=secrets-encryption-key - /var/lib/libvirt/secrets/secrets-encryption-key`.
