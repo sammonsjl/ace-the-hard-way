@@ -2,125 +2,140 @@
 
 ## What you'll have at the end
 
-A laptop ready to run the five lab VMs.
+A host that can build and run the platform, and a written record of what that host looked like before you started — so [Lab 99](99-cleanup.md) can prove you put it back.
 
 ## What you need
 
 | | |
 |---|---|
-| **RAM** | **16 GB minimum.** The `Vagrantfile` allocates 14.3 GB across five VMs and leaves ~1.5 GB for the host. More is better and the numbers are easy to raise; less will not work. |
-| **Disk** | ~60 GB free. Five Rocky boxes, four source checkouts, a node_modules tree and a container image. |
+| **OS** | Linux with a systemd **user** session. Rootless podman and user units are the entire runtime model; there is no VM to hide in. |
+| **RAM** | **16 GB minimum.** About 11 containers run at once, and the console build alone asks for 8 GB of heap. You will not build and run at the same time — see below. |
+| **Disk** | ~60 GB free, most of it image layers and build caches. |
 | **CPU** | 4 cores is workable, 8 is comfortable. Two of the builds are long compiles. |
-| **Network** | The VMs pull from GitHub, PyPI, npm, quay.io and the Rocky mirrors. Nothing here works air-gapped. |
+| **Network** | Builds pull from GitHub, PyPI, npm, quay.io, docker.io and the CentOS mirrors. Nothing here works air-gapped. |
 
-Everything runs on one machine — the five VMs are a *topology*, not five computers.
+You do **not** need a hypervisor, a cloud account, a registry login, or a spare machine. That is the point of this track.
 
-## Install the tools
+> **This was tested on Arch.** The commands below are correct for other distros as far as package names go, but only the Arch path has been run end to end. Everything from Lab 4 onward happens *inside containers* and is identical everywhere.
 
-Pick the track for your platform — both are fully tested end-to-end.
+## Install podman
 
-**Linux — KVM/libvirt** (`vagrant-libvirt`, no license, all open source). Install the virtualization stack plus Vagrant for your distro, then run the common steps below.
-
-*Arch* — the host this was tested on. It takes two commands, because Vagrant isn't in the official repos. First the virtualization stack:
+*Arch* — the host this was tested on:
 
 ```bash
-sudo pacman -S --needed qemu-full libvirt dnsmasq dmidecode nfs-utils
+sudo pacman -S --needed podman
 ```
 
-Then Vagrant itself, which is **AUR-only** on Arch — with an AUR helper:
+*Fedora / RHEL family* — untested as a host:
 
 ```bash
-yay -S vagrant        # or: paru -S vagrant
+sudo dnf -y install podman
 ```
 
-or by hand, if you don't have one:
-
-```bash
-git clone https://aur.archlinux.org/vagrant.git
-cd vagrant && makepkg -si
-```
-
-Either route builds from source and pulls in Go as a build dependency, so give it a few minutes.
-
-> **Don't add `vagrant` or `ebtables` to the `pacman` line.** `vagrant` is AUR-only, and `ebtables` is no longer its own Arch package — `/usr/bin/ebtables` ships in `iptables` now, which libvirt already depends on. pacman aborts the *entire* transaction on a single unknown target, so one bad name means nothing gets installed.
-
-*Fedora / RHEL family* — package names are correct, but this wasn't tested as a **host** (the guest VMs are Rocky, so the tutorial's own `dnf` commands are covered — this line is just the host prep):
-
-```bash
-sudo dnf -y install qemu-kvm libvirt virt-install dnsmasq dmidecode nfs-utils vagrant vagrant-libvirt
-```
-
-*Ubuntu / Debian* — package names are correct, untested as a host:
+*Ubuntu / Debian* — untested as a host:
 
 ```bash
 sudo apt update
-sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients dnsmasq \
-  dmidecode nfs-kernel-server vagrant vagrant-libvirt
+sudo apt install -y podman
 ```
 
-> Distro Vagrant packages can lag; for a current release, install Vagrant from [HashiCorp's apt/dnf repo](https://developer.hashicorp.com/vagrant/install) instead of the distro package.
+> **Podman must be 4.4 or newer**, because this tutorial writes quadlets and that is when podman learned to read them. 5.x or 6.x is better still: `podman generate systemd`, which the vendor's installer uses, is deprecated from podman 5 onward, and this tutorial does not use it. Check with `podman --version`.
 
-Then, on any distro:
+### If you already have Docker
+
+You can keep it. Podman is daemonless, keeps its own image store under `~/.local/share/containers`, brings its own network stack, and does not touch the Docker socket. The two coexist on one machine without any arrangement between them.
+
+Two things would break that, and neither is installed by default:
+
+- **Do not install `podman-docker`.** It aliases the `docker` command to podman. Every Docker workflow you already have would silently start running somewhere else.
+- **Do not enable `podman.socket`.** That is podman's Docker-compatible API endpoint, and it is the one place the two genuinely contend.
+
+> If networking behaves strangely later — a container that cannot reach another container, or DNS that resolves everywhere except inside podman — suspect Docker first. Its daemon writes its own iptables chains and has a long history of interfering with bridges it does not own.
+
+### Why podman and not Docker
+
+Docker builds every image in this tutorial perfectly well; a Containerfile *is* a Dockerfile. The runtime half is where it stops. This tutorial uses podman secrets, quadlets, `userns: keep-id`, one systemd **user unit** per container, and receptor shelling out to `podman` to start execution environments. Docker's daemon model has no equivalent for any of those. Its answer is compose — a second orchestrator with its own opinions, which is exactly the thing this tutorial exists not to hand you.
+
+## Turn on lingering
 
 ```bash
-sudo systemctl enable --now libvirtd nfs-server   # Ubuntu/Debian: the unit is nfs-kernel-server
-sudo usermod -aG libvirt "$USER"                  # log out/in for the group to take effect
-vagrant plugin install vagrant-libvirt            # skip if you installed it from your distro repo (Fedora/Ubuntu above)
+loginctl enable-linger "$USER"
 ```
 
-**macOS (Apple Silicon or Intel) — VMware Fusion:**
+Every service you build runs as a **systemd user unit**. Without lingering, the user manager is torn down when your last session ends — so the whole platform would stop the moment you log out, and would not come back at boot. One command, and it is the difference between a platform and a demo.
+
+## Rootless prerequisites
+
+These are almost certainly already true. Check rather than assume:
 
 ```bash
-brew install --cask vagrant
-brew install --cask vagrant-vmware-utility
-vagrant plugin install vagrant-vmware-desktop
+grep "^$USER" /etc/subuid /etc/subgid
+stat -fc %T /sys/fs/cgroup
 ```
 
-VMware Fusion is a direct download from the [Broadcom support portal](https://support.broadcom.com) (free account, no license key — Fusion is free for personal and commercial use).
+**Want:** a range in both files (something like `you:100000:65536`), and `cgroup2fs`.
 
-## Provider matrix (pick yours)
+Subordinate UID and GID ranges are what let a rootless container believe it has a root user; without them `podman` fails immediately on any image that does not run as your own UID. Modern distros write them when the account is created. If either file has no line for you, add one with `sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$USER"` and log out and back in.
 
-| Your platform | Provider | Box | Status |
-|---|---|---|---|
-| Linux (x86_64) | libvirt/KVM (`vagrant-libvirt`) | `bento/rockylinux-9` (default) | ✅ full run, amd64 (tested on an Arch host) |
-| macOS (Apple Silicon or Intel) | VMware Fusion (`vagrant-vmware-desktop`) | `bento/rockylinux-9` | ✅ full run, what the author develops on |
-| Windows / Linux (x86_64) | VMware Workstation Pro (`vagrant-vmware-desktop`) — free, same plugin | `bento/rockylinux-9` | untested, should work |
+`cgroup2fs` is cgroups v2, which rootless resource control requires. Anything current has it.
 
-The Vagrantfile carries provider blocks for libvirt and VMware, and the box is overridable via the `VAGRANT_BOX` env var. `bento/rockylinux-9` publishes libvirt and VMware images for both x86_64 and aarch64, so the same default box works on every tested provider. Everything from Lab 2 onward happens INSIDE the Rocky VMs — identical on every platform. If a provider combination misbehaves, please open an issue.
+## Build and run are not simultaneous
 
-### libvirt/KVM notes (Linux)
+The console build stage (`ansible-ui`, in [Lab 5](05-gateway.md)) runs node with `--max-old-space-size=8192`. The controller image builds a virtualenv and compiles C extensions. Meanwhile the running platform is about eleven containers with two Django applications in it.
 
-The full tutorial was run to completion on KVM/amd64; a few host-side things are worth knowing up front (most are distro/firewall-specific — you may hit none of them):
+On 16 GB, either of those is comfortable. Both at once is not. Build images first, then start things — the labs are ordered so that falls out naturally, but it is worth knowing why if you ever wonder whether you can rebuild the gateway while the platform is up. You can't.
 
-- **Synced folder is NFS.** `vagrant-libvirt` shares `/vagrant` over NFS and edits `/etc/exports` via `sudo`. The Vagrantfile already pins `nfs_version: 4, nfs_udp: false` because modern Rocky guests reject the plugin's default `vers=3,udp` ("an incorrect mount option was specified"). If Vagrant prompts for a password mid-`up`, add a scoped `/etc/sudoers.d` drop-in for the `exportfs`/`mount`/`systemctl` NFS commands it runs.
-- **Keep the repo on local disk** (almost everyone already does — skip this bullet unless your home directory is network-mounted). If your clone lives on an NFS mount itself (e.g. a NAS-backed home), two things break: the kernel can't re-export it for the `/vagrant` share (`exportfs: requires fsid=`), and Vagrant's SSH-key ownership check fails. Clone to a local path and run Vagrant from there. This is unrelated to the NFSv4 mount option above — that one is about how the guest mounts `/vagrant`; this is about where your copy of the repo sits.
-- **Firewall on the libvirt bridges.** If the guest gets no DHCP/DNS, or the VMs come up but can't reach each other on `192.168.56.0/24`, a default-drop firewall (ufw, or Docker's rules) is blocking libvirt's bridges. Note the plural: this lab ends up with **two** networks — vagrant-libvirt's own management network (DHCP and SSH) and the `ace-lab` network the Vagrantfile defines for `192.168.56.0/24` — and neither one is necessarily `virbr0`. Bridge numbers are handed out in creation order, so don't guess; allow the whole family at once:
+## Preflight — record the host as it is now
 
-  ```bash
-  sudo ufw allow in on 'virbr+'
-  sudo ufw route allow in on 'virbr+'
-  sudo ufw route allow out on 'virbr+'
-  ```
+Everything this tutorial creates lives in three places: `~/ace/`, a set of systemd user units, and podman's own storage. [Lab 99](99-cleanup.md) removes all three. This snapshot is what you diff against to know it worked.
 
-  `virbr+` is an iptables prefix wildcard, so those three rules cover every libvirt bridge you have now or create later. (Prefer to scope it tighter? Swap `'virbr+'` for a specific bridge name and repeat per bridge.) To see what you actually got:
+```bash
+mkdir -p ~/.ace-preflight
+ss -ltnp > ~/.ace-preflight/ports.txt
+systemctl --user list-units --all --no-legend > ~/.ace-preflight/units.txt
+cp /etc/hosts ~/.ace-preflight/hosts.txt
+podman ps -a > ~/.ace-preflight/containers.txt
+podman images > ~/.ace-preflight/images.txt
+```
 
-  ```bash
-  sudo virsh net-list --all      # the networks libvirt knows about
-  ip -br link show type bridge   # the bridges they created
-  ```
-- **`libvirtd` won't start on a TPM box.** If `virt-secret-init-encryption.service` aborts, seal the key to the host instead of the TPM: `systemd-creds encrypt --with-key=host --name=secrets-encryption-key - /var/lib/libvirt/secrets/secrets-encryption-key`.
+It lives in `~/.ace-preflight/`, not `~/ace/`, precisely so that removing the platform does not remove the evidence.
+
+### Ports this tutorial will take
+
+Check them now, while the answer is still "nothing":
+
+```bash
+for p in 9443 8443 8444 8445 8446 8080 8081 8082 8083 8050 8051 8052 8000 8001 5432 6379 27199 50051; do
+  ss -ltn | grep -qE ":$p " && echo "IN USE: $p"
+done
+```
+
+**Want:** no output.
+
+Anything printed here is a collision you must resolve before Lab 4, and the two likely candidates are a PostgreSQL or Redis you already run. Either stop it for the duration, or change that component's port — every one of these numbers is a variable in a config file you write yourself, so moving one is a one-line edit rather than a fork of the tutorial.
 
 ## Verify
 
 ```bash
-vagrant --version
-vagrant plugin list        # want: vagrant-libvirt (Linux) or vagrant-vmware-desktop (macOS)
+podman --version
+podman run --rm quay.io/podman/hello
+loginctl show-user "$USER" -p Linger
 ```
 
-## Why VMs?
+**Want:** podman 4.4 or newer, a greeting from the hello container, and `Linger=yes`.
 
-Because this tutorial builds everything **bare metal**: real systemd units, real users, real config files on a real Linux system. That needs disposable Linux machines you can break and rebuild — which is exactly what Vagrant VMs are. It also matches what you'd run in a homelab or datacenter.
+If you kept Docker, confirm it is unharmed:
 
-**And why five of them?** Because the seams are the lesson. On one box, "the controller talks to the database" is a unix socket and a shrug; across five, it is a hostname, a port, a firewall rule and a certificate whose SAN has to match — and when it breaks you find out which. [Lab 2](02-vms.md) lays out the topology and why each component gets its own machine.
+```bash
+docker version
+```
 
-Next: [Provisioning the VMs](02-vms.md)
+## Why no VM?
+
+The [bare-metal track](../../../tree/main/docs/01-prerequisites.md) needs five virtual machines because its services install *into* a machine: files under `/usr`, a system `awx` user, units in `/etc/systemd/system`, state in `/var/lib/awx`. You cannot do that to a computer you use for anything else, so you build disposable ones.
+
+Containerizing removes the reason. Every service lives inside an image; everything mutable lives under `~/ace/`; every process is supervised by a user unit you own. Nothing is installed into the host but podman itself. The platform becomes something you can run on the machine in front of you and then genuinely delete — which is why the preflight above exists, and why Lab 99 is a real lab on this track rather than a footnote.
+
+What you give up is the seams. On five machines, "the controller talks to the database" is a hostname, a port, a firewall rule and a certificate whose SAN has to match — and when it breaks you find out which. Here it is a port on loopback. That lesson belongs to the bare-metal track, and it is worth having; this track spends its budget on a different one — what is actually inside the images everybody else pulls.
+
+Next: [The host](02-host.md)
