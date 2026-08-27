@@ -84,7 +84,8 @@ COPY --from=jewel-src /src/tools/configs/settings.py         /etc/ansible-automa
 
 RUN for dir in /etc/nginx /opt/aap_gateway /opt/aap_gateway/src \
                /var/log/supervisor /var/run/supervisor /var/run/uwsgi \
-               /var/log/nginx /var/run/django_metrics ; \
+               /var/log/nginx /var/run/django_metrics \
+               /var/cache/ansible-automation-platform/gateway ; \
     do mkdir -m 0775 -p "$dir" ; chmod g+rwx "$dir" ; chgrp root "$dir" ; done && \
     for file in /etc/nginx/gateway.crt /etc/nginx/gateway.key ; \
     do touch "$file" ; chmod g+rw "$file" ; chgrp root "$file" ; done && \

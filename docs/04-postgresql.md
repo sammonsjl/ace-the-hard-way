@@ -168,7 +168,7 @@ Being able to re-run this matters more than it looks. It is how you rotate a pas
 
 ## Redis
 
-One server, six logical databases, and two ways in — the gateway uses a unix socket, the controller, hub and EDA use the TCP port.
+One server, six logical databases, and two ways in. The vendor's build gives the gateway a unix socket and the other services the TCP port; this build starts everything on TCP, and the socket is here because [Lab 7](07-execution.md)'s receptor work and the controller's broker want it. Both are configured now so no later lab has to come back and re-enable one.
 
 ```bash
 mkdir -p ~/ace/redis/run
@@ -232,7 +232,7 @@ systemctl --user daemon-reload
 systemctl --user start ace-redis
 ```
 
-**`UserNS=keep-id` is here, and PostgreSQL's absence of it is the contrast worth understanding.** A TCP port is shared automatically under `Network=host`. A unix socket is not — it is a *file*, and the gateway container in [Lab 5](05-gateway.md) reaches it by mounting the directory it lives in. `keep-id` maps the container's redis user to your UID, so the socket lands on your host owned by you:
+**`UserNS=keep-id` is here, and PostgreSQL's absence of it is the contrast worth understanding.** A TCP port is shared automatically under `Network=host`. A unix socket is not — it is a *file*, and any container that wants it has to mount the directory it lives in. `keep-id` maps the container's redis user to your UID, so the socket lands on your host owned by you:
 
 ```bash
 ls -la ~/ace/redis/run/
