@@ -68,10 +68,8 @@ An unverified backup is a rumour. Check both artifacts are readable and hold wha
 
 ```bash
 sudo pg_restore -l /var/backups/ace/db/awx-$TS.dump | grep -c 'TABLE DATA'
-# want: a few hundred — real table data, not just a schema
 
 sudo tar -tzvf /var/backups/ace/etc/config-$TS.tar.gz | grep -E 'SECRET_KEY|mesh-CA.key|work_private_key'
-# want: all three listed — and SECRET_KEY showing -r-------- , its mode preserved
 ```
 
 If `SECRET_KEY` isn't in that archive, stop and fix it now. It's the one file you cannot regenerate.
@@ -82,7 +80,7 @@ Stop the controller family. Receptor goes down with it — Lab 5's unit has `Par
 
 ```bash
 sudo systemctl stop automation-controller
-systemctl is-active automation-controller receptor    # want: inactive, inactive
+systemctl is-active automation-controller receptor
 ```
 
 Postgres won't drop a database that still has connections, so clear any stragglers first:
@@ -90,14 +88,13 @@ Postgres won't drop a database that still has connections, so clear any straggle
 ```bash
 sudo -iu postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'awx';"
 sudo -iu postgres dropdb awx
-sudo -iu postgres psql -c '\l' | grep -c 'awx'    # want: 0 — really gone
+sudo -iu postgres psql -c '\l' | grep -c 'awx'
 ```
 
 Confirm the platform is genuinely broken, not merely stopped:
 
 ```bash
 sudo -u awx awx-manage list_instances
-# want: an OperationalError — FATAL: database "awx" does not exist
 ```
 
 ## Restore
@@ -118,15 +115,15 @@ If you also lost the config — the real disaster, not this drill — restore it
 
 ```bash
 sudo tar -xzf /var/backups/ace/etc/config-$TS.tar.gz -C / --numeric-owner -p
-sudo ls -l /etc/tower/SECRET_KEY    # want: -r-------- 1 awx awx
+sudo ls -l /etc/tower/SECRET_KEY
 ```
 
 Then bring the family back:
 
 ```bash
 sudo systemctl start automation-controller
-systemctl is-active automation-controller receptor    # want: active, active
-sudo -u awx awx-manage list_instances                 # want: ace-control, with capacity
+systemctl is-active automation-controller receptor
+sudo -u awx awx-manage list_instances
 ```
 
 ## Prove it — an untested restore is not a restore
@@ -148,7 +145,6 @@ from awx.main.utils import decrypt_field
 c = Credential.objects.get(name='Demo Credential')
 print('stored as:', str(c.inputs.get('password'))[:11])
 print('decrypts correctly:', decrypt_field(c, 'password') == 'canary-1234')"
-# want: stored as: $encrypted$   and   decrypts correctly: True
 ```
 
 **Now the experiment.** Move the real key aside, drop in a different one, and ask the same question:

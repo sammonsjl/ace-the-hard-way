@@ -1,12 +1,22 @@
-# Vagrant machine state — contains full VM disks, never commit
-.vagrant/
-*.vmdk
-*.log
-
 # Local Claude settings and context — not part of the tutorial
 .claude/settings.local.json
+.claudian/
 .e2e/
 CLAUDE.md
+
+# Editor and filesystem metadata that appears when the repo is opened in
+# Obsidian or lives on a Synology share. Neither belongs to the tutorial.
+.obsidian/
+@eaDir/
+*.log
+
+# Machine state left behind by the bare-metal branch, which builds VMs with
+# Terraform (and, before that, Vagrant). This branch builds no VMs at all — the
+# platform runs on your own host — but switching branches in a shared clone
+# leaves these directories sitting there.
+/terraform/
+.vagrant/
+*.vmdk
 
 # Working notes from test runs — version pins and war stories for the author,
 # not part of the tutorial. Contains throwaway lab credentials.
@@ -17,10 +27,9 @@ E2E-TEST.md
 downloads/
 docs/bundle-facts.md
 
-# Lab 12 mesh-cert courier files. /vagrant IS this directory, so anything the
-# labs hand between the nodes through it lands right here. Root-anchored on
-# purpose — per-deployment key material must never be committed, and a reader
-# must never inherit someone else's CA or work-signing keys from the repo.
+# Anything the labs leave in the repo directory. Root-anchored on purpose —
+# per-deployment key material must never be committed, and a reader must never
+# inherit someone else's CA or work-signing keys from the repo.
 /*.crt
 /*.csr
 /*.key

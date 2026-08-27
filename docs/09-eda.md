@@ -64,11 +64,6 @@ envoy :443 ──/api/eda/…──► nginx :443 ──┬── unix:/run/eda/
                                            aap-eda-manage dispatcherd       (DefaultWorker — pg_notify tasking, like AWX)
 ```
 
-> **The good news up front:** after the hub's version-alignment saga ([Lab 8](08-hub.md)),
-> EDA is a relief. `eda-server`'s `main` pins **django-ansible-base from git devel** — the
-> *same* DAB the gateway (jewel-devel) uses — so JWT single sign-on lines up on the first try.
-> Track `main`, not a stable branch, for exactly this reason.
-
 All commands on **ace-eda** unless stated otherwise.
 
 ## Foundation
@@ -83,7 +78,7 @@ this node can reach it before building anything:
 
 ```bash
 sudo dnf -y install postgresql
-PGPASSWORD='CHANGE-ME-eda' psql -h ace-db -U eda -d eda -c 'SELECT 1'   # want: one row
+PGPASSWORD='CHANGE-ME-eda' psql -h ace-db -U eda -d eda -c 'SELECT 1'
 ```
 
 There is no `usermod -aG redis` here, because redis is on **ace-gateway** — this is the one
@@ -104,7 +99,7 @@ sudo dnf -y install \
   libffi-devel openssl-devel \
   libpq-devel postgresql-devel \
   openldap-devel cyrus-sasl-devel
-python3.12 --version        # record the exact version
+python3.12 --version
 ```
 
 ## Clone and build
@@ -115,7 +110,7 @@ and resolves everything (DAB devel, Django 5.2, channels/daphne, dispatcherd):
 ```bash
 sudo install -d -o eda -g eda /opt/eda-server
 sudo -u eda git clone https://github.com/ansible/eda-server.git /opt/eda-server
-sudo -u eda git -C /opt/eda-server rev-parse --short HEAD    # RECORD THIS — moving tip
+sudo -u eda git -C /opt/eda-server rev-parse --short HEAD
 
 sudo -u eda python3.12 -m venv /var/lib/ansible-automation-platform/eda/venv
 sudo -u eda bash <<'EOF'
@@ -124,9 +119,8 @@ source /var/lib/ansible-automation-platform/eda/venv/bin/activate
 pip install --upgrade pip setuptools wheel
 cd /opt/eda-server
 pip install . gunicorn
-# EDA shells out to these three at *import time* and at runtime — they must be in the venv:
 pip install ansible-runner ansible-core ansible-rulebook
-pip list | grep -iE 'aap-eda|django-ansible-base|django |channels|daphne'  # RECORD
+pip list | grep -iE 'aap-eda|django-ansible-base|django |channels|daphne'
 EOF
 ```
 
@@ -192,7 +186,7 @@ WEBSOCKET_SSL_VERIFY: "no"
 EOF
 sudo chown eda:eda /etc/ansible-automation-platform/eda/settings.yaml
 sudo chmod 0640 /etc/ansible-automation-platform/eda/settings.yaml
-sudo vim /etc/ansible-automation-platform/eda/settings.yaml    # set the real DB password
+sudo vim /etc/ansible-automation-platform/eda/settings.yaml
 ```
 
 ## Redis
@@ -203,8 +197,8 @@ controller needed it first — and [Lab 8](08-hub.md) is already using it. Confi
 trusting it:
 
 ```bash
-sudo dnf -y install redis          # for redis-cli
-redis-cli -h ace-gateway -p 6379 ping     # want: PONG
+sudo dnf -y install redis
+redis-cli -h ace-gateway -p 6379 ping
 ```
 
 > If that times out, the firewall rule on ace-gateway is missing; if it is refused, redis is bound
@@ -217,14 +211,19 @@ redis-cli -h ace-gateway -p 6379 ping     # want: PONG
 ## Migrate, init, admin, static
 
 ```bash
-sudo -u eda aap-eda-manage migrate                    # want: long OK run
-sudo -u eda aap-eda-manage create_initial_data        # seeds roles/permissions
+sudo -u eda aap-eda-manage migrate
+sudo -u eda aap-eda-manage create_initial_data
 sudo -u eda bash -c 'DJANGO_SUPERUSER_PASSWORD=CHANGE-ME aap-eda-manage createsuperuser --username admin --email admin@example.com --noinput'
 sudo -u eda bash -c 'umask 022 && aap-eda-manage collectstatic --noinput --clear'
 ```
 
 > `migrate` logs `RESOURCE_SERVER['SECRET_KEY'] is not configured. Reverse sync will not be
 > enabled.` — expected. We add the secret when we wire the gateway, at the end of this lab.
+>
+> Note it is logged at **ERROR** level and repeats several times per command — including on
+> `create_initial_data` and `createsuperuser` — so you will see a stack of red `ERROR` lines
+> around output that is otherwise fine. Nothing is wrong; DAB is reporting a capability it cannot
+> enable yet. It stops once the secret is in place.
 
 ## The service family (systemd)
 
@@ -311,14 +310,12 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-sudo semanage fcontext -a -t bin_t '/var/lib/ansible-automation-platform/eda/venv/bin(/.*)?'   # the 203/EXEC fix again
+sudo semanage fcontext -a -t bin_t '/var/lib/ansible-automation-platform/eda/venv/bin(/.*)?'
 sudo restorecon -Rv /var/lib/ansible-automation-platform/eda/venv/bin
 sudo systemctl daemon-reload
 sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-scheduler automation-eda-default-worker
 
-curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/ \
-  -H 'Host: 192.168.56.10'
-# want: {"status": ...} JSON — see the note below for what "degraded" means with this unit set.
+curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/
 ```
 
 > **`{"status": "degraded", "message": "Dispatcherd workers unavailable"}` is the correct, permanent
@@ -355,10 +352,10 @@ sudo /usr/local/sbin/ace-sign-request ace-eda-server cert
 **Back on `ace-eda`:**
 
 ```bash
-sudo install -o root -g eda -m 0640 /vagrant/ace-eda-server.cert \
+sudo install -o root -g eda -m 0644 /srv/ace/ace-eda-server.cert \
   /etc/ansible-automation-platform/eda/server.cert
-sudo rm -f /vagrant/ace-eda-server.cert
-sudo openssl verify /etc/ansible-automation-platform/eda/server.cert      # want: OK
+sudo rm -f /srv/ace/ace-eda-server.cert
+sudo openssl verify /etc/ansible-automation-platform/eda/server.cert
 
 sudo dnf -y module enable nginx:1.24
 sudo dnf -y install nginx
@@ -393,8 +390,13 @@ server {
 }
 EOF
 
+sudo dnf -y install firewalld
+sudo systemctl enable --now firewalld
 sudo firewall-cmd --permanent --add-port=443/tcp && sudo firewall-cmd --reload
 ```
+
+> Same as [Lab 8](08-hub.md): firewalld is not installed on this box, so the install line is not
+> optional — without it `firewall-cmd` is `command not found`.
 
 nginx reaches the API over a unix socket, and that crosses the same pair of SELinux checks
 [Lab 6](06-controller.md) hit — `write` on the socket inode and `connectto` against the domain
@@ -421,7 +423,7 @@ semodule_package -o /tmp/ace-nginx-upstream.pp -m /tmp/ace-nginx-upstream.mod
 sudo semodule -i /tmp/ace-nginx-upstream.pp
 
 sudo nginx -t && sudo systemctl enable --now nginx
-curl -sk https://127.0.0.1:443/api/eda/v1/status/ -o /dev/null -w "eda via nginx: %{http_code}\n"  # want: 200
+curl -sk https://127.0.0.1:443/api/eda/v1/status/ -o /dev/null -w "eda via nginx: %{http_code}\n"
 ```
 
 > Skip the module and you get a **502** with `connect() to unix:/run/eda/eda-api.sock failed
@@ -448,7 +450,7 @@ ensure("/services/", "eda api",
 ```
 
 ```bash
-sudo -u gateway aap-gateway-manage generate_service_secret eda   # RECORD it
+sudo -u gateway aap-gateway-manage generate_service_secret eda
 
 sudo tee -a /etc/ansible-automation-platform/eda/settings.yaml >/dev/null <<'EOF'
 RESOURCE_SERVER:
@@ -456,7 +458,7 @@ RESOURCE_SERVER:
   SECRET_KEY: PASTE-THE-EDA-SECRET
   VALIDATE_HTTPS: false
 EOF
-sudo vim /etc/ansible-automation-platform/eda/settings.yaml    # paste the real secret
+sudo vim /etc/ansible-automation-platform/eda/settings.yaml
 sudo systemctl restart automation-eda-api automation-eda-default-worker
 ```
 
@@ -468,19 +470,16 @@ sudo systemctl restart automation-eda-api automation-eda-default-worker
 > answers 200 locally. Watch it flip rather than guessing:
 > ```bash
 > curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep membership_healthy
-> # 0 while it settles, 1 once envoy will route to it
 > ```
 > `membership_total: 1` with `membership_healthy: 0` means registration worked and the health check
 > has not passed yet — a different problem from an empty cluster, which would mean the node tag on
 > the service and the node disagree.
 
 ```bash
-curl -sk https://192.168.56.11/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"  # 200
+curl -sk https://192.168.56.11/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"
 
 curl -sk -u "admin:CHANGE-ME" https://192.168.56.11/api/eda/v1/users/me/ \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["username"], d["is_superuser"], d["resource"]["resource_type"])'
-# want: admin True shared.user — the gateway minted a JWT, EDA's DAB JWT consumer validated
-#       it, and resolved the platform's shared user. SSO across controller + hub + EDA.
 ```
 
 That `shared.user` resource type is the whole platform speaking one identity: the same admin,

@@ -31,7 +31,7 @@ PostgreSQL 15 on **ace-db**, listening on the lab network, with four roles and f
 All commands on **ace-db** unless stated otherwise.
 
 ```bash
-vagrant ssh ace-db
+ssh ace-db
 ```
 
 ## Install
@@ -41,8 +41,8 @@ sudo dnf -y module enable postgresql:15
 sudo dnf -y install postgresql-server postgresql
 sudo postgresql-setup --initdb
 sudo systemctl enable --now postgresql
-systemctl is-active postgresql    # want: active
-psql --version                    # record it — want: 15.x
+systemctl is-active postgresql
+psql --version
 ```
 
 ## Listen on the network
@@ -59,10 +59,11 @@ listen_addresses = '192.168.56.10,localhost'
 max_connections = 200
 ```
 
-`listen_addresses` is deliberately **not** `'*'`. This VM has two interfaces — the lab network and
-the hypervisor's management network — and only one of them should carry database traffic. Naming
-the address is the difference between a database on your lab network and a database on whatever
-else the host happens to be attached to.
+`listen_addresses` is deliberately **not** `'*'`. Naming the address is the difference between a
+database on your lab network and a database on whatever else the host happens to be attached to.
+This lab gives each VM a single interface, so `'*'` would happen to be harmless here — but it is a
+habit worth keeping: add a second interface later (a management network, a storage network) and
+`'*'` silently starts serving the database on it.
 
 `max_connections` matters more here than it looks. The controller alone opens a connection per
 uwsgi worker, per dispatcher process and per callback receiver; add the gateway, hub and EDA doing
@@ -74,7 +75,7 @@ client rather than the limit.
 Confirm the server will hash passwords the modern way:
 
 ```bash
-sudo -iu postgres psql -c "SHOW password_encryption;"    # want: scram-sha-256
+sudo -iu postgres psql -c "SHOW password_encryption;"
 ```
 
 Then make the client rules match. Rocky's stock `initdb` ships the TCP rules as `ident`, which
@@ -119,7 +120,7 @@ sudo systemctl reload postgresql
 
 ```bash
 sudo systemctl restart postgresql
-ss -tlnp | grep 5432        # want: 192.168.56.10:5432, not just 127.0.0.1
+ss -tlnp | grep 5432
 ```
 
 ## The four databases
@@ -155,7 +156,6 @@ Confirm:
 
 ```bash
 sudo -iu postgres psql -c '\l' | grep -E 'awx|gateway|pulp|eda'
-# want: four databases, each owned by its own role
 ```
 
 ## Firewall
@@ -165,7 +165,7 @@ sudo dnf -y install firewalld
 sudo systemctl enable --now firewalld
 sudo firewall-cmd --permanent --add-service=postgresql
 sudo firewall-cmd --reload
-sudo firewall-cmd --list-services      # want: ... postgresql ...
+sudo firewall-cmd --list-services
 ```
 
 ## Verify — from a client, not from here
@@ -174,9 +174,8 @@ A database that answers on localhost proves nothing. The check that matters runs
 machine**. On **ace-controller**:
 
 ```bash
-sudo dnf -y install postgresql          # the client, not the server
+sudo dnf -y install postgresql
 PGPASSWORD='CHANGE-ME-awx' psql -h ace-db -U awx -d awx -c 'SELECT version();'
-# want: the PostgreSQL 15 version banner
 ```
 
 That one command exercises the whole chain: name resolution (`ace-db` from `/etc/hosts`),
