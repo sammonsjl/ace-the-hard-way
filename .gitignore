@@ -11,8 +11,14 @@ terraform/ssh_config
 
 # Local Claude settings and context — not part of the tutorial
 .claude/settings.local.json
+.claudian/
 .e2e/
 CLAUDE.md
+
+# Editor and filesystem metadata that appears when the repo is opened in
+# Obsidian or lives on a Synology share. Neither belongs to the tutorial.
+.obsidian/
+@eaDir/
 
 # Working notes from test runs — version pins and war stories for the author,
 # not part of the tutorial. Contains throwaway lab credentials.
