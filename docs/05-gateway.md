@@ -62,7 +62,7 @@ podman run --rm --entrypoint "" localhost/ace-gateway:dev \
 ## The certificate
 
 ```bash
-~/ace/tls/ace-cert gateway gateway cert
+~/ace/tls/ace-cert gateway gateway ace-gateway cert
 ```
 
 That writes `~/ace/gateway/tls/gateway.cert` and `.key`, with `ace-gateway` in the SAN. Remember it is mounted, never built in.

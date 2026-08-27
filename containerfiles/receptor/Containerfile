@@ -1,0 +1,30 @@
+# ACE receptor — the execution mesh node, built from upstream Go source.
+#
+# Built before the controller, not after: AWX's own image copies the receptor
+# binary in from a receptor image rather than compiling it, and this build does
+# the same.
+
+ARG RECEPTOR_REF=v1.5.5
+ARG GO_VERSION=1.23
+
+###############################################################################
+# Stage 1 — compile
+###############################################################################
+FROM docker.io/library/golang:${GO_VERSION} AS builder
+ARG RECEPTOR_REF
+WORKDIR /src
+RUN git clone https://github.com/ansible/receptor.git . && git checkout "${RECEPTOR_REF}"
+RUN CGO_ENABLED=0 go build -o /out/receptor ./cmd/receptor-cl
+
+###############################################################################
+# Stage 2 — runtime
+###############################################################################
+FROM quay.io/centos/centos:stream9
+RUN dnf install -y python3.12 python3.12-pip && dnf clean all && \
+    pip3.12 install --no-cache-dir receptorctl
+COPY --from=builder /out/receptor /usr/bin/receptor
+RUN mkdir -p /etc/receptor /var/lib/receptor /run/receptor && \
+    chgrp -R 0 /etc/receptor /var/lib/receptor /run/receptor && \
+    chmod -R g=u /etc/receptor /var/lib/receptor /run/receptor
+ENTRYPOINT ["/usr/bin/receptor"]
+CMD ["--config", "/etc/receptor/receptor.conf"]

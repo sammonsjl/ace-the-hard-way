@@ -118,20 +118,22 @@ vim ~/ace/tls/ace-cert
 
 ```bash
 #!/bin/bash
-# ace-cert <name> <component> [ext] [client]
-#   name       basename for the pair, e.g. "tower"
-#   component  directory under ~/ace to write into, e.g. "awx"
-#   ext        certificate extension, default "crt" (some services want "cert")
-#   client     pass "client" if this service also acts as a TLS *client*
+# ace-cert <name> <dir> <hostname> [ext] [client]
+#   name      basename for the pair, e.g. "tower"
+#   dir       directory under ~/ace to write into, e.g. "awx"
+#   hostname  the name the service is REACHED at, e.g. "ace-controller"
+#   ext       certificate extension, default "crt" (some services want "cert")
+#   client    pass "client" if this service also acts as a TLS *client*
 #
-# Issues a key and a certificate for one service. The key is generated where it
-# will be used and is never copied anywhere else.
+# The directory and the hostname are separate arguments on purpose. They are
+# the same for the gateway and differ for the controller, whose config lives in
+# ~/ace/awx but which is reached at ace-controller. Deriving one from the other
+# silently issues a certificate for a name nothing connects to.
 set -euo pipefail
 
-NAME=$1; COMPONENT=$2; EXT=${3:-crt}; CLIENT=${4:-}
+NAME=$1; DIR_NAME=$2; HOST=$3; EXT=${4:-crt}; CLIENT=${5:-}
 CA=~/ace/tls
-DIR=~/ace/$COMPONENT/tls
-HOST=ace-$COMPONENT
+DIR=~/ace/$DIR_NAME/tls
 
 EKU=""
 [ "$CLIENT" = client ] && EKU=$'\nextendedKeyUsage=clientAuth'
@@ -197,7 +199,7 @@ Here there is one machine and one filesystem. A CSR that never leaves the direct
 Issue a throwaway certificate and validate it against the extracted bundle — not against your host's trust store, but against the exact file the containers will use:
 
 ```bash
-~/ace/tls/ace-cert smoketest smoketest
+~/ace/tls/ace-cert smoketest smoketest ace-smoketest
 
 openssl verify -CAfile ~/ace/tls/extracted/pem/tls-ca-bundle.pem \
   ~/ace/smoketest/tls/smoketest.crt
@@ -213,12 +215,14 @@ That single `verify` proves three things at once: the CA signed it, the bundle y
 
 ## What later labs will do with this
 
-| Lab | Component | Certificate | Role |
-|---|---|---|---|
-| [5 — the gateway](05-gateway.md) | gateway | `gateway.cert` | server only |
-| [6 — the controller](06-controller.md) | awx | `tower.cert` | server only |
-| [8 — hub](08-hub.md) | hub | `pulp_webserver.crt` | server only |
-| [9 — EDA](09-eda.md) | eda | `server.cert` | server only |
+| Lab | Directory | Hostname | Certificate | Role |
+|---|---|---|---|---|
+| [5 — the gateway](05-gateway.md) | `gateway` | `ace-gateway` | `gateway.cert` | server only |
+| [6 — the controller](06-controller.md) | `awx` | `ace-controller` | `tower.cert` | server only |
+| [8 — hub](08-hub.md) | `hub` | `ace-hub` | `pulp_webserver.crt` | server only |
+| [9 — EDA](09-eda.md) | `eda` | `ace-eda` | `server.cert` | server only |
+
+**The directory column is not the hostname column**, and the controller is where that bites: its configuration lives in `~/ace/awx/` — the layout the vendor's installer uses — while the service is reached at `ace-controller`. A script that derives one from the other issues a perfectly valid certificate for `ace-awx`, which nothing ever connects to, and the failure arrives one lab later as a hostname mismatch.
 
 Every certificate here is a **server** certificate, so none of them passes `client` and none carries `extendedKeyUsage=clientAuth`. The fourth argument exists anyway, because it is the one distinction worth being able to make — and getting it wrong is instructive.
 
