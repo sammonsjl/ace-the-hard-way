@@ -12,9 +12,8 @@ users:
     ssh_authorized_keys:
       - ${ssh_pubkey}
 
-# The same minimal prep the Vagrantfile used to do, and nothing more. Everything
-# else is done BY HAND in the labs — this is a hard-way tutorial, so provisioning
-# stays out of the way.
+# Minimal prep, and nothing more. Everything else is done BY HAND in the labs —
+# this is a hard-way tutorial, so provisioning stays out of the way.
 packages:
   - vim
   - curl

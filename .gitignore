@@ -6,7 +6,6 @@ terraform/*.tfstate.*
 terraform/ssh_config
 *.log
 
-# Vagrant machine state, from the pre-Terraform version of this lab
 .vagrant/
 *.vmdk
 

@@ -27,9 +27,8 @@ locals {
   ])
 }
 
-# One network for all five. Vagrant needed two — its own management network for
-# SSH plus a private network for 192.168.56.0/24 — which made firewall debugging
-# confusing. Here SSH and lab traffic share a single subnet.
+# One network for all five: SSH and lab traffic share a single subnet, so there
+# is only one place to look when a firewall rule is wrong.
 resource "libvirt_network" "lab" {
   name      = var.network_name
   autostart = true
@@ -182,7 +181,7 @@ resource "libvirt_domain" "node" {
 }
 
 # Written so `ssh ace-db` works from the repo directory once the Include line
-# from Lab 2 is in ~/.ssh/config. This replaces `vagrant ssh <name>`.
+# from Lab 2 is in ~/.ssh/config.
 resource "local_file" "ssh_config" {
   filename        = "${path.module}/ssh_config"
   file_permission = "0644"

@@ -31,12 +31,8 @@ variable "gateway_ip" {
 variable "base_image_url" {
   description = <<-EOT
     Rocky 9 GenericCloud qcow2. Downloaded once and used as the backing store
-    for all five overlays.
-
-    This replaces the old `bento/rockylinux-9` Vagrant box on purpose: boxes come
-    from the Vagrant public registry, which HashiCorp is retiring (no new boxes
-    after 2026-12-14, end of support 2027-03-15, decommissioned 2027-06-07). A
-    tutorial meant to still work in 2027 should not depend on it.
+    for all five overlays. Served straight from dl.rockylinux.org, so there is
+    no third-party image registry on the critical path.
   EOT
   type        = string
   default     = "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
