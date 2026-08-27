@@ -127,8 +127,10 @@ loginctl show-user "$USER" -p Linger
 If you kept Docker, confirm it is unharmed:
 
 ```bash
-docker version
+docker version    # or `sudo docker version`, if that is how you normally run it
 ```
+
+**Want:** a server version. If you get `permission denied ... /var/run/docker.sock` and you are not in the `docker` group, that is how it behaved before you installed podman too — check with `id -nG` before blaming the install.
 
 ## Why no VM?
 

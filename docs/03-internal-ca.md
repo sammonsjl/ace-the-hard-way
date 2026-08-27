@@ -98,7 +98,7 @@ openssl crl2pkcs7 -nocrl -certfile ~/ace/tls/extracted/pem/tls-ca-bundle.pem \
   | openssl pkcs7 -print_certs -noout | grep "ACE Managed CA"
 ```
 
-**Want:** a `pem/` directory with `tls-ca-bundle.pem` in it, a few hundred certificates (your root plus every public CA the base image ships), and one line naming `ACE Managed CA`.
+**Want:** a `pem/` directory holding `tls-ca-bundle.pem` (plus `email-`, `objsign-` and a `directory-hash/`), around 150 certificates — your root plus every public CA the base image ships — and one line naming `ACE Managed CA`.
 
 From here on, **every service container mounts that directory**:
 

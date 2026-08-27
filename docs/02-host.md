@@ -132,10 +132,20 @@ Now take it away:
 systemctl --user stop ace-hello
 rm ~/.config/containers/systemd/ace-hello.container
 systemctl --user daemon-reload
+systemctl --user reset-failed ace-hello
 podman ps -a
+systemctl --user list-units 'ace-*' --all --no-legend
 ```
 
-**Want:** no `ace-hello` anywhere. That is the removal loop from Lab 99, run once on something disposable.
+**Want:** no output from either listing.
+
+> **`reset-failed` is not optional, and it is the step everyone leaves out.** Stopping this unit kills `sleep infinity`, which exits non-zero, so systemd records the unit as failed. Deleting the quadlet and reloading then leaves you with a unit that is *both* `not-found` and `failed` — it shows up in `list-units` as
+> ```
+> ● ace-hello.service   not-found  failed  failed  ace-hello.service
+> ```
+> forever, because systemd keeps failure state for units it can no longer find. `reset-failed` is what clears it. Without this, [Lab 99](99-cleanup.md)'s final check never comes back clean and you go looking for a container that stopped existing an hour ago.
+
+That is the removal loop from Lab 99, run once on something disposable.
 
 ## A note on `:Z`
 
@@ -166,11 +176,19 @@ Two habits make this painless, and both start now:
 
 ```bash
 ls -d ~/ace ~/.config/containers/systemd
-getent hosts ace-gateway ace-controller ace-hub ace-eda ace-db
+for n in ace-gateway ace-controller ace-hub ace-eda ace-db; do
+  printf '%-16s %s\n' "$n" "$(getent ahostsv4 "$n" | awk 'NR==1{print $1}')"
+done
 loginctl show-user "$USER" -p Linger
 podman ps -a
 ```
 
-**Want:** both directories present, all five names resolving to `127.0.0.1`, `Linger=yes`, and no containers at all — you removed the only one you had.
+**Want:** both directories present, all five names printing `127.0.0.1`, `Linger=yes`, and no containers at all — you removed the only one you had.
+
+> **Do not use a bare `getent hosts ace-gateway` for this.** It resolves correctly, but it prints
+> ```
+> 127.0.0.1       localhost
+> ```
+> because it reports the *canonical* name registered for that address, and `localhost` got there first in `/etc/hosts`. The name is fine; the display is misleading, and it will convince you that you typed something wrong. The loop above prints the name you asked about alongside the address it resolved to. To prove a name is genuinely absent, look for the failure instead: `getent hosts ace-nonexistent` exits non-zero and prints nothing.
 
 Next: [The internal CA](03-internal-ca.md)

@@ -27,9 +27,12 @@ rm -f ~/.config/containers/systemd/ace-*.container
 rm -f ~/.config/containers/systemd/ace-*.network
 rm -f ~/.config/containers/systemd/ace-*.volume
 systemctl --user daemon-reload
+systemctl --user reset-failed 'ace-*'
 ```
 
-**Want:** `systemctl --user list-units 'ace-*' --all` now prints nothing.
+**Want:** `systemctl --user list-units 'ace-*' --all --no-legend` now prints nothing.
+
+> **`reset-failed` is what makes that true.** A unit stopped mid-run is recorded as failed, and systemd keeps that failure state even after the quadlet defining it is gone — so the units come back in `list-units` as `not-found failed failed` indefinitely. [Lab 2](02-host.md) demonstrates this on a throwaway unit. Skip it and step 5 below never comes back clean.
 
 ## 2. Remove the containers, volumes and images
 
