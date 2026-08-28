@@ -232,36 +232,21 @@ The config is almost empty on purpose: `dynamic_resources` pointing CDS and LDS 
 - **`gateway-control-plane-rest`** → `ace-gateway:8446` over TLS. Where the routes come from.
 - **`gateway_control_plane`** → `127.0.0.1:50051` over HTTP/2. Who authorises each request.
 
-### The Lua file nobody ships
+### The Lua file the gateway image does not ship
 
-The gateway's LDS response includes a Lua filter that loads a script by *filename* on envoy's side. It does not send the script, the setup bundle does not contain it, and it is not in the image you just built — it lives inside Red Hat's private gateway image.
+The gateway's LDS response includes a Lua filter that loads a script by *filename* on envoy's side. It does not send the script, and the script is not in the gateway image — the vendor ships it in the **proxy** image, at `/etc/ansible-automation-platform/gateway/envoy-path-rewrite.lua`. Since we assemble our own envoy image, we write it.
 
-So write it. The route metadata tells you exactly what it has to do: routes whose `service_path` differs from their `gateway_path` carry `prefix` and `prefix_rewrite`, and the script rewrites one to the other.
+The route metadata says what it has to do. Each route carries `prefix` (the path clients use) and `prefix_rewrite` (the path the service uses), and the script translates between them **in both directions**.
+
+The direction that is easy to miss is the response. Envoy's own route configuration already rewrites the request path, so the script must not touch it — what the script handles is every *other* place a path appears: query-parameter values, request bodies, `Location` headers, and response bodies. Without the response half, a service that returns a redirect or embeds an absolute URL sends the client to a path envoy does not serve.
+
+Three cases have to be skipped or they break: websocket upgrade requests, completed upgrades (`:status` 101), and `text/event-stream` responses — reading a streaming body to rewrite it is the same as buffering it.
 
 ```bash
 vim ~/ace/envoy/envoy-path-rewrite.lua
 ```
 
-```lua
-function envoy_on_request(request_handle)
-  local meta = request_handle:metadata()
-  local prefix = meta:get("prefix")
-  local prefix_rewrite = meta:get("prefix_rewrite")
-
-  if prefix == nil or prefix_rewrite == nil then
-    return
-  end
-
-  local headers = request_handle:headers()
-  local path = headers:get(":path")
-
-  if path ~= nil and string.sub(path, 1, string.len(prefix)) == prefix then
-    headers:replace(":path", prefix_rewrite .. string.sub(path, string.len(prefix) + 1))
-  end
-end
-```
-
-Thirteen lines, and without them envoy rejects every listener the gateway sends with `Invalid path: /etc/envoy/envoy-path-rewrite.lua`. The gateway service itself does not need a rewrite — its `service_path` and `gateway_path` are both `/` — but the filter is attached at the listener, so the file has to exist before *any* route loads. [Lab 6](06-controller.md) is where it starts doing real work, mapping `/api/controller/` to `/api/`.
+The full script is in the repo. Without it, envoy rejects every listener the gateway sends with `Invalid path: /etc/envoy/envoy-path-rewrite.lua`. The gateway service itself does not need a rewrite — its `service_path` and `gateway_path` are both `/` — but the filter is attached at the listener, so the file has to exist before *any* route loads. [Lab 6](06-controller.md) is where it starts doing real work, mapping `/api/controller/` to `/api/`.
 
 ### The quadlet
 

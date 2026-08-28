@@ -4,8 +4,8 @@
 # binary in from a receptor image rather than compiling it, and this build does
 # the same.
 
-ARG RECEPTOR_REF=v1.5.5
-ARG GO_VERSION=1.23
+ARG RECEPTOR_REF=devel
+ARG GO_VERSION=1.25
 
 ###############################################################################
 # Stage 1 — compile
@@ -14,7 +14,9 @@ FROM docker.io/library/golang:${GO_VERSION} AS builder
 ARG RECEPTOR_REF
 WORKDIR /src
 RUN git clone https://github.com/ansible/receptor.git . && git checkout "${RECEPTOR_REF}"
-RUN CGO_ENABLED=0 go build -o /out/receptor ./cmd/receptor-cl
+# Matches the flags receptor's own Makefile uses. -buildvcs=false is required:
+# the build runs on a shallow clone with no usable VCS metadata.
+RUN CGO_ENABLED=0 GOFLAGS="-buildvcs=false" go build -o /out/receptor ./cmd/receptor-cl
 
 ###############################################################################
 # Stage 2 — runtime
@@ -46,6 +48,14 @@ RUN mkdir -p /etc/receptor /var/lib/receptor /run/receptor \
     chmod -R g=u /etc/receptor /var/lib/receptor /run/receptor && \
     chown -R 1000:0 /home/runner && chmod -R g=u /home/runner
 
+RUN useradd -u 1000 -g 0 -d /home/runner -M -s /bin/bash runner 2>/dev/null || true
+
 ENV HOME=/home/runner
-ENTRYPOINT ["/usr/bin/receptor"]
-CMD ["--config", "/etc/receptor/receptor.conf"]
+USER 1000
+WORKDIR /
+
+# dumb-init as PID 1, like every vendor image. receptor spawns ansible-runner
+# which spawns podman which spawns a job; without an init that reaps, the
+# container accumulates zombies over a long-running mesh node.
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["/usr/bin/receptor", "-c", "/etc/receptor/receptor.conf"]

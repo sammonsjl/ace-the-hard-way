@@ -11,7 +11,7 @@
 # genuinely its build system (make ui, make requirements_awx, make sdist) and
 # hand-written configs for everything else.
 
-ARG AWX_REF=7928f7010da1b51b83f0a6bb98d0ff358282b51d
+ARG AWX_REF=devel
 ARG AWX_VERSION=25.0.0
 ARG PYTHON=python3.12
 
@@ -85,13 +85,15 @@ ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 ENV AWX_LOGGING_MODE=stdout
+ENV container=oci
 
 ADD https://copr.fedorainfracloud.org/coprs/ansible/Rsyslog/repo/epel-9/ansible-Rsyslog-epel-9.repo \
     /etc/yum.repos.d/ansible-Rsyslog-epel-9.repo
 
 RUN dnf -y install 'dnf-command(config-manager)' && dnf config-manager --set-enabled crb && \
+    dnf -y module install nginx:1.24/common && \
     dnf -y install \
-      acl git-core git-lfs glibc-langpack-en krb5-workstation nginx postgresql \
+      acl git-core git-lfs glibc-langpack-en krb5-workstation postgresql \
       "${PYTHON}" "${PYTHON}-devel" "${PYTHON}-pip" "${PYTHON}-setuptools" \
       "${PYTHON}-packaging" "${PYTHON}-psycopg2" \
       rsync rsyslog subversion sudo vim-minimal which unzip xmlsec1-openssl && \
@@ -100,9 +102,10 @@ RUN dnf -y install 'dnf-command(config-manager)' && dnf config-manager --set-ena
 RUN pip3.12 install virtualenv supervisor dumb-init build && \
     rm -rf /root/.cache /tmp/*
 
-# receptor comes from the image built in containerfiles/receptor, exactly as
-# AWX's own build copies it from a receptor image rather than compiling it.
-COPY --from=localhost/ace-receptor:dev /usr/bin/receptor /usr/bin/receptor
+# NOTE: no receptor binary here. AWX's upstream Dockerfile copies one in for its
+# development image, but the vendor's controller image does not contain it — only
+# receptorctl and ansible-runner, both of which arrive with the venv. receptor
+# runs in its own container (Lab 7); the controller only talks to its socket.
 
 COPY --from=builder /var/lib/awx /var/lib/awx
 RUN ln -s /var/lib/awx/venv/awx/bin/awx-manage /usr/bin/awx-manage
@@ -144,10 +147,18 @@ RUN for dir in \
 RUN ln -sf /dev/stdout /var/log/nginx/access.log && \
     ln -sf /dev/stderr /var/log/nginx/error.log
 
-ENV HOME="/var/lib/awx"
-ENV PATH="/var/lib/awx/venv/awx/bin:${PATH}"
+# A NAMED service user, not a bare uid. launch_awx_web.sh appends an `awx` line
+# to /etc/passwd when it runs as uid >= 500 precisely because the name has to
+# resolve; creating it here is what the vendor's image does.
+RUN useradd -u 1000 -g 0 -d /var/lib/awx -M -s /bin/bash awx 2>/dev/null || true
 
-USER 1000
+ENV HOME="/var/lib/awx"
+# XDG_CONFIG_HOME points at /tmp because $HOME is not writable at runtime for
+# everything that wants to scribble a config there.
+ENV XDG_CONFIG_HOME=/tmp/.config
+
+USER awx
+WORKDIR /var/lib/awx
 EXPOSE 8052
 ENTRYPOINT ["dumb-init", "--"]
 VOLUME /var/lib/nginx

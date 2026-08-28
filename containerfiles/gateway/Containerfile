@@ -7,8 +7,8 @@
 # Both are pinned to a commit. A moving branch is not reproducible, and this
 # tutorial is meant to still build in a year.
 
-ARG JEWEL_REF=cd1fd8e657f873f2b7c328cf3acc8696f23fb2ed
-ARG ANSIBLE_UI_REF=75d1264624fcf08777f72fcaaeaeb93d9d4a90d1
+ARG JEWEL_REF=devel
+ARG ANSIBLE_UI_REF=devel
 ARG PYTHON=python3.12
 
 ###############################################################################
@@ -70,6 +70,13 @@ RUN dnf module install -y nginx:1.24/common && \
       "${PYTHON}" "${PYTHON}-pip" supervisor xmlsec1-openssl && \
     dnf clean all
 
+# The vendor sets a UTF-8 locale in every image. Django and click both behave
+# differently without one, and "it worked in my container" bugs trace back here.
+ENV LANG=en_US.UTF-8 \
+    LANGUAGE=en_US:en \
+    LC_ALL=en_US.UTF-8 \
+    container=oci
+
 RUN useradd -u 1000 -g 0 -d /var/lib/ansible-automation-platform -m -s /sbin/nologin gateway
 
 COPY --from=builder   /opt/aap_gateway /opt/aap_gateway
@@ -104,7 +111,9 @@ RUN GATEWAY_SECRET_KEY_FILE=/dev/null aap-gateway-manage collectstatic --noinput
     chgrp -R root /opt/aap_gateway/static && chmod -R g=u /opt/aap_gateway/static
 
 USER gateway
-EXPOSE 8000
 WORKDIR /opt
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+# No CMD. The vendor's image has none either: the command belongs to the unit
+# that runs the container, not to the image, so one image can serve as the
+# gateway, a migration runner, or a one-shot manage command.
 CMD ["/usr/bin/launch-gateway"]

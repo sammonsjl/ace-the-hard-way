@@ -5,6 +5,10 @@
 # generate a Containerfile like this one from an execution-environment.yml; we
 # write it out, because a generated file you never read teaches nothing.
 #
+# The ansible-core version pairs with the controller. The vendor tags its image
+# `ee-minimal-rhel9:2.16` — the tag IS the core version — because it ships
+# automation-controller 4.8.6. We track AWX devel, so we track a newer core.
+#
 # What makes it an EE rather than any image with ansible in it:
 #   - ansible-runner is present and on PATH — receptor invokes it
 #   - /runner exists and is writable, because that is where ansible-runner

@@ -14,48 +14,38 @@ The base is `docker.io/pulp/base`, which is pulp's own multi-arch image, and gal
 
 **Why built rather than pulled:** `quay.io/ansible/galaxy-ng` is amd64-only and `pulp/pulp-galaxy-ng` is abandoned.
 
-### The dependency problem, and the four things that do not fix it
+### Check which branch you are on before you debug anything
 
-Ask pip to install galaxy_ng and let it resolve, and it does not fail — it *backtracks*, downloading metadata for the same handful of packages over and over, for as long as you let it. galaxy_ng's `setup.py` declares loose ranges and the search space is enormous.
+galaxy_ng has **two** long-lived branches, and only one of them is current:
 
-galaxy_ng ships a pip-compile lockfile at `requirements/requirements.common.txt`, so the obvious move is to use it. Four attempts, in order, and what each taught:
+| Branch | Declares | Pins |
+|---|---|---|
+| `master` | 4.11.0dev | pulpcore 3.49.40, Django 4.2 |
+| **`main`** (default) | **4.12.0dev** | **pulpcore 3.105.12, Django 5.2** |
 
-| Attempt | Result |
-|---|---|
-| Lockfile as `--constraint` | `ERROR: Constraints cannot have extras` — a pip-compile lockfile is full of `package[extra]==version`, and constraints may not carry extras |
-| Strip the extras | `ResolutionImpossible` — the lockfile pins django-ansible-base to a **git ref**, which is not a valid constraint and contradicts our DAB override |
-| Drop git refs too | `pulpcore 3.49.40 depends on aiohttp<3.10.12; the user requested aiohttp==3.12.14` |
-| Drop `aiohttp` as well | the same failure again, for `protobuf` — and it would keep going |
+`master` is stale. Its lockfile no longer resolves against current PyPI — it pins `pulpcore==3.49.40` next to `aiohttp` and `protobuf` versions that pulpcore's published metadata forbids — and pip's error tells you about aiohttp, then protobuf, then the next one, forever. Nothing about the message suggests the branch is the problem.
 
-That last pair is the actual finding: **the lockfile is stale against PyPI.** It pins `pulpcore==3.49.40` alongside aiohttp and protobuf versions that pulpcore's *published metadata* forbids. Whatever generated it did not enforce those ranges. No amount of excluding one package at a time converges, because every resolution reads that metadata.
+Build from `main`. The vendor ships galaxy-ng 4.12.2 on pulpcore 3.105.12; `main` gives 4.12.0dev on pulpcore 3.105.12, which is the same platform.
 
-### What does work
+> This is worth internalising beyond hub: **a default branch is not always the one you first find.** Check `git ls-remote --symref <repo> HEAD` before pinning anything.
 
-Install the pinned set as a **requirements file with `--no-deps`**:
+### The lockfile, used properly
 
-```dockerfile
-RUN sed -E 's/\[[^]]*\]//' /tmp/galaxy-lock.txt | grep -v '@ git+' > /tmp/galaxy-pins.txt && \
-    pip3 install --no-cache-dir --no-deps -r /tmp/galaxy-pins.txt
-```
-
-pip-compile already produced a complete closure — every transitive dependency is in the file with an exact version. There is nothing to resolve, so `--no-deps` skips the resolver *and* the metadata checks that were failing. galaxy_ng then goes on top, also `--no-deps`, because everything it wants is already installed.
-
-> **`--no-deps` is not a way to silence a real conflict.** It is correct here for one specific reason: the input is a complete, pre-resolved closure. Using it on an ordinary `pip install` would hide genuine breakage.
-
-### One more, after that
-
-```
-ImportError: cannot import name 'get_storage_class' from 'django.core.files.storage'
-```
-
-The DAB-devel install — the one that has to override the lockfile so hub's JWT dialect matches the gateway's — pulled Django 5.2 in as a dependency, clobbering the pinned 4.2. pulpcore 3.49.40 uses an API Django removed. So that install needs `--no-deps` too:
+Even on `main`, asking pip to resolve galaxy_ng's `setup.py` unaided sends it backtracking — the declared ranges are loose and the search space is large. galaxy_ng ships its own pip-compile lockfile, so use it as constraints:
 
 ```dockerfile
-RUN pip3 install --no-cache-dir --no-deps --upgrade \
-      "django-ansible-base[feature-flags,jwt-consumer] @ git+https://github.com/ansible/django-ansible-base@devel"
+ADD https://raw.githubusercontent.com/ansible/galaxy_ng/${GALAXY_NG_REF}/requirements/requirements.common.txt /tmp/galaxy-lock.txt
+RUN sed -E 's/\[[^]]*\]//' /tmp/galaxy-lock.txt | grep -v '@ git+' > /tmp/galaxy-constraints.txt
+RUN pip3 install --no-cache-dir -c /tmp/galaxy-constraints.txt \
+      "galaxy-ng @ https://github.com/ansible/galaxy_ng/archive/${GALAXY_NG_REF}.tar.gz"
 ```
 
-**Why DAB is overridden at all:** the gateway builds against DAB devel, whose JWTs no longer carry a claim that galaxy_ng's own pin still expects. Leave it and hub rejects every token the gateway signs.
+Two things have to come out of the lockfile first:
+
+- **Extras.** pip refuses a constraints file whose entries carry them — `Constraints cannot have extras` — and a pip-compile lockfile is full of `package[extra]==version`. The version pin is the point; the extras are not.
+- **Direct git references.** A constraint must be a name and a version specifier, and the lockfile pins django-ansible-base to a git ref. That is also the one dependency deliberately overridden below, so dropping it here is exactly right.
+
+**Why DAB is overridden:** the gateway builds against DAB devel, whose JWTs no longer carry a claim that the pinned version still expects. Leave it and hub rejects every token the gateway signs.
 
 ## Key material and configuration
 
