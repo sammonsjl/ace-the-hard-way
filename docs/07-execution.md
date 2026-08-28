@@ -1,10 +1,8 @@
 # Lab 7 — Execution: receptor and podman
 
-> **Partially complete.** Everything through the mesh works and is verified. The last step — a job actually executing in an EE container — is blocked on nested rootless podman, characterised precisely at the end of this lab. Read that section before starting.
-
 ## What you will have at the end
 
-receptor built from source and running as its own container, a mesh the controller can drive, work signing you set up yourself, and an execution environment you built.
+receptor built from source and running as its own container, work signing you set up yourself, an execution environment you built — and a playbook that actually runs, in a container, started by a container.
 
 ## Where it fits
 
@@ -134,42 +132,122 @@ podman exec ace-awx-task awx-manage resource_sync
 
 **Want:** the gateway's `Default` organization appearing in the controller. That is the resource registry working — one identity, one org list, two databases.
 
-## Where this stops: nested rootless podman
+## Nested rootless podman
 
-receptor starts the job by calling `podman run` **inside its own container**, which is rootless podman inside rootless podman. Two walls, in order:
+receptor starts each job by calling `podman run` **inside its own container** — rootless podman inside rootless podman. This is the hardest part of the tutorial and it fails in five distinct ways, each with an error that names something other than the cause. They are worth working through in order, because every one of them teaches something about user namespaces.
 
-**The image store cannot simply be shared.** podman records the absolute path of its storage in its own database, so mounting the host's store at a different path inside the container fails with `database configuration mismatch`, and mounting it at the *same* path requires `HOME` to match and the mount parents to be owned by the running user — podman refuses a config directory it does not own. Even when all of that lines up, two podmen writing one store is a lock race waiting to happen.
+### 1. The image store cannot be shared with the host
 
-Giving the inner podman its **own** store and delivering the EE image into it (`podman save` on the host, `podman load` inside) is the cleaner design, and it is what this lab does. That is where the real wall is:
+podman records the *absolute path* of its storage in its own database, so mounting the host's store at a different path inside the container fails with `database configuration mismatch`. Mounting it at the same path then requires `HOME` to match and every mount parent to be owned by the running user, because podman refuses a config directory it does not own. And even with all of that aligned, two podmen writing one store is a lock race.
+
+Give the inner podman its **own** store and deliver the EE into it:
+
+```bash
+podman save -o ~/ace/receptor/images/ace-ee-minimal.tar localhost/ace-ee-minimal:dev
+podman exec ace-receptor podman load -i /images/ace-ee-minimal.tar
+```
+
+### 2. One UID is not enough to unpack an image
 
 ```
 potentially insufficient UIDs or GIDs available in user namespace
-(requested 0:12 for /var/spool/mail): Check /etc/subuid and /etc/subgid
+(requested 0:12 for /var/spool/mail)
 ```
 
-Unpacking an image whose layers contain files owned by several different UIDs needs the unpacking podman to *have* several UIDs. `UserNS=keep-id` maps exactly one — yours — so the inner podman has a single UID and cannot represent the layer.
+Layers contain files owned by several users; unpacking them needs several UIDs. `UserNS=keep-id` maps exactly one — and it has to, because the control socket receptor creates must be openable by the controller's task container running as you. Giving receptor a UID range with `UserNS=auto` would fix the unpack and break the socket.
 
-The fix is to give the receptor container a **range** of UIDs (`UserNS=auto`), and that collides with the rest of the design: the control socket at `~/ace/receptor/run/receptor.sock` has to be openable by the controller's task container, which runs `keep-id` as you. Under `auto`, receptor creates that socket as a subordinate UID that the controller cannot open.
+The way out is not more UIDs but fewer expectations. `~/ace/receptor/containers-conf/storage.conf`:
 
-So the two halves want opposite user-namespace mappings, and reconciling them is the open problem in this lab. Options not yet tried here, in rough order of promise:
+```ini
+[storage.options.overlay]
+ignore_chown_errors = "true"
+```
 
-- `UserNS=auto` on receptor plus an explicit `--uidmap` entry that keeps your own UID mapped, so the socket stays yours while a range exists for image unpacking
-- a shared group on the socket directory, with receptor under `auto` and the socket mode widened to `0660` with a gid both containers map
-- running receptor as a **host** process rather than a container — the vendor's own bare-metal topology does exactly this, and it is worth asking whether the execution plane is the one component that should not be containerized on a single-host build
+The inner podman then unpacks the layer anyway and lets every file belong to the one UID it has. **State the cost plainly:** ownership inside execution environments is flattened. For running playbooks that is irrelevant; for an image that depends on multi-user ownership at runtime it would not be.
 
-None of these is a guess to write into the lab before it is tried. This section will say what worked once one of them does.
+### 3. Devices
 
-## What is verified
+```
+fuse: device not found, try 'modprobe fuse' first
+Failed to open() /dev/net/tun
+```
 
-- receptor built from source, running, control socket shared with the controller
-- node id matching `CLUSTER_HOST_ID`, work signing active (`Secure Work Types: local`)
-- the EE image built from source
-- instance groups registered, instance at capacity 136
-- `migrate_service_data` complete, resource sync working, the gateway's org visible in the controller
-- a job reaching `running` and receptor invoking `ansible-runner` — the control plane and mesh are correct
+The inner podman performs a real fuse-overlayfs mount and builds a real network namespace, so it needs the devices to do both:
 
-## What is not
+```ini
+AddDevice=/dev/fuse
+AddDevice=/dev/net/tun
+```
 
-- a job completing. It fails inside the EE step, at image unpack, for the user-namespace reason above.
+### 4. Capabilities and masked paths
+
+```
+crun: mount `proc` to `proc`: Operation not permitted
+```
+
+A nested container mounts its own `/proc`. That needs `SYS_ADMIN`, an unconfined seccomp profile — and `Unmask=ALL`, because podman masks paths under `/proc` in every container it starts and the inner runtime has to mount over them.
+
+```ini
+AddCapability=SYS_ADMIN
+AddCapability=SYS_CHROOT
+AddCapability=MKNOD
+AddCapability=SETFCAP
+SeccompProfile=unconfined
+SecurityLabelDisable=true
+Unmask=ALL
+```
+
+This is the point in the tutorial where the security posture is loosest, and it should be uncomfortable. A container that can mount filesystems and has an unconfined seccomp profile is close to not being a boundary. On the vendor's own topology the execution plane is a **separate machine** for exactly this reason — the isolation is the VM, not the container.
+
+### 5. Two settings on the controller side
+
+The EE cannot build a network namespace either — the nested podman cannot write `/proc/sys/net/ipv4/ping_group_range`. Every service here is already on the host network, so give the EE the host network too:
+
+```python
+DEFAULT_CONTAINER_RUN_OPTIONS = ["--network", "host"]
+```
+
+And AWX's production defaults mount the CA paths into every EE as *ephemeral overlays*:
+
+```python
+AWX_ISOLATION_SHOW_PATHS = [
+    '/etc/pki/ca-trust:/etc/pki/ca-trust:O',
+    '/usr/share/pki:/usr/share/pki:O',
+]
+```
+
+An overlay mount has to chown its upper directory, and we are back to one UID:
+
+```
+mounting overlay failed "/usr/share/pki": chown .../upper: invalid argument
+```
+
+A read-only bind gives the EE the same trust store with no upper directory to own — and `/etc/pki/ca-trust` inside the receptor container is already the extracted bundle from [Lab 3](03-internal-ca.md), so the EE inherits the platform CA:
+
+```python
+AWX_ISOLATION_SHOW_PATHS = ['/etc/pki/ca-trust:/etc/pki/ca-trust:ro']
+```
+
+> The `cannot find UID/GID for user jamie: no subuid ranges found` line at the top of every job's output is expected and harmless. The inner podman is reporting that it has a single mapping — which is exactly the arrangement `ignore_chown_errors` exists to accommodate.
+
+## Run a job
+
+Create an inventory with `localhost` and `ansible_connection: local`, a project, and a job template using the EE. Then launch it and watch the output.
+
+**Want:**
+
+```
+PLAY [ACE smoke test] **********************************************************
+
+TASK [Say hello from inside an execution environment] **************************
+ok: [localhost] => {
+    "msg": "Hello from localhost - this ran in a container started by receptor"
+}
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=1    changed=0    unreachable=0    failed=0
+```
+
+Follow what that took. The request arrived at envoy on 9443 and was authorised over gRPC by the gateway. The controller's dispatcher accepted the job, signed a work unit, and handed it to receptor over a unix socket. receptor verified the signature, ran `ansible-runner worker`, and ansible-runner started an execution environment — a container, started by a container, on a machine where nothing runs as root.
 
 Next: [Automation hub](08-hub.md)
