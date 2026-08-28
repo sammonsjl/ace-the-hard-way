@@ -6,7 +6,7 @@ The execution mesh node.
 |---|---|
 | Source | [ansible/receptor](https://github.com/ansible/receptor) |
 | Built in | [Lab 7](../../docs/07-execution.md) |
-| Status | not written |
+| Status | **built** (2026-08-27) — `Containerfile` in this directory |
 
 A Go build — the simplest Containerfile in the tutorial, and the one running the hardest lab. Serves 27199 and owns the control socket the controller hands signed work units to.
 

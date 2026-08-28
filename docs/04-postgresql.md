@@ -214,7 +214,7 @@ ContainerName=ace-redis
 Image=docker.io/library/redis:7
 Network=host
 UserNS=keep-id
-Volume=ace-redis-data.volume:/data
+Volume=ace-redis-data.volume:/data:U
 Volume=%h/ace/redis/redis.conf:/etc/redis/redis.conf:ro,Z
 Volume=%h/ace/redis/run:/run/redis:Z
 Volume=%h/ace/tls/extracted:/etc/pki/ca-trust/extracted:z
@@ -231,6 +231,10 @@ WantedBy=default.target
 systemctl --user daemon-reload
 systemctl --user start ace-redis
 ```
+
+> **`:U` on the data volume is not decoration.** `keep-id` makes the container run as *your* UID, but the image's `/data` belongs to its own `redis` user — so redis cannot write there, every background save fails with `Failed opening the temp RDB file ... Permission denied`, and Redis then refuses all writes with `MISCONF Redis is configured to save RDB snapshots, but it's currently unable to persist to disk`. `:U` tells podman to chown the volume to the user the container actually runs as.
+>
+> The reason this is worth a warning rather than a footnote: Redis keeps *serving reads* the whole time, so nothing here looks broken. The failure surfaces two labs later, inside the controller's dispatcher, as a `redis.exceptions.ResponseError` — and you go looking at the controller.
 
 **`UserNS=keep-id` is here, and PostgreSQL's absence of it is the contrast worth understanding.** A TCP port is shared automatically under `Network=host`. A unix socket is not — it is a *file*, and any container that wants it has to mount the directory it lives in. `keep-id` maps the container's redis user to your UID, so the socket lands on your host owned by you:
 

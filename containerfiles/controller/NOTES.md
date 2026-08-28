@@ -7,7 +7,7 @@ AWX, built from source.
 | Source | [ansible/awx](https://github.com/ansible/awx) |
 | Base | EL9 |
 | Built in | [Lab 6](../../docs/06-controller.md) |
-| Status | **does not exist anywhere — the largest piece of work on this branch** |
+| Status | **built and running** (2026-08-27), AWX 25.0.0 |
 
 **Why it must be built:** `quay.io/ansible/awx` is frozen at 24.6.1 (July 2024), predating the gateway / django-ansible-base resource-server integration this platform needs. `ghcr.io/ansible/awx:devel` is an undocumented nightly. The vendor image is private. Pulling any of them makes the tutorial dishonest about its most interesting component.
 
@@ -38,3 +38,17 @@ Rendering the template needs ansible. Writing our own from its end state is the
 hard-way route and is what the other images do, but this is the largest of them:
 the UI build alone is longer than the gateway's, and the three supervisor
 configs have to be written by hand rather than symlinked from a source tree.
+
+## Built 2026-08-27
+
+Builds and runs. Four stages; `make ui` is the longest single step in the
+tutorial. `SETUPTOOLS_SCM_PRETEND_VERSION` must be set — a checkout at a bare
+commit has no tag for setuptools-scm to derive a version from.
+
+The three supervisor configs in this directory are hand-written from the
+production branch of AWX's templates: web (nginx, uwsgi, daphne, ws-heartbeat,
+awx-cache-clear), task (dispatcher, callback-receiver, wsrelay), rsyslog
+(rsyslogd, configurer).
+
+nginx here is **1.20.1** from AppStream, not the 1.24 module the gateway image
+installs, so its config uses `listen ... http2` and not `http2 on;`.
