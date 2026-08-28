@@ -99,7 +99,40 @@ Restrict it to your own network if you would rather not serve the whole world:
 sudo ufw allow from 192.168.1.0/24 to any port 443 proto tcp comment 'ACE platform front door'
 ```
 
-## 5. Clients have to trust the CA
+## 5. The client may refuse before it sends anything
+
+Before blaming the network, rule out the browser. A managed browser — Edge or Chrome under enterprise policy, and increasingly the defaults — can refuse to connect to private-network addresses and **never put a packet on the wire**. Corporate policy blocking access to local hosts is a real configuration and it produces a failure that looks exactly like a firewall.
+
+The symptom is indistinguishable from a network problem if you only look at the browser:
+
+```
+Hmmm… can't reach this page
+https://192.168.1.3/ is unreachable
+ERR_ADDRESS_UNREACHABLE
+```
+
+**The test that separates the two takes one command on the server:**
+
+```bash
+sudo tcpdump -i any -n "host <client-ip> and tcp[tcpflags] & tcp-syn != 0"
+```
+
+`tcpdump` sees packets *before* netfilter, so anything that reaches the wire shows up even when the firewall drops it. Then load the page.
+
+| tcpdump shows | Meaning |
+|---|---|
+| Nothing at all | The client never sent it — browser policy, a proxy, or the wrong machine. **Not your firewall.** |
+| SYNs arriving, no reply | The server is dropping them — now go and read your firewall rules |
+| SYNs and SYN-ACKs | It works; the problem is TLS or the application |
+
+Two corroborating checks, both quick:
+
+- **`curl` from the same machine.** If `curl -v http://<server>:<port>/` succeeds where the browser fails, the network is fine and the browser is the variable.
+- **`edge://policy` or `chrome://policy`.** Managed policies are listed there. Look for URL blocklists and anything governing private-network or local-host access.
+
+> **The general principle is worth more than the specific fix:** when a server sees no packet but another tool on the same client works, the fault is in the client application, not the network. Firewalls drop packets that *arrive*. A browser refusing on policy never sends one, and no amount of `ufw` archaeology on the server will reveal it.
+
+## 6. Clients have to trust the CA
 
 The certificate is signed by the CA you made in [Lab 3](03-internal-ca.md), which nothing else on your network has heard of. Every client either accepts a browser warning or installs the root:
 
