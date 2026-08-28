@@ -258,7 +258,7 @@ After=ace-gateway.service
 
 [Container]
 ContainerName=ace-envoy
-Image=docker.io/envoyproxy/envoy:v1.33.5
+Image=docker.io/envoyproxy/envoy:v1.38.4
 Network=host
 UserNS=keep-id:uid=101,gid=101
 Volume=%h/ace/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro,Z
@@ -275,7 +275,13 @@ Restart=on-failure
 WantedBy=default.target
 ```
 
-> **Envoy version is not free to choose.** The vendor's `gateway-proxy` image ships **envoy 1.38.4**, but jewel `devel`'s xDS output is rejected by it — every listener and cluster update fails and envoy never binds the front door. 1.33.5 accepts the same configuration. The gateway here tracks `devel` while the vendor's tracks a 2.7 release, and the xDS contract between them has moved; if you bump envoy, check `podman logs ace-envoy` for `REST update ... failed` before assuming anything else broke.
+> **`dns_lookup_family: V4_ONLY` is not optional, and leaving it out looks like a version problem.** `ace-gateway` resolves to *both* `127.0.0.1` and `::1` on a dual-stack host, and envoy will pick the IPv6 address. Every service here listens on IPv4, so the connection is refused — and what you see is
+> ```
+> REST update for /v3/discovery:clusters failed
+> ```
+> repeating forever, with envoy never binding 9443. Nothing in that message mentions addresses. Turn on `--component-log-level connection:debug` and the real line appears: `connecting to [::1]:8446 ... Connection refused`.
+>
+> The [bare-metal track](../../../tree/main/docs/05-gateway.md) never hits this because it points the cluster at a literal `127.0.0.1` rather than a name. Using names is worth the one extra setting — it is what keeps the certificates in [Lab 3](03-internal-ca.md) meaningful.
 
 Two details that will otherwise cost you an hour:
 
