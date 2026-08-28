@@ -135,6 +135,20 @@ NAME=$1; DIR_NAME=$2; HOST=$3; EXT=${4:-crt}; CLIENT=${5:-}
 CA=~/ace/tls
 DIR=~/ace/$DIR_NAME/tls
 
+# Extra names this certificate should also be valid for, one per line in
+# ~/ace/tls/extra-sans-<dir>. A service reachable from other machines needs
+# every name and address those machines will use — see Lab 5.
+EXTRA=""
+if [ -f ~/ace/tls/extra-sans-"$DIR_NAME" ]; then
+  while read -r n; do
+    [ -z "$n" ] && continue
+    case "$n" in
+      *[0-9].[0-9]*) EXTRA="$EXTRA,IP:$n" ;;
+      *)             EXTRA="$EXTRA,DNS:$n" ;;
+    esac
+  done < ~/ace/tls/extra-sans-"$DIR_NAME"
+fi
+
 EKU=""
 [ "$CLIENT" = client ] && EKU=$'\nextendedKeyUsage=clientAuth'
 
@@ -145,7 +159,7 @@ chmod 0640 "$DIR/$NAME.key"
 
 openssl req -new -key "$DIR/$NAME.key" -subj "/CN=$HOST" \
   -addext "keyUsage=keyEncipherment,digitalSignature" \
-  -addext "subjectAltName=DNS:$HOST,DNS:localhost,IP:127.0.0.1${EKU}" \
+  -addext "subjectAltName=DNS:$HOST,DNS:localhost,IP:127.0.0.1${EXTRA}${EKU}" \
   -out "$DIR/$NAME.csr"
 
 openssl x509 -req -in "$DIR/$NAME.csr" -sha256 \

@@ -197,6 +197,7 @@ Where the tutorial takes a shortcut it says so, in the lab, at the moment it tak
 
 - [A1: The EPEL uwsgi conflict](docs/a1-epel-uwsgi-conflict.md) — the ABI mismatch, and whether a build stage is immune to it
 - [A2: Backup and restore](docs/a2-backup-restore.md) — what actually holds state when the filesystem is a volume
+- [A3: Reaching it from other machines](docs/a3-network-access.md) — SANs, the external URL, the firewall, and getting clients to trust your CA
 
 — [Glossary](docs/glossary.md) · [Cleanup](docs/99-cleanup.md)
 
