@@ -35,6 +35,12 @@ Four rules, and they hold for every image in [`containerfiles/`](../containerfil
 Four things in it are worth understanding rather than skimming:
 
 - **The console is built here rather than pulled** because the published platform-UI image is private. This stage is why [Lab 1](01-prerequisites.md) tells you not to build and run at once: `NODE_OPTIONS=--max-old-space-size=8192`.
+
+> **"But AAP has a platform-ui image — where is it?"** It exists, and it is a *build input*, not a container anyone runs. The containerized topology has no platform-ui service: the setup bundle ships 19 images and platform-ui is not among them. Look inside the vendor's own `gateway-rhel9` and the console is already there, baked in at `/var/lib/ansible-automation-platform/platform/ui` — 13 files, `index.html` and the same vite bundles.
+>
+> Red Hat assembles that by copying from their private `platform-ui` image at build time. We reach the same end state by compiling [ansible-ui](https://github.com/ansible/ansible-ui) in the `ui-builder` stage, because that image is not published. The only difference is the path: ours lands at `/opt/aap_gateway/platform_ui`, keeping jewel's own convention rather than adopting Red Hat's `/var/lib/...` layout — the same deliberate choice as the underscore in `aap_gateway`, and the reason this build sets its own `STATIC_ROOT`.
+>
+> A *separate* platform-UI container does appear in the Kubernetes/operator deployment. That is a different topology from this one.
 - **`uid 1000 / gid 0`** for the `gateway` user. Group-root with `chmod g+rwx` on the runtime directories is how the image stays writable when the UID it runs as changes.
 - **`PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python`** — the xDS protobuf definitions need the pure-Python implementation to stay compatible with protobuf 3.21+.
 - **`collectstatic` at build time**, with `GATEWAY_SECRET_KEY_FILE=/dev/null` because collecting static files does not need a real key. The startup script runs it again; baking it makes that a fast no-op.
