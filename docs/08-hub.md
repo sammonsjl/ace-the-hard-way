@@ -53,7 +53,7 @@ This is the first thing to run when single sign-on misbehaves anywhere in the pl
 
 ```bash
 podman run --rm --entrypoint "" localhost/ace-gateway:dev \
-  /opt/aap_gateway/venv/bin/pip show django-ansible-base | awk '/^Version/{print}'
+  /opt/aap-gateway/venv/bin/pip show django-ansible-base | awk '/^Version/{print}'
 podman run --rm --entrypoint "" localhost/ace-hub:dev \
   pip3 show django-ansible-base | awk '/^Version/{print}'
 podman run --rm --entrypoint "" localhost/ace-controller:dev \

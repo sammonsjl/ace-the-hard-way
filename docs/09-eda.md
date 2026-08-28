@@ -14,7 +14,7 @@ A usable multi-arch upstream image exists (`quay.io/ansible/eda-server`). We bui
 
 Two stages, and one thing that sets this build apart from every other image in the tutorial:
 
-**eda-server declares its dependencies with poetry, not pip.** So poetry is what installs them:
+**eda-server declares its dependencies with poetry — but poetry is not how the vendor installs it, and not how we do either.**
 
 ```dockerfile
 RUN ${PYTHON_BIN} -m pip install --user "poetry==${POETRY_VERSION}" && \

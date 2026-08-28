@@ -47,15 +47,15 @@ RUN sed -i '/^\[crb\]$/,/^enabled=0$/ s/enabled=0/enabled=1/' /etc/yum.repos.d/c
       postgresql xmlsec1-devel && \
     dnf clean all
 
-RUN mkdir -p /opt/aap_gateway && chgrp -R 0 /opt/aap_gateway && chmod -R g=u /opt/aap_gateway
-RUN "/usr/bin/${PYTHON}" -m venv /opt/aap_gateway/venv
-RUN echo "/opt/aap_gateway/aap_gateway" > "/opt/aap_gateway/venv/lib/${PYTHON}/site-packages/project.pth"
-RUN /opt/aap_gateway/venv/bin/pip install --upgrade 'setuptools>=65.5.1'
+RUN mkdir -p /opt/aap-gateway && chgrp -R 0 /opt/aap-gateway && chmod -R g=u /opt/aap-gateway
+RUN "/usr/bin/${PYTHON}" -m venv /opt/aap-gateway/venv
+RUN echo "/opt/aap-gateway/aap_gateway" > "/opt/aap-gateway/venv/lib/${PYTHON}/site-packages/project.pth"
+RUN /opt/aap-gateway/venv/bin/pip install --upgrade 'setuptools>=65.5.1'
 
 COPY --from=jewel-src /src/requirements/requirements.txt /tmp/requirements.txt
 COPY --from=jewel-src /src/requirements/requirements_git.txt /tmp/requirements_git.txt
-RUN /opt/aap_gateway/venv/bin/pip --no-cache-dir install -r /tmp/requirements.txt
-RUN /opt/aap_gateway/venv/bin/pip --no-cache-dir install -r /tmp/requirements_git.txt
+RUN /opt/aap-gateway/venv/bin/pip --no-cache-dir install -r /tmp/requirements.txt
+RUN /opt/aap-gateway/venv/bin/pip --no-cache-dir install -r /tmp/requirements_git.txt
 
 ###############################################################################
 # Stage 4 — the runtime. No compilers, no node, no git.
@@ -79,7 +79,7 @@ ENV LANG=en_US.UTF-8 \
 
 RUN useradd -u 1000 -g 0 -d /var/lib/ansible-automation-platform -m -s /sbin/nologin gateway
 
-COPY --from=builder   /opt/aap_gateway /opt/aap_gateway
+COPY --from=builder   /opt/aap-gateway /opt/aap-gateway
 COPY --from=jewel-src /src/tools/scripts/launch-gateway      /usr/bin/launch-gateway
 COPY --from=jewel-src /src/tools/scripts/auto-reload         /usr/bin/auto-reload
 COPY --from=jewel-src /src/tools/scripts/aap-gateway-manage  /usr/bin/aap-gateway-manage
@@ -89,7 +89,21 @@ COPY --from=jewel-src /src/tools/configs/uwsgi.ini           /etc/ansible-automa
 COPY --from=jewel-src /src/tools/configs/supervisord.conf    /etc/supervisord.conf
 COPY --from=jewel-src /src/tools/configs/settings.py         /etc/ansible-automation-platform/gateway/settings.py
 
-RUN for dir in /etc/nginx /opt/aap_gateway /opt/aap_gateway/src \
+# jewel hardcodes its own base dir, /opt/aap_gateway, throughout the scripts and
+# configs it ships. We install to the vendor's /opt/aap-gateway, so everything
+# jewel supplies has to be retargeted. This is the price of matching Red Hat's
+# layout rather than upstream's — and it is why Red Hat does not ship these
+# scripts at all: their installer templates its own.
+RUN sed -i 's|/opt/aap_gateway|/opt/aap-gateway|g' \
+      /usr/bin/launch-gateway /usr/bin/auto-reload /usr/bin/aap-gateway-manage \
+      /etc/ansible-automation-platform/gateway/nginx-gateway.conf \
+      /etc/ansible-automation-platform/gateway/uwsgi.ini \
+      /etc/supervisord.conf \
+      /etc/ansible-automation-platform/gateway/settings.py && \
+    grep -rl "aap_gateway" /usr/bin/launch-gateway /etc/supervisord.conf || true
+
+RUN for dir in /etc/nginx /opt/aap-gateway /opt/aap-gateway/src \
+               /var/lib/ansible-automation-platform/platform/ui \
                /var/log/supervisor /var/run/supervisor /var/run/uwsgi \
                /var/log/nginx /var/run/django_metrics \
                /var/cache/ansible-automation-platform/gateway ; \
@@ -100,15 +114,17 @@ RUN for dir in /etc/nginx /opt/aap_gateway /opt/aap_gateway/src \
 
 ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 
-COPY --from=jewel-src /src/aap_gateway_api /opt/aap_gateway/src/aap_gateway_api/
-ENV PATH=/opt/aap_gateway/venv/bin:$PATH
-ENV PYTHONPATH=/opt/aap_gateway/src
+COPY --from=jewel-src /src/aap_gateway_api /opt/aap-gateway/src/aap_gateway_api/
+ENV PATH=/opt/aap-gateway/venv/bin:$PATH
+ENV PYTHONPATH=/opt/aap-gateway/src
 ENV DJANGO_SETTINGS_MODULE=aap_gateway_api.settings
 
-COPY --from=ui-builder /ui/platform/dist /opt/aap_gateway/platform_ui
+COPY --from=ui-builder /ui/platform/dist /var/lib/ansible-automation-platform/platform/ui
 
+ENV GATEWAY_STATIC_ROOT=/var/lib/ansible-automation-platform/platform/ui/static
 RUN GATEWAY_SECRET_KEY_FILE=/dev/null aap-gateway-manage collectstatic --noinput && \
-    chgrp -R root /opt/aap_gateway/static && chmod -R g=u /opt/aap_gateway/static
+    chgrp -R root /var/lib/ansible-automation-platform && \
+    chmod -R g=u /var/lib/ansible-automation-platform
 
 USER gateway
 WORKDIR /opt

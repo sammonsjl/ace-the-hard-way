@@ -38,9 +38,10 @@ Four things in it are worth understanding rather than skimming:
 
 > **"But AAP has a platform-ui image — where is it?"** It exists, and it is a *build input*, not a container anyone runs. The containerized topology has no platform-ui service: the setup bundle ships 19 images and platform-ui is not among them. Look inside the vendor's own `gateway-rhel9` and the console is already there, baked in at `/var/lib/ansible-automation-platform/platform/ui` — 13 files, `index.html` and the same vite bundles.
 >
-> Red Hat assembles that by copying from their private `platform-ui` image at build time. We reach the same end state by compiling [ansible-ui](https://github.com/ansible/ansible-ui) in the `ui-builder` stage, because that image is not published. The only difference is the path: ours lands at `/opt/aap_gateway/platform_ui`, keeping jewel's own convention rather than adopting Red Hat's `/var/lib/...` layout — the same deliberate choice as the underscore in `aap_gateway`, and the reason this build sets its own `STATIC_ROOT`.
+> Red Hat assembles that by copying from their private `platform-ui` image at build time. We reach the same end state by compiling [ansible-ui](https://github.com/ansible/ansible-ui) in the `ui-builder` stage, because that image is not published — and we put it exactly where they put it, `/var/lib/ansible-automation-platform/platform/ui`, with `STATIC_ROOT` underneath it as the vendor's own `settings.py` template does.
 >
 > A *separate* platform-UI container does appear in the Kubernetes/operator deployment. That is a different topology from this one.
+- **The layout is Red Hat's, not jewel's.** The venv and source live at `/opt/aap-gateway` — hyphen — and the console at `/var/lib/ansible-automation-platform/platform/ui`. jewel installs itself at `/opt/aap_gateway` with an underscore and hardcodes that path through every script and config it ships, so the image has to retarget them with a `sed` after copying. That one line is the whole cost of matching the product's filesystem instead of upstream's, and it is why the vendor ships none of jewel's scripts: their installer templates its own.
 - **`uid 1000 / gid 0`** for the `gateway` user. Group-root with `chmod g+rwx` on the runtime directories is how the image stays writable when the UID it runs as changes.
 - **`PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python`** — the xDS protobuf definitions need the pure-Python implementation to stay compatible with protobuf 3.21+.
 - **`collectstatic` at build time**, with `GATEWAY_SECRET_KEY_FILE=/dev/null` because collecting static files does not need a real key. The startup script runs it again; baking it makes that a fast no-op.
@@ -54,7 +55,7 @@ This takes a while — the npm install and the venv are both long. When it finis
 
 ```bash
 podman run --rm --entrypoint "" localhost/ace-gateway:dev \
-  sh -c 'python3.12 -V; ls /opt/aap_gateway/; nginx -v'
+  sh -c 'python3.12 -V; ls /opt/aap-gateway/; nginx -v'
 ```
 
 **Want:** Python 3.12, a directory listing containing `venv`, `src`, `static` and `platform_ui`, and nginx 1.24.
@@ -154,7 +155,7 @@ Secret=ace-gw-secret-key,type=mount,target=/etc/ansible-automation-platform/gate
 Volume=%h/ace/gateway/settings.py:/etc/ansible-automation-platform/gateway/settings.py:ro,Z
 Volume=%h/ace/gateway/uwsgi.ini:/etc/ansible-automation-platform/gateway/uwsgi.ini:ro,Z
 Volume=%h/ace/gateway/nginx-gateway.conf:/etc/ansible-automation-platform/gateway/nginx-gateway.conf:ro,Z
-Volume=%h/ace/gateway/container-startup.yml:/opt/aap_gateway/src/container-startup.yml:ro,Z
+Volume=%h/ace/gateway/container-startup.yml:/opt/aap-gateway/src/container-startup.yml:ro,Z
 Volume=%h/ace/gateway/tls/gateway.cert:/etc/ansible-automation-platform/gateway/gateway.crt:ro,Z
 Volume=%h/ace/gateway/tls/gateway.key:/etc/ansible-automation-platform/gateway/gateway.key:ro,Z
 Volume=%h/ace/tls/extracted:/etc/pki/ca-trust/extracted:z

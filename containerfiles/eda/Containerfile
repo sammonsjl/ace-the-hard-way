@@ -9,7 +9,7 @@ ARG EDA_REF=main
 ARG PYTHON_BIN=python3.12
 ARG ANSIBLE_CORE_VER=2.16
 ARG USER_ID=1001
-ARG STATIC_ROOT=/var/lib/eda/static
+ARG STATIC_ROOT=/var/lib/ansible-automation-platform/eda/static
 
 ###############################################################################
 # Stage 1 — source at a pinned commit
@@ -38,10 +38,15 @@ ENV LANG=en_US.UTF-8 \
 RUN dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     dnf -y install dumb-init && dnf clean all
 
-RUN useradd --uid "$USER_ID" --gid 0 --home-dir /app --create-home eda && \
-    mkdir -p /app/.local /var/lib/eda && \
-    chown -R "${USER_ID}:0" /app/.local /var/lib/eda && \
-    chmod 0775 /app /var/lib/eda
+# The vendor puts EDA's home under the platform tree and installs into the
+# SYSTEM interpreter — aap-eda-manage is /usr/bin/aap-eda-manage with a
+# #!/usr/bin/python3.12 shebang, not a venv entry point.
+RUN useradd --uid "$USER_ID" --gid 0 --home-dir /var/lib/ansible-automation-platform/eda --create-home eda && \
+    mkdir -p /var/lib/ansible-automation-platform/eda/.local \
+             /var/lib/ansible-automation-platform/eda/.cache \
+             /app/src && \
+    chown -R "${USER_ID}:0" /var/lib/ansible-automation-platform/eda /app && \
+    chmod 0775 /var/lib/ansible-automation-platform/eda /app
 
 RUN dnf -y install dnf-plugins-core && \
     dnf -y config-manager --set-enabled crb && \
@@ -51,46 +56,40 @@ RUN dnf -y install dnf-plugins-core && \
       glibc-langpack-en && \
     dnf -y clean all && rm -rf /var/cache/dnf
 
-USER "$USER_ID"
-ENV POETRY_VERSION="2.*" \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    POETRY_NO_INTERACTION=1 \
-    VIRTUAL_ENV=/app/venv \
     SOURCES_DIR=/app/src \
-    PATH="/app/.local/bin:$PATH" \
-    HOME="/app"
+    HOME="/var/lib/ansible-automation-platform/eda"
 
-# eda-server declares its dependencies with poetry, so poetry is how they get
-# installed. `virtualenvs.create false` makes it install into the venv we just
-# made rather than one of its own.
-RUN ${PYTHON_BIN} -m pip install --user "poetry==${POETRY_VERSION}" && \
-    ${PYTHON_BIN} -m venv "$VIRTUAL_ENV" && \
-    poetry config virtualenvs.create false
+# Install into the SYSTEM interpreter with pip, the way the vendor does.
+#
+# Their image has no venv: aap_eda sits in /usr/lib/python3.12/site-packages and
+# its dist-info records INSTALLER=pip — not rpm. eda-server is a poetry project,
+# but poetry is not required to install it: `pip install .` reads pyproject.toml
+# through PEP 517 and resolves the same tree, without poetry's git backend, which
+# fails resolving django-ansible-base from a git ref.
+#
+# pip has to be taken out of rpm's hands first, or any dependency that wants to
+# upgrade it dies with "Cannot uninstall pip ... The package was installed by rpm".
+RUN ${PYTHON_BIN} -m pip install --ignore-installed --upgrade pip setuptools wheel
 
 WORKDIR $SOURCES_DIR
-ENV PATH="${VIRTUAL_ENV}/bin:$PATH"
-
-# Dependencies before source, so a source change does not re-resolve them.
-COPY --from=eda-src /src/poetry.toml /src/pyproject.toml /src/poetry.lock $SOURCES_DIR/
-RUN poetry install -E all --no-root --no-cache && \
-    ${PYTHON_BIN} -m pip install gunicorn
-
 COPY --from=eda-src /src $SOURCES_DIR/
-USER 0
-RUN chown -R "${USER_ID}:0" $SOURCES_DIR
+
+# --prefix=/usr, not the /usr/local that pip defaults to, so the package lands in
+# /usr/lib/python3.12/site-packages and the entry point in /usr/bin — exactly
+# where the vendor's image has them.
+RUN ${PYTHON_BIN} -m pip install --prefix=/usr . gunicorn && \
+    ${PYTHON_BIN} -m pip install --prefix=/usr "ansible-core==${ANSIBLE_CORE_VER}"
+
 USER "$USER_ID"
-
-RUN poetry install -E all --only-root && \
-    pip install "ansible-core==${ANSIBLE_CORE_VER}"
-
 RUN EDA_SECRET_KEY=build-only EDA_STATIC_ROOT=${STATIC_ROOT} \
     aap-eda-manage collectstatic --noinput --clear
 
 USER 0
-RUN for dir in /app /app/venv /app/venv/bin /var/lib/eda ; \
+RUN for dir in /app /var/lib/ansible-automation-platform/eda ; \
     do mkdir -m 0775 -p $dir ; chmod g+rwx $dir ; chgrp root $dir ; done
 
 # Gunicorn, parameterised by environment — NOT `aap-eda-manage runserver`.
@@ -100,9 +99,9 @@ RUN for dir in /app /app/venv /app/venv/bin /var/lib/eda ; \
 ENV EDA_GUNICORN_BIND=0.0.0.0:8000 \
     EDA_GUNICORN_WORKERS=2 \
     EDA_GUNICORN_LOG_LEVEL=info \
-    EDA_MEDIA_ROOT=/var/lib/eda/media
+    EDA_MEDIA_ROOT=/var/lib/ansible-automation-platform/eda/media
 
 USER eda
-WORKDIR /var/lib/eda
+WORKDIR /var/lib/ansible-automation-platform/eda
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["/bin/sh", "-c", "gunicorn --bind ${EDA_GUNICORN_BIND} --workers=${EDA_GUNICORN_WORKERS} aap_eda.wsgi:application --log-level=${EDA_GUNICORN_LOG_LEVEL}"]
