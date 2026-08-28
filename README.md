@@ -209,6 +209,19 @@ The reference is the containerized setup bundle: same components, same port map,
 | `podman generate systemd` | **quadlets** | `generate systemd` is deprecated as of podman 5. Same end state — a user unit supervising a container — via the mechanism podman still supports. |
 | envoy on 443 | envoy on **9443** | 443 is privileged and 8443 is taken by the controller. Your machine, your rules. |
 | `:Z` relabelling on every mount | noted, not required | SELinux is load-bearing on RHEL-family hosts and inert elsewhere. The labs mark every mount that needs it, so the same commands work either way. |
+| tmpfs for `/run/nginx` and the gateway cache | directories baked into the image | One fewer moving part per container. The vendor's approach is arguably cleaner — nothing writable survives a restart — and is noted in [Lab 5](docs/05-gateway.md). |
+| podman **auto-update labels** on every container | none | Auto-update pulls new images on a timer. This tutorial pins refs on purpose; an image that changes underneath you is the opposite of what it is for. |
+| containers named `automation-*` | named `ace-*` | The prefix is the inventory: [Lab 99](docs/99-cleanup.md) finds everything this tutorial made by name. |
+
+Everything else about the deployment matches: `network: host`, `userns: keep-id`, podman secrets rather than environment files, the journald log driver, and one systemd user unit per container.
+
+### One structural difference worth knowing
+
+The vendor runs database migrations in **ephemeral init containers** — `podman run --rm` with `aap-gateway-manage migrate`, then a second for `createsuperuser` — and the long-running container then does nothing but `supervisord`.
+
+This tutorial does that for the controller, hub and EDA, where you run `migrate` yourself and watch it. The **gateway** is the exception: it uses the image's own `launch-gateway`, which migrates, creates the superuser, collects static and *then* execs supervisord, all on first start.
+
+Both work. The vendor's split is better operationally — a migration that fails is a container that failed, not a service that half-started — and it is the honest thing to move to if you extend this. It is called out here rather than hidden because it is the one place the deployment shape genuinely differs.
 
 ## License
 

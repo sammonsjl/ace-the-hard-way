@@ -47,7 +47,8 @@ RUN dnf -y install dnf-plugins-core && \
     dnf -y config-manager --set-enabled crb && \
     dnf -y install \
       "${PYTHON_BIN}" "${PYTHON_BIN}-devel" "${PYTHON_BIN}-pip" \
-      libpq-devel libffi-devel git openssh-clients gcc gettext git-core && \
+      libpq-devel libffi-devel git openssh-clients gcc gettext git-core \
+      glibc-langpack-en && \
     dnf -y clean all && rm -rf /var/cache/dnf
 
 USER "$USER_ID"

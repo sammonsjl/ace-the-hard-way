@@ -66,7 +66,7 @@ ARG PYTHON
 RUN dnf module install -y nginx:1.24/common && \
     dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     dnf install -y \
-      dumb-init inotify-tools less libpq postgresql \
+      dumb-init inotify-tools less libpq postgresql glibc-langpack-en \
       "${PYTHON}" "${PYTHON}-pip" supervisor xmlsec1-openssl && \
     dnf clean all
 
