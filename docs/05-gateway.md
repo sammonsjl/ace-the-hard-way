@@ -275,6 +275,8 @@ Restart=on-failure
 WantedBy=default.target
 ```
 
+> **Envoy version is not free to choose.** The vendor's `gateway-proxy` image ships **envoy 1.38.4**, but jewel `devel`'s xDS output is rejected by it — every listener and cluster update fails and envoy never binds the front door. 1.33.5 accepts the same configuration. The gateway here tracks `devel` while the vendor's tracks a 2.7 release, and the xDS contract between them has moved; if you bump envoy, check `podman logs ace-envoy` for `REST update ... failed` before assuming anything else broke.
+
 Two details that will otherwise cost you an hour:
 
 - **The certificate is mounted at the gateway's path, not envoy's.** The listener config comes from the gateway, so it names the paths the *gateway* uses — `/etc/ansible-automation-platform/gateway/gateway.crt`. Mount it anywhere else and envoy reports `Failed to load incomplete private key`, naming a path you never chose.

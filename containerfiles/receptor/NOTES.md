@@ -19,3 +19,10 @@ the work command produced nothing.
 ansible-runner is installed here too: receptor's work-command is
 `ansible-runner worker`, so the runner lives in receptor's filesystem, not just
 in the EE.
+
+## Corrected 2026-08-28
+
+Tracks `devel`, which needs Go 1.25 and `GOFLAGS=-buildvcs=false` (the build
+runs on a shallow clone). Cross-checked against `receptor-rhel9`: uid 1000,
+dumb-init as PID 1, `receptor -c /etc/receptor/receptor.conf` as the command.
+The vendor's image has ansible-runner but no podman — it mounts the host's.

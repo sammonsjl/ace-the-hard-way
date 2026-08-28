@@ -28,3 +28,14 @@ at all. Installing the pinned closure with `--no-deps` works, because
 pip-compile already resolved it. django-ansible-base is overridden to devel to
 match the gateway's JWT dialect, and that install needs `--no-deps` too or it
 drags in Django 5.x and pulpcore fails at collectstatic.
+
+## Corrected 2026-08-28
+
+Built from `main`, not `master`. `master` is a stale branch (4.11.0dev,
+pulpcore 3.49.40) whose lockfile no longer resolves; `main` is the default
+branch and gives 4.12.0dev on pulpcore 3.105.12 — the same platform the vendor
+ships. Cross-checked against `hub-rhel9`: pulpcore and pulp-ansible match
+exactly.
+
+Config parity: named `galaxy` user, WORKDIR /, PYTHONUNBUFFERED=1 (the pulp/base
+image sets it to 0, which keeps pulpcore's output out of the journal).

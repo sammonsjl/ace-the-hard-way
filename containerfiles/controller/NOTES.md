@@ -52,3 +52,17 @@ awx-cache-clear), task (dispatcher, callback-receiver, wsrelay), rsyslog
 
 nginx here is **1.20.1** from AppStream, not the 1.24 module the gateway image
 installs, so its config uses `listen ... http2` and not `http2 on;`.
+
+## Corrected 2026-08-28
+
+Cross-checked against `controller-rhel9` (automation-controller 4.8.6):
+
+- the ten supervisor programs across three files MATCH exactly, including
+  `awx-manage dispatcherd` for the dispatcher
+- the vendor's image contains NO receptor binary, only receptorctl and
+  ansible-runner from the venv — the COPY from the receptor image is removed
+- nginx is 1.24 there, not the AppStream default 1.20
+- named `awx` user, WORKDIR /var/lib/awx, XDG_CONFIG_HOME=/tmp/.config, and the
+  venv deliberately NOT on PATH (awx-manage is reached through /usr/bin)
+- the vendor's installer overrides launch_awx_task.sh to drop
+  `awx-manage provision_instance`, exactly as this build does

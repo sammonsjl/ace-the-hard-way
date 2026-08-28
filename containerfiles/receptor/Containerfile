@@ -27,7 +27,9 @@ FROM quay.io/centos/centos:stream9
 # libraries that binary was linked against — mounting /usr/bin/podman straight
 # in fails at exec with `libsubid.so.6: cannot open shared object file`, and
 # receptor reports that as a missing work-unit status file.
-RUN dnf install -y python3.12 python3.12-pip podman fuse-overlayfs && \
+# dumb-init lives in EPEL, not the base repos — the same trap as the EDA image.
+RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf install -y python3.12 python3.12-pip podman fuse-overlayfs dumb-init && \
     dnf clean all && \
     pip3.12 install --no-cache-dir receptorctl ansible-runner
 
