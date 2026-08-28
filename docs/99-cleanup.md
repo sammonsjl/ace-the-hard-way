@@ -99,7 +99,7 @@ diff <(systemctl --user list-units --all --no-legend) ~/.ace-preflight/units.txt
 Ports, last:
 
 ```bash
-for p in 9443 8443 8444 8445 8446 8080 8081 8082 8083 8050 8051 8052 8000 8001 5432 6379 27199 50051; do
+for p in 443 8443 8444 8445 8446 8080 8081 8082 8083 8050 8051 8052 8000 8001 5432 6379 27199 50051; do
   ss -ltn | grep -qE ":$p " && echo "STILL IN USE: $p"
 done
 ```

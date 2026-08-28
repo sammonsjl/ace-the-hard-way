@@ -98,13 +98,13 @@ post services         '{"name":"eda api","api_slug":"eda","http_port":1,"service
 
 ```bash
 curl --cacert $C https://ace-eda:8445/api/eda/v1/status/          # directly
-curl -u "$A" --cacert $C https://ace-gateway:9443/api/eda/v1/status/   # through the front door
+curl -u "$A" --cacert $C https://ace-gateway/api/eda/v1/status/   # through the front door
 ```
 
 `status` does not prove single sign-on — it answers without a token. To confirm the JWT path actually works, ask EDA who you are:
 
 ```bash
-curl -u "$A" --cacert $C https://ace-gateway:9443/api/eda/v1/users/me/
+curl -u "$A" --cacert $C https://ace-gateway/api/eda/v1/users/me/
 ```
 
 **Want:** the gateway's `admin`, carrying a `resource.ansible_id`. That UUID is issued by the gateway and shared across every service, so seeing it here means EDA validated a JWT the gateway signed and resolved it to the same identity — not that it happens to have a local user with the same name.
@@ -147,7 +147,7 @@ The usage message is on the last line, after everything that looked fine. This i
 With both workers up:
 
 ```bash
-curl -u "$A" --cacert $C https://ace-gateway:9443/api/eda/v1/status/
+curl -u "$A" --cacert $C https://ace-gateway/api/eda/v1/status/
 ```
 
 **Want:** `{"status":"good"}`.
@@ -289,14 +289,14 @@ Read what that took. EDA cloned a rulebook from a git daemon, asked the host's p
 Five components, all built from upstream source, all behind one login:
 
 ```bash
-curl -u "$A" --cacert $C https://ace-gateway:9443/api/controller/v2/ping/
-curl -u "$A" --cacert $C https://ace-gateway:9443/api/galaxy/pulp/api/v3/status/
-curl -u "$A" --cacert $C https://ace-gateway:9443/api/eda/v1/status/
+curl -u "$A" --cacert $C https://ace-gateway/api/controller/v2/ping/
+curl -u "$A" --cacert $C https://ace-gateway/api/galaxy/pulp/api/v3/status/
+curl -u "$A" --cacert $C https://ace-gateway/api/eda/v1/status/
 curl http://127.0.0.1:9901/clusters | grep health_flags
 ```
 
 **Want:** three services answering, and four `healthy` clusters in envoy.
 
-Open `https://ace-gateway:9443/` and log in. Automation Execution, Automation Content and Automation Decisions are all in the sidebar — because the registry has four services in it, and the navigation is assembled from the registry at page load.
+Open `https://ace-gateway/` and log in. Automation Execution, Automation Content and Automation Decisions are all in the sidebar — because the registry has four services in it, and the navigation is assembled from the registry at page load.
 
 — [Cleanup](99-cleanup.md) · [Glossary](glossary.md)

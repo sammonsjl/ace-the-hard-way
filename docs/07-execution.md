@@ -95,7 +95,7 @@ podman exec ace-awx-task awx-manage register_queue --queuename=controlplane --ho
 Any attempt to sync resources — or even to create an organization in AWX — fails with:
 
 ```
-423 Client Error: Locked for url: https://ace-gateway:9443/api/gateway/v1/service-index/metadata/
+423 Client Error: Locked for url: https://ace-gateway/api/gateway/v1/service-index/metadata/
 ```
 
 The gateway refuses *all* service-token authentication until its data migration has run:
@@ -248,6 +248,6 @@ PLAY RECAP *********************************************************************
 localhost                  : ok=1    changed=0    unreachable=0    failed=0
 ```
 
-Follow what that took. The request arrived at envoy on 9443 and was authorised over gRPC by the gateway. The controller's dispatcher accepted the job, signed a work unit, and handed it to receptor over a unix socket. receptor verified the signature, ran `ansible-runner worker`, and ansible-runner started an execution environment — a container, started by a container, on a machine where nothing runs as root.
+Follow what that took. The request arrived at envoy on 443 and was authorised over gRPC by the gateway. The controller's dispatcher accepted the job, signed a work unit, and handed it to receptor over a unix socket. receptor verified the signature, ran `ansible-runner worker`, and ansible-runner started an execution environment — a container, started by a container, on a machine where nothing runs as root.
 
 Next: [Automation hub](08-hub.md)

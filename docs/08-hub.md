@@ -86,11 +86,11 @@ The symmetric key encrypts credentials in pulp's database; the EC pair signs con
 In `settings.py`, every externally-visible URL is the **front door**, not hub's own nginx — hub builds the URLs it hands to clients from these:
 
 ```python
-CONTENT_ORIGIN = 'https://ace-gateway:9443'
-ANSIBLE_API_HOSTNAME = 'https://ace-gateway:9443'
-ANSIBLE_CONTENT_HOSTNAME = 'https://ace-gateway:9443'
-ANSIBLE_BASE_JWT_KEY = 'https://ace-gateway:9443'
-RESOURCE_SERVER__URL = 'https://ace-gateway:9443'
+CONTENT_ORIGIN = 'https://ace-gateway'
+ANSIBLE_API_HOSTNAME = 'https://ace-gateway'
+ANSIBLE_CONTENT_HOSTNAME = 'https://ace-gateway'
+ANSIBLE_BASE_JWT_KEY = 'https://ace-gateway'
+RESOURCE_SERVER__URL = 'https://ace-gateway'
 ```
 
 `GALAXY_AUTO_SIGN_COLLECTIONS` is **off** here. The vendor turns it on and points it at a GPG signing service we have not built.
@@ -130,7 +130,7 @@ post services         '{"name":"galaxy api","api_slug":"galaxy","http_port":1,"s
 ```
 
 ```bash
-curl -u "$A" --cacert $C https://ace-gateway:9443/api/galaxy/pulp/api/v3/status/
+curl -u "$A" --cacert $C https://ace-gateway/api/galaxy/pulp/api/v3/status/
 ```
 
 **Want:** a version list naming `pulpcore`, `pulp_ansible` and `pulp_container`.

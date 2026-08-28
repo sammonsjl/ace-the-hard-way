@@ -37,7 +37,7 @@ flowchart TB
     browser(["browser"])
 
     subgraph HOST["your host — rootless podman, systemd user units"]
-        envoy["envoy :9443<br/>the single front door · TLS ends here"]
+        envoy["envoy :443<br/>the single front door · TLS ends here"]
 
         subgraph GW["gateway"]
             gwnginx["nginx :8446<br/>gateway API + the console SPA"]
@@ -70,7 +70,7 @@ flowchart TB
         redis[("Redis<br/>unix socket for the gateway · :6379 for the others")]
     end
 
-    browser -->|"9443"| envoy
+    browser -->|"443"| envoy
     envoy -->|"/"| gwnginx
     envoy -->|"/api/controller/"| ctlnginx
     envoy -->|"/api/galaxy/"| hubnginx
@@ -113,25 +113,25 @@ A few things the picture is meant to make obvious.
 - **One front door — but two planes.** Envoy is the only port a browser touches, and it is *only* the data plane. The gateway is what assembles the platform. That is why the controller, hub and EDA each have arrows arriving from two different places:
   - **Solid arrows — traffic.** Envoy proxies a request to `/api/controller/`, `/api/galaxy/` or `/api/eda/` straight to that component's own nginx. It matches a path prefix and forwards bytes; it knows nothing about who is asking.
   - **Dotted arrows — configuration and trust.** The gateway's API hands envoy its routes over **xDS** every five seconds — every route envoy serves is a row in the gateway's service registry, not a line in a static config file. It authorises each request through its **gRPC control plane**. And it publishes the **public key** that the controller, hub and EDA fetch at runtime to validate the JWT it signs. Three independently built images trusting one issuer is what "one login for the whole platform" means mechanically.
-- **The port map is the topology.** On the bare-metal track each component owns 443 on a host of its own. Here they are neighbours, so every number in that diagram is load-bearing, and every one of them comes from the vendor's own defaults rather than being invented — with one exception noted below.
+- **The port map is the topology.** On the bare-metal track each component owns 443 on a host of its own. Here they are neighbours, so every number in that diagram is load-bearing — and every one of them is the vendor's own default rather than something invented here.
 - **A container is not one process.** The controller box shows eight processes under a supervisord *inside* the image. That is not a compromise with container orthodoxy; it is what the real containerized build does, and pretending otherwise would teach you a platform that does not exist.
 - **Receptor is the parent of podman**, never the reverse: the dispatcher hands receptor a work unit, receptor's work-command spawns `ansible-runner`, and ansible-runner starts the EE container — podman inside podman, rootless both times.
 - **One root, every trust store.** The CA in [Lab 3](docs/03-internal-ca.md) signs every certificate in the picture, and it has to reach *inside* images that were built before it existed.
 
 ### Ports
 
-Every number is the vendor's default, except the front door.
+Every number is the vendor's default.
 
 | | | | |
 |---|---|---|---|
-| envoy | **9443** | controller nginx | 8443 / 8080 |
+| envoy | **443** | controller nginx | 8443 / 8080 |
 | gateway nginx | 8446 / 8083 | controller uwsgi · daphne | 8050 · 8051 |
 | gateway uwsgi | 8052 | hub nginx | 8444 / 8081 |
 | gateway gRPC | 50051 | eda nginx | 8445 / 8082 |
 | PostgreSQL | 5432 | eda gunicorn · daphne | 8000 · 8001 |
 | Redis | 6379 | receptor | 27199 |
 
-**Why 9443 and not 443.** The vendor puts envoy on 443 because it owns the machine. You do not — 443 is privileged, and binding it rootless means changing `net.ipv4.ip_unprivileged_port_start` on a computer you use for other things. 8443 is not available either: it is already the controller's nginx. So the front door moves out of the way to 9443, and nothing else shifts.
+**443, the same as the vendor.** Binding it rootless takes one sysctl — `net.ipv4.ip_unprivileged_port_start` — which is exactly what the vendor's installer does before it starts the proxy. [Lab 5](docs/05-gateway.md) covers it. Note that 8443 is *not* available for the front door: it is already the controller's nginx.
 
 ## Who this is for
 
@@ -208,7 +208,6 @@ The reference is the containerized setup bundle: same components, same port map,
 | Vendor | Here | Why |
 |---|---|---|
 | `podman generate systemd` | **quadlets** | `generate systemd` is deprecated as of podman 5. Same end state — a user unit supervising a container — via the mechanism podman still supports. |
-| envoy on 443 | envoy on **9443** | 443 is privileged and 8443 is taken by the controller. Your machine, your rules. |
 | `:Z` relabelling on every mount | noted, not required | SELinux is load-bearing on RHEL-family hosts and inert elsewhere. The labs mark every mount that needs it, so the same commands work either way. |
 | tmpfs for `/run/nginx` and the gateway cache | directories baked into the image | One fewer moving part per container. The vendor's approach is arguably cleaner — nothing writable survives a restart — and is noted in [Lab 5](docs/05-gateway.md). |
 | podman **auto-update labels** on every container | none | Auto-update pulls new images on a timer. This tutorial pins refs on purpose; an image that changes underneath you is the opposite of what it is for. |

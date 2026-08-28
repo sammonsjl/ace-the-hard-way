@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-Your first image built from upstream source — the gateway API and the platform console, compiled in front of you — running behind envoy on `https://ace-gateway:9443`, with a front door that opens because the gateway told envoy to open it.
+Your first image built from upstream source — the gateway API and the platform console, compiled in front of you — running behind envoy on `https://ace-gateway`, with a front door that opens because the gateway told envoy to open it.
 
 ## Where it fits
 
@@ -203,7 +203,7 @@ C=~/ace/tls/extracted/pem/tls-ca-bundle.pem
 B=https://ace-gateway:8446/api/gateway/v1
 post () { curl -sS -u "$A" --cacert $C -H 'Content-Type: application/json' -X POST "$B/$1/" -d "$2"; }
 
-post http_ports      '{"name":"port-9443","number":9443,"use_https":true,"is_api_port":true}'
+post http_ports      '{"name":"port-443","number":443,"use_https":true,"is_api_port":true}'
 post service_clusters '{"name":"gateway","service_type":1}'
 post service_nodes    '{"name":"Node gateway - ace-gateway","service_cluster":1,"address":"ace-gateway"}'
 post services         '{"name":"gateway api","api_slug":"gateway","http_port":1,"service_cluster":1,
@@ -213,7 +213,7 @@ post services         '{"name":"gateway api","api_slug":"gateway","http_port":1,
 
 Four objects, and the shape matters:
 
-- **`http_ports`** *is* the envoy listener. Port 9443 exists because this row exists.
+- **`http_ports`** *is* the envoy listener. Port 443 exists because this row exists.
 - **`service_types`** are seeded by the migrations — `gateway`, `controller`, `hub`, `eda` are ids 1 to 4. Check with `curl -u "$A" --cacert $C $B/service_types/`; the API wants the primary key, not the name.
 - **`service_clusters`** and **`service_nodes`** are the "what" and the "where".
 - **`services`** is the route: this path prefix, on that port, to this cluster's port.
@@ -279,7 +279,7 @@ WantedBy=default.target
 > ```
 > REST update for /v3/discovery:clusters failed
 > ```
-> repeating forever, with envoy never binding 9443. Nothing in that message mentions addresses. Turn on `--component-log-level connection:debug` and the real line appears: `connecting to [::1]:8446 ... Connection refused`.
+> repeating forever, with envoy never binding 443. Nothing in that message mentions addresses. Turn on `--component-log-level connection:debug` and the real line appears: `connecting to [::1]:8446 ... Connection refused`.
 >
 > The [bare-metal track](../../../tree/main/docs/05-gateway.md) never hits this because it points the cluster at a literal `127.0.0.1` rather than a name. Using names is worth the one extra setting — it is what keeps the certificates in [Lab 3](03-internal-ca.md) meaningful.
 
@@ -294,16 +294,16 @@ systemctl --user start ace-envoy
 podman logs ace-envoy | grep -E "lds:|rejected"
 ```
 
-**Want:** `lds: add/update listener 'port-9443'` and no `rejected` lines.
+**Want:** `lds: add/update listener 'port-443'` and no `rejected` lines.
 
 ## Verify
 
 ```bash
 C=~/ace/tls/extracted/pem/tls-ca-bundle.pem
 
-curl -o /dev/null -w "console: %{http_code}\n" --cacert $C https://ace-gateway:9443/
-curl -o /dev/null -w "unauthenticated api: %{http_code}\n" --cacert $C https://ace-gateway:9443/api/gateway/v1/me/
-curl --cacert $C https://ace-gateway:9443/api/gateway/v1/ping/
+curl -o /dev/null -w "console: %{http_code}\n" --cacert $C https://ace-gateway/
+curl -o /dev/null -w "unauthenticated api: %{http_code}\n" --cacert $C https://ace-gateway/api/gateway/v1/me/
+curl --cacert $C https://ace-gateway/api/gateway/v1/ping/
 ```
 
 **Want:** `200` for the console, **`401`** for the API, and a ping reporting `"proxy_connected":true`.
@@ -312,7 +312,7 @@ The 401 is the interesting one. Envoy did not decide that — it asked the gatew
 
 `"proxy_connected":true` is the other direction: the gateway can see that an envoy is talking to it.
 
-Open `https://ace-gateway:9443/` in a browser. You will get a certificate warning unless you have added the CA from [Lab 3](03-internal-ca.md) to your browser or system trust store — the platform trusts it, your desktop does not. Log in as `admin` with the password in `~/ace/gateway/pw-admin`.
+Open `https://ace-gateway/` in a browser. You will get a certificate warning unless you have added the CA from [Lab 3](03-internal-ca.md) to your browser or system trust store — the platform trusts it, your desktop does not. Log in as `admin` with the password in `~/ace/gateway/pw-admin`.
 
 **Want:** the console, with exactly one thing in the sidebar. The controller, hub and EDA are not there because they do not exist yet — the navigation is assembled from the service registry, and right now the registry has one service in it.
 

@@ -80,8 +80,8 @@ podman secret create ace-awx-secret-key SECRET_KEY
 Then `settings.py` and three fragments in `conf.d/`. The interesting settings:
 
 ```python
-ANSIBLE_BASE_JWT_KEY = 'https://ace-gateway:9443'
-RESOURCE_SERVER__URL = 'https://ace-gateway:9443'
+ANSIBLE_BASE_JWT_KEY = 'https://ace-gateway'
+RESOURCE_SERVER__URL = 'https://ace-gateway'
 OPTIONAL_API_URLPATTERN_PREFIX = "controller"
 ```
 
@@ -254,14 +254,14 @@ post services         '{"name":"controller api","api_slug":"controller","http_po
 Wait five seconds for envoy's next xDS refresh, then go through the **front door**:
 
 ```bash
-curl -u "$A" --cacert $C https://ace-gateway:9443/api/controller/v2/ping/
+curl -u "$A" --cacert $C https://ace-gateway/api/controller/v2/ping/
 ```
 
 **Want:** the controller's ping, listing `ace-controller` as a hybrid node with a capacity and a heartbeat.
 
-That single request is the whole platform working at once. Envoy accepted it on 9443, asked the gateway over gRPC whether it was allowed, rewrote `/api/controller/` to `/api/` using the Lua script you wrote in [Lab 5](05-gateway.md) — this is the first route where that script does real work — and proxied it to a controller that authenticated the caller from a JWT the gateway signed.
+That single request is the whole platform working at once. Envoy accepted it on 443, asked the gateway over gRPC whether it was allowed, rewrote `/api/controller/` to `/api/` using the Lua script you wrote in [Lab 5](05-gateway.md) — this is the first route where that script does real work — and proxied it to a controller that authenticated the caller from a JWT the gateway signed.
 
-Open `https://ace-gateway:9443/` and log in. **Automation Execution** is now in the sidebar, because the registry has two services in it instead of one.
+Open `https://ace-gateway/` and log in. **Automation Execution** is now in the sidebar, because the registry has two services in it instead of one.
 
 And every job you launch will sit in `pending` forever, because nothing is running receptor yet.
 

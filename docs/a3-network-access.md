@@ -5,15 +5,15 @@ By default this platform answers on the machine that runs it. Nothing about that
 ## What is already true
 
 ```bash
-ss -ltn | grep :9443
+ss -ltn | grep ':443 '
 ```
 
-**Want:** `*:9443`, not `127.0.0.1:9443`. The listener comes from the gateway's registry ([Lab 5](05-gateway.md)), and the `http_port` row does not restrict the bind address, so envoy is listening on every interface from the moment you create it.
+**Want:** `*:443`, not `127.0.0.1:443`. The listener comes from the gateway's registry ([Lab 5](05-gateway.md)), and the `http_port` row does not restrict the bind address, so envoy is listening on every interface from the moment you create it.
 
 Prove the service itself is reachable before changing anything:
 
 ```bash
-curl -k -o /dev/null -w "%{http_code}\n" https://<your-lan-ip>:9443/
+curl -k -o /dev/null -w "%{http_code}\n" https://<your-lan-ip>/
 ```
 
 **Want:** `200`. If you get that, the only remaining problems are the certificate and the firewall — in that order, because they fail differently and it is easy to mistake one for the other.
@@ -45,7 +45,7 @@ systemctl --user restart ace-gateway ace-envoy
 ```bash
 openssl x509 -in ~/ace/gateway/tls/gateway.cert -noout -ext subjectAltName
 curl --cacert ~/ace/tls/extracted/pem/tls-ca-bundle.pem \
-     -o /dev/null -w "%{http_code}\n" https://192.168.1.3:9443/
+     -o /dev/null -w "%{http_code}\n" https://192.168.1.3/
 ```
 
 **Want:** `200` **without** `-k`.
@@ -69,29 +69,37 @@ curl -u "$A" --cacert $C https://ace-gateway:8446/api/gateway/v1/settings/all/ \
 
 curl -u "$A" --cacert $C -H 'Content-Type: application/json' -X PUT \
   https://ace-gateway:8446/api/gateway/v1/settings/all/ \
-  -d '{"gateway_proxy_url":"https://192.168.1.3:9443"}'
+  -d '{"gateway_proxy_url":"https://192.168.1.3"}'
 ```
 
 **`PUT`, not `PATCH`** — the settings endpoint rejects `PATCH` with `Method "PATCH" not allowed.`
 
-**And a bare hostname is rejected**: `https://myhost:9443` comes back as `is not a valid URL`. It wants a dotted name or an address.
+**And a bare hostname is rejected**: `https://myhost` comes back as `is not a valid URL`. It wants a dotted name or an address.
 
-## 3. The firewall
+## 3. The privileged-port floor
+
+The front door is 443, which a rootless container cannot bind until the machine says unprivileged processes may. [Lab 5](05-gateway.md) covers the sysctl and why no systemd setting substitutes for it; if you skipped it, envoy will be running with no listener at all:
+
+```bash
+sysctl net.ipv4.ip_unprivileged_port_start   # want: 443
+```
+
+## 4. The firewall
 
 This is the step that looks like a broken service. The port is open on the host, the certificate is right, and connections from other machines simply hang or refuse — because a default-deny firewall never lets them arrive.
 
 ```bash
 sudo ufw status
-sudo ufw allow 9443/tcp comment 'ACE platform front door'
+sudo ufw allow 443/tcp comment 'ACE platform front door'
 ```
 
 Restrict it to your own network if you would rather not serve the whole world:
 
 ```bash
-sudo ufw allow from 192.168.1.0/24 to any port 9443 proto tcp comment 'ACE platform front door'
+sudo ufw allow from 192.168.1.0/24 to any port 443 proto tcp comment 'ACE platform front door'
 ```
 
-## 4. Clients have to trust the CA
+## 5. Clients have to trust the CA
 
 The certificate is signed by the CA you made in [Lab 3](03-internal-ca.md), which nothing else on your network has heard of. Every client either accepts a browser warning or installs the root:
 
@@ -114,14 +122,14 @@ Firefox keeps its own trust store and ignores the system one, which is why it is
 ## Verify from the other machine
 
 ```bash
-curl --cacert ca.cert -o /dev/null -w "%{http_code}\n" https://192.168.1.3:9443/
-curl --cacert ca.cert -u admin:<password> https://192.168.1.3:9443/api/gateway/v1/ping/
+curl --cacert ca.cert -o /dev/null -w "%{http_code}\n" https://192.168.1.3/
+curl --cacert ca.cert -u admin:<password> https://192.168.1.3/api/gateway/v1/ping/
 ```
 
 **Want:** `200`, and a ping reporting `proxy_connected: true`. Then open the console in a browser and log in.
 
 ## What this does not do
 
-The `ace-*` names still resolve only on the host — they are `/etc/hosts` entries from [Lab 2](02-host.md), and the services use them to talk to each other. Clients reach the platform through the front door on 9443 and never need them.
+The `ace-*` names still resolve only on the host — they are `/etc/hosts` entries from [Lab 2](02-host.md), and the services use them to talk to each other. Clients reach the platform through the front door on 443 and never need them.
 
 Nothing else is exposed. The component ports (8443, 8444, 8445, 8446) bind on the host and are not opened here, which is the intended shape: one door, and envoy authorising everything through it.
