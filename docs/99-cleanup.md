@@ -63,8 +63,16 @@ podman system df
 ## 3. Remove the state root
 
 ```bash
-rm -rf ~/ace
+podman unshare rm -rf ~/ace
 ```
+
+**`podman unshare`, not a plain `rm`.** Some of what is under `~/ace/` was written by a container running as root *inside its own user namespace* — the extracted trust bundle from [Lab 3](03-internal-ca.md) is the main one, produced by a throwaway container that ran `update-ca-trust` as root. On your host those files belong to a subordinate UID out of your `/etc/subuid` range, and a plain `rm -rf` fails on every one of them:
+
+```
+rm: cannot remove '/home/you/ace/tls/extracted/pem/directory-hash/ACCVRAIZ1.pem': Permission denied
+```
+
+`podman unshare` runs the command inside that same namespace, where those files are owned by "root" and you *are* root. It is the correct tool for cleaning up anything a rootless container wrote, and it is worth remembering the moment you see permission denied on a file you appear to own the directory for.
 
 This takes the CA and its private key, every service certificate, every config file you wrote, and the extracted trust bundle. There is nothing under `~/ace/` that anything else on your system uses.
 
