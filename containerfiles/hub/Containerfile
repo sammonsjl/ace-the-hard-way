@@ -14,13 +14,6 @@ FROM docker.io/pulp/base:latest
 
 ARG GALAXY_NG_REF=main
 
-# galaxy_ng's own pip-compile lockfile, used as CONSTRAINTS.
-#
-# This is the difference between a build that finishes and one that does not.
-# galaxy_ng's setup.py declares loose ranges, and asking pip to resolve them
-# together sends it backtracking: it downloads metadata for the same handful of
-# packages over and over, for hours, without failing. Constraining every version
-# to the set galaxy_ng itself pinned turns the resolution into a lookup.
 ADD https://raw.githubusercontent.com/ansible/galaxy_ng/${GALAXY_NG_REF}/requirements/requirements.common.txt /tmp/galaxy-lock.txt
 
 # galaxy_ng's own pip-compile lockfile, used as constraints.

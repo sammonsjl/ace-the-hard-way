@@ -91,8 +91,8 @@ nginx routes `/api/eda/ws/` to daphne and everything else to gunicorn — the sa
 
 ```bash
 post service_clusters '{"name":"eda","service_type":4}'
-post service_nodes    '{"name":"Node eda - ace-eda","service_cluster":3,"address":"ace-eda"}'
-post services         '{"name":"eda api","api_slug":"eda","http_port":1,"service_cluster":3,
+post service_nodes    '{"name":"Node eda - ace-eda","service_cluster":4,"address":"ace-eda"}'
+post services         '{"name":"eda api","api_slug":"eda","http_port":1,"service_cluster":4,
                         "is_service_https":true,"service_path":"/api/eda/","service_port":8445,"order":3}'
 ```
 
@@ -295,7 +295,9 @@ curl -u "$A" --cacert $C https://ace-gateway/api/eda/v1/status/
 curl http://127.0.0.1:9901/clusters | grep health_flags
 ```
 
-**Want:** three services answering, and four `healthy` clusters in envoy.
+**Want:** three services answering, and every cluster carrying a `healthy` IPv4 endpoint.
+
+Each service cluster also shows a `[::1]` endpoint marked `/failed_active_hc`. That is cosmetic: the gateway registers each node by hostname, envoy resolves it to both families, and nothing in this build listens on IPv6. The IPv4 endpoint beside it is the one carrying traffic — the same resolution asymmetry the static clusters avoid with `dns_lookup_family: V4_ONLY` in [Lab 5](05-gateway.md), which does not reach clusters the gateway hands down over xDS.
 
 Open `https://ace-gateway/` and log in. Automation Execution, Automation Content and Automation Decisions are all in the sidebar — because the registry has four services in it, and the navigation is assembled from the registry at page load.
 

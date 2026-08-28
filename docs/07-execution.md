@@ -59,7 +59,8 @@ The control socket lives on a host path (`~/ace/receptor/run`) mounted into **bo
 ## Verify the mesh
 
 ```bash
-podman exec ace-awx-task receptorctl --socket /var/run/receptor/receptor.sock status
+podman exec ace-awx-task /var/lib/awx/venv/awx/bin/receptorctl \
+  --socket /var/run/receptor/receptor.sock status
 ```
 
 **Want:**
@@ -86,7 +87,7 @@ podman exec ace-awx-task awx-manage register_queue --queuename=default --hostnam
 podman exec ace-awx-task awx-manage register_queue --queuename=controlplane --hostnames=ace-controller
 ```
 
-**The job execution directory.** `AWX_ISOLATION_BASE_PATH` points at `/var/lib/awx/job_execution`, which the image does not create. Without it the job errors instantly with `FileNotFoundError: /var/lib/awx/job_execution/awx_2_...`. It is created on the host and mounted into the controller — and into **receptor**, at the same path, because the controller hands ansible-runner a private-data-dir path from its own layout and receptor is the process that has to create it.
+**The job execution directory.** `AWX_ISOLATION_BASE_PATH` points at `/var/lib/ansible-automation-platform/controller/data/job_execution`, which the image does not create. Without it the job errors instantly with `FileNotFoundError: .../job_execution/awx_2_...`. It is created on the host and mounted into the controller — and into **receptor**, at the same path, because the controller hands ansible-runner a private-data-dir path from its own layout and receptor is the process that has to create it.
 
 **The gateway's service data migration.** See below — it blocks more than jobs.
 
@@ -155,6 +156,15 @@ potentially insufficient UIDs or GIDs available in user namespace
 ```
 
 Layers contain files owned by several users; unpacking them needs several UIDs. `UserNS=keep-id` maps exactly one — and it has to, because the control socket receptor creates must be openable by the controller's task container running as you. Giving receptor a UID range with `UserNS=auto` would fix the unpack and break the socket.
+
+There is a second half to this, in the image rather than the config. `useradd` hands every new user a subuid/subgid range, and the inner podman finds it and tries to use it:
+
+```
+newuidmap: write to uid_map failed: Operation not permitted
+Error: cannot set up namespace using "/usr/bin/newuidmap"
+```
+
+It cannot: `newuidmap` is not setuid inside the container, and the outer namespace has one UID mapped anyway. So the receptor image empties `/etc/subuid` and `/etc/subgid` — take the ranges away and podman stops trying, falling back to the single-UID mode this whole section is about.
 
 The way out is not more UIDs but fewer expectations. `~/ace/receptor/containers-conf/storage.conf`:
 

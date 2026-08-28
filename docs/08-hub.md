@@ -124,8 +124,8 @@ Generate the service key from the gateway and pass it as `PULP_RESOURCE_SERVER__
 
 ```bash
 post service_clusters '{"name":"hub","service_type":3}'
-post service_nodes    '{"name":"Node hub - ace-hub","service_cluster":4,"address":"ace-hub"}'
-post services         '{"name":"galaxy api","api_slug":"galaxy","http_port":1,"service_cluster":4,
+post service_nodes    '{"name":"Node hub - ace-hub","service_cluster":3,"address":"ace-hub"}'
+post services         '{"name":"galaxy api","api_slug":"galaxy","http_port":1,"service_cluster":3,
                         "is_service_https":true,"service_path":"/api/galaxy/","service_port":8444,"order":2}'
 ```
 

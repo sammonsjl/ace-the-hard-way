@@ -35,11 +35,6 @@ RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.n
 
 COPY --from=builder /out/receptor /usr/bin/receptor
 
-# receptor's work-command is `ansible-runner worker`, so ansible-runner has to
-# be in THIS image — receptor is the parent of the job, not the controller.
-# podman is deliberately NOT installed: the host's binary is mounted in at run
-# time so the client matches the storage it is driving, which is what the
-# vendor's installer does too.
 # /home/runner is podman's HOME inside this container, so it must be owned by
 # the uid the container actually runs as — with keep-id that is the host user's,
 # 1000. Group-root alone is not enough: podman refuses a config directory it
@@ -51,6 +46,14 @@ RUN mkdir -p /etc/receptor /var/lib/receptor /run/receptor \
     chown -R 1000:0 /home/runner && chmod -R g=u /home/runner
 
 RUN useradd -u 1000 -g 0 -d /home/runner -M -s /bin/bash runner 2>/dev/null || true
+
+# useradd hands the new user a subuid/subgid range, and the podman inside
+# this container will try to use it. It cannot: newuidmap is not setuid here,
+# and the outer namespace has exactly one UID mapped anyway, so the attempt
+# fails with `newuidmap: write to uid_map failed: Operation not permitted`.
+# Take the ranges away and the inner podman falls back to single-UID mode,
+# which is the arrangement ignore_chown_errors exists to accommodate.
+RUN : > /etc/subuid && : > /etc/subgid
 
 ENV HOME=/home/runner
 USER 1000

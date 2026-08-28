@@ -117,6 +117,14 @@ podman run --rm --entrypoint "" localhost/ace-controller:dev \
 
 Note also that both URLs are the **unix socket**, not the TCP port — which is why [Lab 4](04-postgresql.md) built one.
 
+`conf.d/postgres.py` has a matching trap in the other direction. The vendor's template sets `sslmode` from a variable that defaults to `prefer`, and it is tempting to tighten that to `verify-full` since [Lab 3](03-internal-ca.md) gave you a CA. Do not — [Lab 4](04-postgresql.md) did not turn TLS on in postgres, so the connection fails before any certificate is looked at:
+
+```
+django.db.utils.OperationalError: connection failed: server does not support SSL, but SSL was required
+```
+
+`prefer` is what the gateway uses too. Tightening it is a postgres-side change, not a client-side one.
+
 ### nginx here is 1.20, not 1.24
 
 The gateway image installs nginx from the `nginx:1.24` module. This image takes the AppStream default, which is **1.20.1**. So `~/ace/awx/nginx.conf` writes:
@@ -149,7 +157,13 @@ Then register this machine as an instance:
 
 **Want:** `Successfully registered instance ace-controller`.
 
-`RESOURCE_SERVER['SECRET_KEY'] is not configured` appears repeatedly throughout both commands. It is a warning about reverse-sync to the gateway, not a failure, and everything in this lab works without it.
+`RESOURCE_SERVER['SECRET_KEY'] is not configured` appears repeatedly throughout both commands. Nothing in *this* lab needs it — but it is not decoration. The key is what lets the controller call back to the gateway as a service, and without it [Lab 7](07-execution.md)'s `resource_sync` dies on `KeyError: 'SECRET_KEY'`. The gateway mints it:
+
+```bash
+podman exec ace-gateway aap-gateway-manage generate_service_secret controller
+```
+
+Store it as a podman secret and hand it to all three containers as `AWX_RESOURCE_SERVER__SECRET_KEY`. Hub and EDA each get their own, the same way, in Labs 8 and 9.
 
 ### Why the instance is registered by hand
 
@@ -202,6 +216,12 @@ vim receptor.conf
 ```
 
 The config is a single `local-only` node: a control service on a unix socket, a `work-command` that runs `ansible-runner worker`, and the work-signing key. There is no `tls-client` section and no mesh CA, because there is no second node to authenticate to — [Lab 7](07-execution.md) explains what a second node would restore.
+
+Three details in that file are each worth one line of care, because each fails somewhere other than where you wrote it:
+
+- **`- local-only:` is a stanza, not a description.** Leave it out and receptor starts, logs `Nothing to do - no backends are running`, and exits 0 — which systemd reports as a service that will not stay up rather than as a config error.
+- **`datadir: /var/lib/receptor`.** Covered in [Lab 7](07-execution.md); set it now, while you are in the file.
+- **The `command:` path is `/usr/local/bin/ansible-runner`,** because [Lab 7](07-execution.md)'s receptor image installs ansible-runner with pip. It is *not* AWX's venv path — receptor runs the work command inside its own container, not the controller's.
 
 The controller holds the **private** key and signs each work unit; receptor holds the **public** key and verifies it. That asymmetry is the whole point, and it is why the two files have different modes.
 
