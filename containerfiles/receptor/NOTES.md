@@ -10,4 +10,12 @@ The execution mesh node.
 
 A Go build — the simplest Containerfile in the tutorial, and the one running the hardest lab. Serves 27199 and owns the control socket the controller hands signed work units to.
 
-Open question for Lab 7: the vendor's installer mounts the *host's* podman binary into this container rather than shipping one. Whether that is the right shape here or whether the image should carry its own is undecided.
+**Answered 2026-08-27: the image carries its own podman.** Mounting the host's
+binary fails at exec with `libsubid.so.6: cannot open shared object file` —
+the host binary is linked against libraries the image does not have. receptor
+reports this as `Exceeded retries for reading stdout`, because from its side
+the work command produced nothing.
+
+ansible-runner is installed here too: receptor's work-command is
+`ansible-runner worker`, so the runner lives in receptor's filesystem, not just
+in the EE.

@@ -20,11 +20,32 @@ RUN CGO_ENABLED=0 go build -o /out/receptor ./cmd/receptor-cl
 # Stage 2 — runtime
 ###############################################################################
 FROM quay.io/centos/centos:stream9
-RUN dnf install -y python3.12 python3.12-pip && dnf clean all && \
-    pip3.12 install --no-cache-dir receptorctl
+# podman is installed here rather than mounted from the host. The vendor's
+# installer mounts a host binary, which only works if the container carries the
+# libraries that binary was linked against — mounting /usr/bin/podman straight
+# in fails at exec with `libsubid.so.6: cannot open shared object file`, and
+# receptor reports that as a missing work-unit status file.
+RUN dnf install -y python3.12 python3.12-pip podman fuse-overlayfs && \
+    dnf clean all && \
+    pip3.12 install --no-cache-dir receptorctl ansible-runner
+
 COPY --from=builder /out/receptor /usr/bin/receptor
-RUN mkdir -p /etc/receptor /var/lib/receptor /run/receptor && \
+
+# receptor's work-command is `ansible-runner worker`, so ansible-runner has to
+# be in THIS image — receptor is the parent of the job, not the controller.
+# podman is deliberately NOT installed: the host's binary is mounted in at run
+# time so the client matches the storage it is driving, which is what the
+# vendor's installer does too.
+# /home/runner is podman's HOME inside this container, so it must be owned by
+# the uid the container actually runs as — with keep-id that is the host user's,
+# 1000. Group-root alone is not enough: podman refuses a config directory it
+# does not own outright ("exists and it is not owned by the current user").
+RUN mkdir -p /etc/receptor /var/lib/receptor /run/receptor \
+             /home/runner/.config /home/runner/.local/share && \
     chgrp -R 0 /etc/receptor /var/lib/receptor /run/receptor && \
-    chmod -R g=u /etc/receptor /var/lib/receptor /run/receptor
+    chmod -R g=u /etc/receptor /var/lib/receptor /run/receptor && \
+    chown -R 1000:0 /home/runner && chmod -R g=u /home/runner
+
+ENV HOME=/home/runner
 ENTRYPOINT ["/usr/bin/receptor"]
 CMD ["--config", "/etc/receptor/receptor.conf"]

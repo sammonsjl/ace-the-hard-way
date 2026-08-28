@@ -1,0 +1,34 @@
+# ACE minimal execution environment — where jobs actually run.
+#
+# An EE is not magic: it is a container image with ansible-core, ansible-runner
+# and whatever collections your playbooks import. `ansible-builder` exists to
+# generate a Containerfile like this one from an execution-environment.yml; we
+# write it out, because a generated file you never read teaches nothing.
+#
+# What makes it an EE rather than any image with ansible in it:
+#   - ansible-runner is present and on PATH — receptor invokes it
+#   - /runner exists and is writable, because that is where ansible-runner
+#     stages the private data directory for each job
+#   - ansible-core lives in a venv on PATH, not in the system interpreter
+
+ARG ANSIBLE_CORE_VERSION=2.17.*
+ARG ANSIBLE_RUNNER_VERSION=2.4.*
+
+FROM quay.io/centos/centos:stream9
+
+ARG ANSIBLE_CORE_VERSION
+ARG ANSIBLE_RUNNER_VERSION
+
+RUN dnf install -y python3.12 python3.12-pip git openssh-clients rsync && \
+    dnf clean all
+
+RUN pip3.12 install --no-cache-dir \
+      "ansible-core==${ANSIBLE_CORE_VERSION}" \
+      "ansible-runner==${ANSIBLE_RUNNER_VERSION}"
+
+RUN mkdir -p /runner /runner/project /runner/artifacts /runner/inventory && \
+    chgrp -R 0 /runner && chmod -R g=u /runner
+
+ENV HOME=/runner
+WORKDIR /runner
+CMD ["ansible-runner", "worker"]
