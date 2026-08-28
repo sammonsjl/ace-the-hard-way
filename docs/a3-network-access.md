@@ -16,7 +16,9 @@ Prove the service itself is reachable before changing anything:
 curl -k -o /dev/null -w "%{http_code}\n" https://<your-lan-ip>/
 ```
 
-**Want:** `200`. If you get that, the only remaining problems are the certificate and the firewall — in that order, because they fail differently and it is easy to mistake one for the other.
+**Want:** `200`. If you get that, the service is fine and everything below is about the path to it.
+
+> **Do [section 5](#5-the-client-may-refuse-before-it-sends-anything) first.** It costs one command and rules out the client entirely. Skip it and every other step here is guesswork — the failure modes look identical from a browser, and a browser that refuses on policy never sends a packet for your firewall to drop.
 
 ## 1. The certificate has to carry the names clients will use
 
