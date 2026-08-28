@@ -1,0 +1,87 @@
+# ACE EDA — eda-server, built from upstream source.
+#
+# A usable multi-arch upstream image does exist (quay.io/ansible/eda-server).
+# We build it anyway: an image you did not build is a component you did not
+# learn. This reproduces the end state of eda-server's own tools/docker/Dockerfile
+# with the development conveniences removed — no SSH key mounting, no dev extras.
+
+ARG EDA_REF=867792e55b8872f2b7d9085aee4f0c0498c39ef4
+ARG PYTHON_BIN=python3.12
+ARG ANSIBLE_CORE_VER=2.16
+ARG USER_ID=1001
+ARG STATIC_ROOT=/var/lib/eda/static
+
+###############################################################################
+# Stage 1 — source at a pinned commit
+###############################################################################
+FROM quay.io/centos/centos:stream9 AS eda-src
+ARG EDA_REF
+RUN dnf install -y git && dnf clean all
+WORKDIR /src
+RUN git clone https://github.com/ansible/eda-server.git . && git checkout "${EDA_REF}"
+
+###############################################################################
+# Stage 2 — the runtime
+###############################################################################
+FROM quay.io/centos/centos:stream9
+ARG PYTHON_BIN
+ARG ANSIBLE_CORE_VER
+ARG USER_ID
+ARG STATIC_ROOT
+
+RUN useradd --uid "$USER_ID" --gid 0 --home-dir /app --create-home eda && \
+    mkdir -p /app/.local /var/lib/eda && \
+    chown -R "${USER_ID}:0" /app/.local /var/lib/eda && \
+    chmod 0775 /app /var/lib/eda
+
+RUN dnf -y install dnf-plugins-core && \
+    dnf -y config-manager --set-enabled crb && \
+    dnf -y install \
+      "${PYTHON_BIN}" "${PYTHON_BIN}-devel" "${PYTHON_BIN}-pip" \
+      libpq-devel libffi-devel git openssh-clients gcc gettext git-core && \
+    dnf -y clean all && rm -rf /var/cache/dnf
+
+USER "$USER_ID"
+ENV POETRY_VERSION="2.*" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    POETRY_NO_INTERACTION=1 \
+    VIRTUAL_ENV=/app/venv \
+    SOURCES_DIR=/app/src \
+    PATH="/app/.local/bin:$PATH" \
+    HOME="/app"
+
+# eda-server declares its dependencies with poetry, so poetry is how they get
+# installed. `virtualenvs.create false` makes it install into the venv we just
+# made rather than one of its own.
+RUN ${PYTHON_BIN} -m pip install --user "poetry==${POETRY_VERSION}" && \
+    ${PYTHON_BIN} -m venv "$VIRTUAL_ENV" && \
+    poetry config virtualenvs.create false
+
+WORKDIR $SOURCES_DIR
+ENV PATH="${VIRTUAL_ENV}/bin:$PATH"
+
+# Dependencies before source, so a source change does not re-resolve them.
+COPY --from=eda-src /src/poetry.toml /src/pyproject.toml /src/poetry.lock $SOURCES_DIR/
+RUN poetry install -E all --no-root --no-cache && \
+    ${PYTHON_BIN} -m pip install gunicorn
+
+COPY --from=eda-src /src $SOURCES_DIR/
+USER 0
+RUN chown -R "${USER_ID}:0" $SOURCES_DIR
+USER "$USER_ID"
+
+RUN poetry install -E all --only-root && \
+    pip install "ansible-core==${ANSIBLE_CORE_VER}"
+
+RUN EDA_SECRET_KEY=build-only EDA_STATIC_ROOT=${STATIC_ROOT} \
+    aap-eda-manage collectstatic --noinput --clear
+
+USER 0
+RUN for dir in /app /app/venv /app/venv/bin /var/lib/eda ; \
+    do mkdir -m 0775 -p $dir ; chmod g+rwx $dir ; chgrp root $dir ; done
+
+USER "$USER_ID"
+CMD ["aap-eda-manage", "runserver", "0.0.0.0:8000"]

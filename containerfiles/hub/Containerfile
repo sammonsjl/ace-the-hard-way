@@ -1,0 +1,77 @@
+# ACE hub — galaxy_ng on pulpcore, built from upstream source.
+#
+# Why built rather than pulled: quay.io/ansible/galaxy-ng is amd64-only and
+# pulp/pulp-galaxy-ng is abandoned. The base is pulp's own multi-arch image;
+# galaxy_ng comes from its upstream repo (Apache-2.0) at a pinned ref, and pip
+# resolves the matching pulpcore / pulp_ansible / pulp-container pins from
+# galaxy_ng's own setup.py.
+#
+# The image carries no configuration. The quadlets mount settings.py and the key
+# material, and each container picks its process:
+#   pulpcore-api / pulpcore-content / pulpcore-worker / pulpcore-manager
+
+FROM docker.io/pulp/base:latest
+
+ARG GALAXY_NG_REF=04335c3a5b3ccf0a501d7c01f8d3965007017cb8
+
+# galaxy_ng's own pip-compile lockfile, used as CONSTRAINTS.
+#
+# This is the difference between a build that finishes and one that does not.
+# galaxy_ng's setup.py declares loose ranges, and asking pip to resolve them
+# together sends it backtracking: it downloads metadata for the same handful of
+# packages over and over, for hours, without failing. Constraining every version
+# to the set galaxy_ng itself pinned turns the resolution into a lookup.
+ADD https://raw.githubusercontent.com/ansible/galaxy_ng/${GALAXY_NG_REF}/requirements/requirements.common.txt /tmp/galaxy-lock.txt
+
+# Install the lockfile as a REQUIREMENTS file, not as constraints.
+#
+# Constraints make pip re-resolve galaxy_ng's dependency graph while honouring
+# the pins, and that fails: the lockfile pins pulpcore==3.49.40 alongside
+# aiohttp and protobuf versions that pulpcore's published metadata forbids.
+# Whatever generated the lockfile did not enforce those ranges, so no amount of
+# excluding one package at a time converges.
+#
+# Installing the pinned set with --no-deps sidesteps the resolver entirely.
+# pip-compile already produced a complete closure, so nothing needs resolving —
+# and --no-deps is required, not merely faster: the lockfile pins pulpcore
+# 3.49.40 next to aiohttp and protobuf versions that pulpcore's PUBLISHED
+# metadata forbids. The lockfile is stale against PyPI, and any resolution that
+# reads that metadata fails no matter how many pins you exclude one at a time.
+# galaxy_ng then goes on top, also --no-deps, because everything it wants is
+# already installed.
+RUN sed -E 's/\[[^]]*\]//' /tmp/galaxy-lock.txt | grep -v '@ git+' > /tmp/galaxy-pins.txt && \
+    pip3 install --no-cache-dir --no-deps -r /tmp/galaxy-pins.txt
+
+# django-ansible-base must match the gateway's. The gateway builds against DAB
+# devel, whose JWTs no longer carry a claim that the version galaxy_ng pins still
+# expects — so hub would reject every token the gateway signs. This is the one
+# dependency deliberately NOT taken from the lockfile, which is why the git
+# reference was filtered out above.
+# --no-deps here too. DAB devel depends on a newer Django than pulpcore 3.49.40
+# supports, and without --no-deps pip silently upgrades Django to 5.x — which
+# then fails at collectstatic with
+#   ImportError: cannot import name 'get_storage_class' from django.core.files.storage
+# because pulpcore still uses an API Django removed. Everything DAB needs is
+# already installed from the lockfile.
+RUN pip3 install --no-cache-dir --no-deps --upgrade \
+      "django-ansible-base[feature-flags,jwt-consumer] @ git+https://github.com/ansible/django-ansible-base@devel"
+
+RUN pip3 install --no-cache-dir --no-deps \
+      "galaxy-ng @ https://github.com/ansible/galaxy_ng/archive/${GALAXY_NG_REF}.tar.gz"
+
+ENV PULP_SETTINGS=/etc/pulp/settings.py \
+    DJANGO_SETTINGS_MODULE=pulpcore.app.settings
+
+# Static assets baked at build time; whitenoise serves them. Group-root
+# permissions so the image works at whatever uid it is given.
+RUN mkdir -p /var/lib/operator/static /etc/pulp/keys /var/lib/pulp /var/tmp/pulp && \
+    PULP_SECRET_KEY=build-only \
+    PULP_CONTENT_ORIGIN=http://localhost \
+    PULP_STATIC_ROOT=/var/lib/operator/static/ \
+    PULP_DB_ENCRYPTION_KEY=/dev/null \
+    PULP_REDIRECT_TO_OBJECT_STORAGE=False \
+    pulpcore-manager collectstatic --noinput && \
+    chgrp -R root /var/lib/operator/static /etc/pulp /var/lib/pulp /var/tmp/pulp && \
+    chmod -R g=u /var/lib/operator/static /etc/pulp /var/lib/pulp /var/tmp/pulp
+
+USER 1000
