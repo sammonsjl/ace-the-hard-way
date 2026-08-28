@@ -1,7 +1,5 @@
 # Lab 9 — Event-Driven Ansible
 
-> **Mostly complete.** eda-server is built, running and reachable through the gateway. Its own status endpoint reports `degraded` because the worker will not stay up; that is the one open item, described at the end.
-
 ## What you will have at the end
 
 eda-server built from upstream source, running as four containers behind nginx, registered with the gateway and answering on `/api/eda/`.
@@ -83,7 +81,8 @@ passed to the containers as `EDA_RESOURCE_SERVER__SECRET_KEY`.
 | `ace-eda-api` | `gunicorn aap_eda.wsgi:application` | 8000 |
 | `ace-eda-ws` | `daphne aap_eda.asgi:application` | 8001 |
 | `ace-eda-scheduler` | `aap-eda-manage scheduler` | — |
-| `ace-eda-worker` | `aap-eda-manage dispatcherd` | — |
+| `ace-eda-worker` | `aap-eda-manage dispatcherd --worker-class DefaultWorker` | — |
+| `ace-eda-activation-worker` | `aap-eda-manage dispatcherd --worker-class ActivationWorker` | — |
 | `ace-eda-web` | nginx | 8445 |
 
 nginx routes `/api/eda/ws/` to daphne and everything else to gunicorn — the same websocket split the controller has, for the same reason.
@@ -104,17 +103,57 @@ curl -u "$A" --cacert $C https://ace-gateway:9443/api/eda/v1/status/   # through
 
 Both should answer. If the second says `no healthy upstream`, restart envoy — see the note at the end of [Lab 8](08-hub.md); the health check remembers a failure from before the service was up.
 
-## Open: the worker will not stay up
+## Two workers, and the argument with no default
 
-The status endpoint reports:
+EDA runs **two** dispatchers, and the difference matters: `DefaultWorker` handles general tasks, `ActivationWorker` runs rulebook activations. With only one of them, or none, the status endpoint reports:
 
 ```json
 {"status": "degraded", "message": "Dispatcherd workers unavailable"}
 ```
 
-`aap-eda-manage rqworker` still exists in the image but EDA's status check looks for a **dispatcherd**, so the queue implementation has moved and the old command has outlived it. Running `aap-eda-manage dispatcherd` instead is clearly the right direction — that container starts and then restarts in a loop, with nothing useful in the journal.
+`aap-eda-manage rqworker` still exists in the image and looks like the obvious command, but the status check looks for a **dispatcherd** — the queue implementation moved and the old entry point outlived it.
 
-Everything else works: API, websockets, scheduler, registration, JWT SSO through the gateway. What is missing is rulebook *activation* — which is also where EDA's own nested-podman story begins, since activations run in decision-environment containers via `PODMAN_SOCKET_URL`. That is the same problem [Lab 7](07-execution.md) solved for execution environments, and the solution there is the obvious place to start.
+The trap is what happens when you get to `dispatcherd` and stop there:
+
+```
+aap-eda-manage dispatcherd: error: the following arguments are required: --worker-class
+```
+
+**`--worker-class` is required and has no default.** Omitting it makes the command print its entire settings dump — dozens of lines that look exactly like a healthy startup — and *then* exit 2 on an argparse error. Under a quadlet with `Restart=on-failure` that is a container which starts, logs what appears to be a successful boot, and dies, forever, with no error anywhere in `journalctl`.
+
+The way to see it is to stop asking systemd and run the command yourself:
+
+```bash
+podman run --rm --network host --userns keep-id:uid=1001,gid=0 \
+  -v ~/ace/eda/settings.yaml:/etc/eda/settings.yaml:ro,Z \
+  -v ~/ace/eda/SECRET_KEY:/etc/eda/SECRET_KEY:ro,Z \
+  -v ~/ace/tls/extracted:/etc/pki/ca-trust/extracted:z \
+  --entrypoint "" localhost/ace-eda:dev \
+  aap-eda-manage dispatcherd
+```
+
+The usage message is on the last line, after everything that looked fine. This is the third time in this tutorial that a container's real error died with the container — the others were [Lab 4](04-postgresql.md)'s postgres initialization and [Lab 6](06-controller.md)'s AWX migration — and the technique is the same every time: take the process out of the unit and run it in the foreground.
+
+With both workers up:
+
+```bash
+curl -u "$A" --cacert $C https://ace-gateway:9443/api/eda/v1/status/
+```
+
+**Want:** `{"status":"good"}`.
+
+## The decision environment
+
+Rulebook activations run in a **decision environment** — the same idea as an execution environment, different contents: `ansible-rulebook` instead of `ansible-core` plus collections.
+
+```bash
+cd containerfiles/de-supported
+podman build -t localhost/ace-de-supported:dev .
+```
+
+One thing in that Containerfile is worth knowing: **it installs a JVM.** `ansible-rulebook`'s event engine is Drools, reached through jpy, so a DE is a Java runtime wearing a Python coat. It is why the image is noticeably larger than the EE.
+
+Activations start their DE containers through `PODMAN_SOCKET_URL`, which is the same nested-rootless-podman problem [Lab 7](07-execution.md) works through in detail — and the settings that solved it there are the place to start here.
 
 ## What you have now
 

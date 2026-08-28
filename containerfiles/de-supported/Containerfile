@@ -1,0 +1,37 @@
+# ACE decision environment — where rulebooks run.
+#
+# Same mechanism as the execution environment in containerfiles/ee-minimal,
+# different contents: ansible-rulebook and its dependencies rather than
+# ansible-core and collections. A job runs in an EE; a rulebook activation runs
+# in a DE.
+#
+# ansible-rulebook needs a JVM: its event engine is Drools, running through
+# jpy. That is the one surprising thing in this file and the reason it is
+# noticeably larger than the EE.
+
+ARG ANSIBLE_RULEBOOK_VERSION=1.1.*
+ARG ANSIBLE_CORE_VERSION=2.17.*
+
+FROM quay.io/centos/centos:stream9
+
+ARG ANSIBLE_RULEBOOK_VERSION
+ARG ANSIBLE_CORE_VERSION
+
+RUN dnf install -y python3.12 python3.12-pip python3.12-devel gcc \
+      java-17-openjdk-headless git && \
+    dnf clean all
+
+ENV JAVA_HOME=/usr/lib/jvm/jre-17-openjdk
+
+RUN pip3.12 install --no-cache-dir \
+      "ansible-core==${ANSIBLE_CORE_VERSION}" \
+      "ansible-rulebook==${ANSIBLE_RULEBOOK_VERSION}" \
+      ansible-runner
+
+RUN ansible-galaxy collection install ansible.eda --collections-path /usr/share/ansible/collections
+
+RUN mkdir -p /runner && chgrp -R 0 /runner && chmod -R g=u /runner
+
+ENV HOME=/runner
+WORKDIR /runner
+CMD ["ansible-rulebook", "--help"]
