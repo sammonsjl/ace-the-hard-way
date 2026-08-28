@@ -23,7 +23,7 @@ Four rules, and they hold for every image in [`containerfiles/`](../containerfil
 
 ## The Containerfile
 
-Write it at `containerfiles/gateway/Containerfile`. Four stages:
+`containerfiles/gateway/Containerfile` is the finished file — a Containerfile has to exist on disk before `podman build` can read it, so this track ships them rather than pretending you can type one into a build ([why](../containerfiles/README.md)). Open it alongside this section. Four stages:
 
 | Stage | Does |
 |---|---|
@@ -32,7 +32,7 @@ Write it at `containerfiles/gateway/Containerfile`. Four stages:
 | `builder` | CentOS Stream 9, `python3.12 -m venv`, installs jewel's `requirements.txt` and `requirements_git.txt` |
 | runtime | nginx 1.24, supervisor, uwsgi, `dumb-init` as PID 1, the venv and the console copied in, `collectstatic` baked |
 
-The full file is in the repo. Four things in it are worth understanding rather than copying:
+Four things in it are worth understanding rather than skimming:
 
 - **The console is built here rather than pulled** because the published platform-UI image is private. This stage is why [Lab 1](01-prerequisites.md) tells you not to build and run at once: `NODE_OPTIONS=--max-old-space-size=8192`.
 - **`uid 1000 / gid 0`** for the `gateway` user. Group-root with `chmod g+rwx` on the runtime directories is how the image stays writable when the UID it runs as changes.
@@ -246,7 +246,7 @@ Three cases have to be skipped or they break: websocket upgrade requests, comple
 vim ~/ace/envoy/envoy-path-rewrite.lua
 ```
 
-The full script is in the repo. Without it, envoy rejects every listener the gateway sends with `Invalid path: /etc/envoy/envoy-path-rewrite.lua`. The gateway service itself does not need a rewrite — its `service_path` and `gateway_path` are both `/` — but the filter is attached at the listener, so the file has to exist before *any* route loads. [Lab 6](06-controller.md) is where it starts doing real work, mapping `/api/controller/` to `/api/`.
+It lives at `~/ace/envoy/envoy-path-rewrite.lua` and is reproduced in full above. Without it, envoy rejects every listener the gateway sends with `Invalid path: /etc/envoy/envoy-path-rewrite.lua`. The gateway service itself does not need a rewrite — its `service_path` and `gateway_path` are both `/` — but the filter is attached at the listener, so the file has to exist before *any* route loads. [Lab 6](06-controller.md) is where it starts doing real work, mapping `/api/controller/` to `/api/`.
 
 ### The quadlet
 
