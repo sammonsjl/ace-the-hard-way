@@ -101,6 +101,16 @@ curl --cacert $C https://ace-eda:8445/api/eda/v1/status/          # directly
 curl -u "$A" --cacert $C https://ace-gateway:9443/api/eda/v1/status/   # through the front door
 ```
 
+`status` does not prove single sign-on — it answers without a token. To confirm the JWT path actually works, ask EDA who you are:
+
+```bash
+curl -u "$A" --cacert $C https://ace-gateway:9443/api/eda/v1/users/me/
+```
+
+**Want:** the gateway's `admin`, carrying a `resource.ansible_id`. That UUID is issued by the gateway and shared across every service, so seeing it here means EDA validated a JWT the gateway signed and resolved it to the same identity — not that it happens to have a local user with the same name.
+
+> EDA's django-ansible-base comes from `poetry.lock`, so it trails the version the gateway, hub and controller share. That is tolerable — verified here — but it is the first thing to check if `users/me` ever returns a JWT claim error. See the DAB generation check in [Lab 8](08-hub.md).
+
 Both should answer. If the second says `no healthy upstream`, restart envoy — see the note at the end of [Lab 8](08-hub.md); the health check remembers a failure from before the service was up.
 
 ## Two workers, and the argument with no default

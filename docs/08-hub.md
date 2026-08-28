@@ -45,7 +45,26 @@ Two things have to come out of the lockfile first:
 - **Extras.** pip refuses a constraints file whose entries carry them — `Constraints cannot have extras` — and a pip-compile lockfile is full of `package[extra]==version`. The version pin is the point; the extras are not.
 - **Direct git references.** A constraint must be a name and a version specifier, and the lockfile pins django-ansible-base to a git ref. That is also the one dependency deliberately overridden below, so dropping it here is exactly right.
 
-**Why DAB is overridden:** the gateway builds against DAB devel, whose JWTs no longer carry a claim that the pinned version still expects. Leave it and hub rejects every token the gateway signs.
+**Why DAB is overridden:** galaxy_ng pins django-ansible-base to a *specific commit* in its `setup.py`. The gateway builds against DAB `devel`. When those two drift apart the JWT format drifts with them, and hub starts rejecting tokens the gateway signed — classically with `Token is missing the "objects" claim`. Forcing DAB to `devel` here makes hub's copy exactly the gateway's.
+
+### The DAB generation check
+
+This is the first thing to run when single sign-on misbehaves anywhere in the platform — every service that sits behind the gateway consumes its JWT through DAB, so they all have to agree:
+
+```bash
+podman run --rm --entrypoint "" localhost/ace-gateway:dev \
+  /opt/aap_gateway/venv/bin/pip show django-ansible-base | awk '/^Version/{print}'
+podman run --rm --entrypoint "" localhost/ace-hub:dev \
+  pip3 show django-ansible-base | awk '/^Version/{print}'
+podman run --rm --entrypoint "" localhost/ace-controller:dev \
+  /var/lib/awx/venv/awx/bin/pip show django-ansible-base | awk '/^Version/{print}'
+podman run --rm --entrypoint "" localhost/ace-eda:dev \
+  /app/venv/bin/pip show django-ansible-base | awk '/^Version/{print}'
+```
+
+**Want:** the same *generation* everywhere. On this build the gateway, hub and controller land on the identical devel build, and EDA trails by a few weeks because its version comes from `poetry.lock` rather than an override — which is fine. A few weeks of devel is not the problem; a *stable* branch pinning a DAB from a different era is, and that is what breaks SSO.
+
+[Lab 9](09-eda.md) shows how to confirm SSO actually works rather than inferring it from version numbers.
 
 ## Key material and configuration
 
