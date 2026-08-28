@@ -48,7 +48,9 @@ You can keep it. Podman is daemonless, keeps its own image store under `~/.local
 Two things would break that, and neither is installed by default:
 
 - **Do not install `podman-docker`.** It aliases the `docker` command to podman. Every Docker workflow you already have would silently start running somewhere else.
-- **Do not enable `podman.socket`.** That is podman's Docker-compatible API endpoint, and it is the one place the two genuinely contend.
+- **`DOCKER_HOST` stays unset.** Pointing it at podman's socket is what actually makes the two collide; nothing in this tutorial needs it.
+
+> **You will need `podman.socket` in [Lab 9](09-eda.md)**, and it is safe to enable. It is podman's API endpoint, and it lives at `/run/user/$UID/podman/podman.sock` — a different path, owned by you, from Docker's `/var/run/docker.sock`, which is root-owned and belongs to the `docker` group. Enabling one does not touch the other.
 
 > If networking behaves strangely later — a container that cannot reach another container, or DNS that resolves everywhere except inside podman — suspect Docker first. Its daemon writes its own iptables chains and has a long history of interfering with bridges it does not own.
 

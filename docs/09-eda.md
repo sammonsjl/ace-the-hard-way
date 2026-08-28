@@ -151,9 +151,128 @@ cd containerfiles/de-supported
 podman build -t localhost/ace-de-supported:dev .
 ```
 
-One thing in that Containerfile is worth knowing: **it installs a JVM.** `ansible-rulebook`'s event engine is Drools, reached through jpy, so a DE is a Java runtime wearing a Python coat. It is why the image is noticeably larger than the EE.
+One thing in that Containerfile is worth knowing: **it installs a JVM.** `ansible-rulebook`'s event engine is Drools, reached through jpy, so a DE is a Java runtime wearing a Python coat:
 
-Activations start their DE containers through `PODMAN_SOCKET_URL`, which is the same nested-rootless-podman problem [Lab 7](07-execution.md) works through in detail — and the settings that solved it there are the place to start here.
+```
+ansible-rulebook [1.1.7]
+  Drools_jpy version = 0.3.10
+  Java home = /usr/lib/jvm/jre-17-openjdk
+```
+
+That is why it is roughly twice the size of the EE.
+
+## Somewhere to keep a rulebook
+
+EDA projects are git repositories, and the URL has to be one EDA accepts. Two attempts fail before one works:
+
+- **`file:///...`** — `Invalid source control URL: Unsupported scheme 'file'`.
+- **Dumb HTTP** (a bare repo behind plain nginx with `git update-server-info`) — EDA clones with `--depth`, and `fatal: dumb http transport does not support shallow capabilities`.
+
+So the lab runs a `git daemon`, which speaks `git://` and supports shallow clones. There is one trap in building it:
+
+> **`git daemon` is not part of the `git` package on EL9.** It ships separately in `git-daemon`. Every image in this tutorial has git and none of them can run `git daemon` — you get `git: 'daemon' is not a git command`, which reads like a typo rather than a missing package.
+
+`containerfiles/git-server/` is four lines for that reason.
+
+```bash
+mkdir -p ~/ace/eda/projects/ace-rulebooks/rulebooks
+vim ~/ace/eda/projects/ace-rulebooks/rulebooks/hello.yml
+```
+
+```yaml
+- name: ACE rulebook smoke test
+  hosts: all
+  sources:
+    - ansible.eda.generic:
+        payload:
+          - message: "hello from a rulebook"
+        loop_count: 1
+        shutdown_after: 5
+  rules:
+    - name: React to the event
+      condition: event.message == "hello from a rulebook"
+      action:
+        debug:
+          msg: "Rulebook fired - this ran in a decision environment"
+```
+
+**`payload`, singular.** `payloads` is the natural guess and the plugin rejects it with `Args.__init__() missing 1 required positional argument: 'payload'` — from inside the DE container, which by then has already started and connected.
+
+Commit it, push into a bare repo under `~/ace/eda/git/`, and serve that directory with the git-server container.
+
+## Activations
+
+Three things have to be right before an activation will even be created.
+
+**1. Seed EDA's initial data.** Creating an activation validates credentials against `CredentialType` rows that a fresh database does not have, and the API returns a bare `Unexpected server error`. The traceback says `DoesNotExist: CredentialType matching query does not exist`:
+
+```bash
+podman exec ace-eda-api aap-eda-manage create_initial_data
+```
+
+That creates 28 credential types and the platform's role definitions.
+
+**2. The podman socket.** Activations start DE containers through podman's **API socket**, not the CLI:
+
+```bash
+systemctl --user enable --now podman.socket
+```
+
+```yaml
+PODMAN_SOCKET_URL: 'unix:///run/podman/podman.sock'
+```
+
+with the host socket mounted into the activation worker. Note what this is *not*: unlike [Lab 7](07-execution.md), nothing here runs podman inside a container. The worker is an API **client** of the host's podman, which is why this needs none of Lab 7's capabilities, devices or storage gymnastics.
+
+**3. The DE's pull policy.** The image was built locally and exists in the host's store, but EDA still tries to pull it — and `localhost/...` sends podman to a registry called `localhost`, which refuses the connection. The activation fails with a 500 whose body is just `{"message":"connection refused"}`:
+
+```bash
+curl ... -X PATCH "$B/decision-environments/1/" -d '{"pull_policy":"never"}'
+```
+
+**Lowercase.** `"Never"` is rejected with `"Never" is not a valid choice.` — the enum values are `always`, `never`, `missing`.
+
+### The CA, one more time
+
+With all that, the DE container starts, connects back to EDA's websocket, and dies:
+
+```
+ansible_rulebook.websocket - WARNING - websocket aborted by OSError:
+  [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed
+```
+
+A DE is a container **EDA** starts, not one you wrote a quadlet for, so nothing has mounted the platform CA into it. `PODMAN_MOUNTS` is how you reach containers you do not launch yourself:
+
+```yaml
+PODMAN_MOUNTS: '@json [{"source": "/home/jamie/ace/tls/extracted",
+                        "target": "/etc/pki/ca-trust/extracted",
+                        "type": "bind", "read_only": true, "relabel": "shared"}]'
+```
+
+This is the fourth distinct place the CA has had to be plumbed — the extracted bundle in [Lab 3](03-internal-ca.md), `REQUESTS_CA_BUNDLE` for Python in [Lab 7](07-execution.md), the read-only bind into execution environments, and now this. One CA, four mechanisms, because four different things start containers.
+
+### Run it
+
+```bash
+post decision-environments '{"name":"ACE DE","image_url":"localhost/ace-de-supported:dev","organization_id":1}'
+post projects '{"name":"ACE rulebooks","url":"git://127.0.0.1/ace-rulebooks.git","organization_id":1}'
+post activations '{"name":"ACE hello activation","project_id":1,"rulebook_id":1,
+                   "decision_environment_id":1,"organization_id":1,
+                   "is_enabled":true,"restart_policy":"never"}'
+```
+
+**Want:** the activation moving `starting` → `running` → `completed`, and in its instance logs:
+
+```
+Container args ['ansible-rulebook', '--worker', '--websocket-url',
+  'wss://ace-eda:8445/api/eda/ws/ansible-rulebook', ...]
+Container ... is running.
+[debug] ******************************************
+Rulebook fired - this ran in a decision environment
+Container ... is cleaned up.
+```
+
+Read what that took. EDA cloned a rulebook from a git daemon, asked the host's podman API for a decision-environment container you built, handed it a websocket URL and a token, and the DE connected *back* to EDA over TLS it could verify — then ran the rule and shut down. The event loop closed inside a container that did not exist thirty seconds earlier.
 
 ## What you have now
 

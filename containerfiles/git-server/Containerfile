@@ -1,0 +1,16 @@
+# A git server for the rulebook repository in Lab 9.
+#
+# EDA projects are git repositories and EDA clones them with --depth, so the
+# lab needs somewhere to put a rulebook that supports shallow clones. The dumb
+# HTTP transport does not ("fatal: dumb http transport does not support shallow
+# capabilities"), so this serves the git:// protocol instead.
+#
+# `git daemon` is NOT part of the git package on EL9 — it ships separately in
+# git-daemon, which is why every image in this tutorial that has git still
+# cannot run it.
+
+FROM quay.io/centos/centos:stream9
+RUN dnf install -y git git-daemon && dnf clean all
+EXPOSE 9418
+ENTRYPOINT ["git", "daemon", "--reuseaddr", "--export-all", "--base-path=/srv/git"]
+CMD ["/srv/git"]
