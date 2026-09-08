@@ -166,7 +166,7 @@ in `python-ldap`. Both compile against native libraries:
 ```bash
 sudo dnf -y install \
   gcc gcc-c++ make git \
-  python3.12 python3.12-devel python3.12-pip \
+  python3.12 python3.12-devel \
   libffi-devel openssl-devel \
   libpq-devel postgresql-devel \
   openldap-devel cyrus-sasl-devel \
@@ -196,6 +196,7 @@ uwsgi it does not need to share an interpreter with what it runs. That is what l
 system-wide:
 
 ```bash
+sudo python3.12 -m ensurepip --altinstall
 sudo python3.12 -m pip install supervisor
 sudo ln -sf /usr/local/bin/supervisord  /usr/bin/supervisord
 sudo ln -sf /usr/local/bin/supervisorctl /usr/bin/supervisorctl
@@ -203,12 +204,32 @@ sudo which supervisord supervisorctl
 sudo supervisord --version
 ```
 
-> **The symlinks are not cosmetic**, though not for the reason you might expect. Fedora's `sudo`
-> *does* keep `/usr/local/bin` on its `secure_path` (`sudo grep secure_path /etc/sudoers`), so
-> `sudo supervisorctl` resolves without them. They matter for [Lab 6](06-controller.md) instead:
-> AWX restarts its own processes by shelling out to a **bare** `supervisorctl`, resolved from
-> `PATH`, reading its **default** config path — and `/usr/bin` is where a packaged supervisord
-> would have lived. Put the links in here so that lab has them.
+> **`ensurepip`, because there is no `python3.12-pip` package.** Fedora packages pip only for the
+> *default* interpreter — 3.14 here. The alternate versioned interpreters this build uses (3.12 on
+> the gateway, controller and EDA; 3.11 on the hub) each ship `ensurepip` with a pip wheel bundled
+> inside instead, which is what bootstraps it. `--altinstall` is what stops it stamping on the
+> system `pip3`. Ask dnf for `python3.12-pip` and you get `No match for argument`.
+>
+> Inside a venv this never comes up — `python3.12 -m venv` bootstraps pip on its own. It only
+> matters here, where supervisor is installed system-wide on purpose.
+
+> **What the symlinks are actually for.** They reproduce the end state a packaged supervisord
+> would leave — binaries on `/usr/bin` — which is what [Lab 6](06-controller.md) needs: AWX
+> restarts its own processes by shelling out to a **bare** `supervisorctl`, resolved from `PATH`,
+> reading its **default** config path, with no `-c` and no environment variable.
+>
+> On Fedora they are belt-and-braces rather than load-bearing, and the `which` above shows why:
+> pip installs supervisor's scripts into **both** `/usr/local/bin` and `/usr/local/sbin`, and
+> Fedora's `secure_path` (`sudo grep secure_path /etc/sudoers`) begins
+> `/usr/local/sbin:/usr/local/bin`, so a bare `supervisorctl` resolves to the `sbin` copy before it
+> ever reaches `/usr/bin`. The copies are identical and both default to `/etc/supervisord.conf`, so
+> it does not matter which one runs.
+>
+> It matters a great deal on RHEL and its rebuilds, where `secure_path` is
+> `/sbin:/bin:/usr/sbin:/usr/bin` with no `/usr/local` at all — there, without these links, every
+> `sudo supervisorctl` is `command not found` while the binary sits one directory over. Keep them:
+> they cost nothing here and they are the difference between working and not if you carry this
+> build to a RHEL box.
 
 ```bash
 sudo install -d -o root -g root -m 0755 /var/log/supervisor /etc/supervisord.d /var/run/supervisor

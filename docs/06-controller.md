@@ -405,10 +405,8 @@ sudo supervisord --version
 > `/usr/bin/supervisorctl` plus `/etc/supervisord.conf` is exactly what that expects, and pip puts
 > the real binaries in `/usr/local/bin`.
 >
-> **`ensurepip`, because there is no `python3.12-pip` package.** Fedora packages pip only for its
-> *default* interpreter. The alternate versioned interpreters — 3.11, 3.12, 3.13 — ship
-> `ensurepip` with a pip wheel bundled inside instead, and `--altinstall` is what keeps it from
-> stamping on the system `pip3`.
+> **`ensurepip` again**, for the reason [Lab 5](05-gateway.md) gives: Fedora has no
+> `python3.12-pip` package, so pip is bootstrapped out of the interpreter's own bundled wheel.
 >
 > **This is also why supervisord and not eight systemd units.** Native units would be nicer in every
 > way except the one that matters: remove supervisord and AWX's own restart calls have nothing to
