@@ -594,7 +594,7 @@ redirect_stderr = true
 stdout_logfile = /var/log/supervisor/awx-uwsgi.log
 stdout_logfile_maxbytes = 10MB
 stdout_logfile_backups = 10
-environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx",REQUESTS_CA_BUNDLE="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 [program:awx-daphne]
 command = /var/lib/awx/venv/awx/bin/daphne -u /var/run/tower/daphne.sock awx.asgi:channel_layer
@@ -607,7 +607,7 @@ redirect_stderr = true
 stdout_logfile = /var/log/supervisor/awx-daphne.log
 stdout_logfile_maxbytes = 10MB
 stdout_logfile_backups = 10
-environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx",REQUESTS_CA_BUNDLE="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 [program:awx-dispatcher]
 command = /var/lib/awx/venv/awx/bin/awx-manage dispatcherd
@@ -620,7 +620,7 @@ redirect_stderr = true
 stdout_logfile = /var/log/supervisor/awx-dispatcher.log
 stdout_logfile_maxbytes = 10MB
 stdout_logfile_backups = 10
-environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx",REQUESTS_CA_BUNDLE="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 [program:awx-callback-receiver]
 command = /var/lib/awx/venv/awx/bin/awx-manage run_callback_receiver
@@ -632,7 +632,7 @@ redirect_stderr = true
 stdout_logfile = /var/log/supervisor/awx-callback-receiver.log
 stdout_logfile_maxbytes = 10MB
 stdout_logfile_backups = 10
-environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx",REQUESTS_CA_BUNDLE="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 [program:awx-wsrelay]
 command = /var/lib/awx/venv/awx/bin/awx-manage run_wsrelay
@@ -644,7 +644,7 @@ redirect_stderr = true
 stdout_logfile = /var/log/supervisor/awx-wsrelay.log
 stdout_logfile_maxbytes = 10MB
 stdout_logfile_backups = 10
-environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx",REQUESTS_CA_BUNDLE="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 [program:awx-ws-heartbeat]
 command = /var/lib/awx/venv/awx/bin/awx-manage run_ws_heartbeat
@@ -657,7 +657,7 @@ redirect_stderr = true
 stdout_logfile = /var/log/supervisor/awx-ws-heartbeat.log
 stdout_logfile_maxbytes = 10MB
 stdout_logfile_backups = 10
-environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx",REQUESTS_CA_BUNDLE="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 [program:awx-rsyslogd]
 command = rsyslogd -n -i /var/run/awx-rsyslog/rsyslog.pid -f /var/lib/awx/rsyslog/rsyslog.conf
@@ -685,7 +685,7 @@ killasgroup = true
 redirect_stderr = true
 stdout_logfile = /var/log/supervisor/awx-rsyslog-configurer.log
 stdout_logfile_maxbytes = 0
-environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx"
+environment = AWX_MODE="production",HOME="/var/lib/awx",USER="awx",REQUESTS_CA_BUNDLE="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 [group:tower-processes]
 programs = awx-dispatcher,awx-callback-receiver,awx-uwsgi,awx-daphne,awx-wsrelay,awx-rsyslogd,awx-rsyslog-configurer,awx-ws-heartbeat
@@ -705,6 +705,20 @@ EOF
 > **`redirect_stderr` everywhere, and especially on `awx-rsyslogd`.** Skip it there and its failures
 > are invisible: rsyslogd reports startup errors on stderr, supervisor discards them, and you get
 > `RUNNING` over an empty log while the process restarts forever.
+>
+> **`REQUESTS_CA_BUNDLE` on the running processes, not just on the one-off commands.** Section 8
+> sets `ANSIBLE_BASE_JWT_KEY` to a **URL**, so a live AWX worker fetches the gateway's public key
+> over HTTPS on the first proxied request and has to trust our internal CA to do it. Leave it out
+> and the symptom is peculiar: the controller answers `200` when you curl it directly, and `500`
+> for the identical path through the gateway — because only the proxied request carries a JWT worth
+> validating. The reason is buried in `/var/log/tower/tower.log`:
+>
+> ```
+> File ".../ansible_base/jwt_consumer/common/cert.py", line 46, in _get_decryption_key_from_url
+> ```
+>
+> and `migrate_service_data` in section 8 fails with `Successful migrations: 0` and no explanation
+> at all.
 
 ### The unit that does nothing
 
@@ -1142,14 +1156,14 @@ Last, and only once trust exists in both directions. Two commands on two machine
 **On ace-gateway** — pull the controller's users, teams and organisations up into the platform:
 
 ```bash
-sudo -u gateway REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
+sudo -u gateway REQUESTS_CA_BUNDLE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
   aap-gateway-manage migrate_service_data --api-slug controller --username admin
 ```
 
 **Then on ace-controller** — pull the platform's identities back down:
 
 ```bash
-sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
+sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
   awx-manage resource_sync
 ```
 
@@ -1159,6 +1173,14 @@ sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 > `SSLError(SSLCertVerificationError(... unable to get local issuer certificate))`, which reads
 > like a broken certificate rather than a bundle the library cannot see. `openssl verify` succeeding
 > on the same file, on the same host, is the tell.
+>
+> **Mind the path.** `/etc/pki/tls/certs/ca-bundle.crt` is the RHEL-family location and is the one
+> most documentation names; **Fedora does not ship it**. The bundle `update-ca-trust` maintains
+> lives at `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`, and that is what these commands and
+> the supervisor programs point at. Naming the missing path does not fall back to the system store
+> — it raises `OSError: Could not find a suitable TLS CA certificate bundle, invalid path:`, which
+> at least says so plainly. Confirm your CA is in there with
+> `grep -c "ACE Managed CA" /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`.
 >
 > **Order matters, and the error if you get it wrong is genuinely opaque.** Run `resource_sync`
 > first and it dies with:
