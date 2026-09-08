@@ -274,15 +274,40 @@ network. This is that moment:
 
 ```bash
 sudo sed -i 's/^port 0$/port 6379/' /etc/valkey/valkey.conf
+sudo sed -i 's/^protected-mode yes$/protected-mode no/' /etc/valkey/valkey.conf
 sudo systemctl restart valkey
 sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.1.42/32 port port=6379 protocol=tcp accept'
 sudo firewall-cmd --reload
 ```
 
+> **`protected-mode no` is not optional here, and it is worth reading the error it prevents.**
+> Valkey refuses non-loopback connections whenever no password is set — and unlike classic Redis,
+> which only applied protected mode when *no* `bind` was configured at all, Valkey applies it even
+> though Lab 5 bound this server to a specific address. Skip the line and the controller's very
+> first redis call fails with a `redis.exceptions.ConnectionError: Connection closed by server.`
+> buried in a Python traceback; the reason only appears if you speak the protocol by hand:
+>
+> ```
+> -DENIED Running in protected mode because protected mode is enabled and no password is set
+> for the default user. In this mode connections are only accepted from the loopback interface.
+> ```
+>
+> Valkey is making a fair point: an unauthenticated database is being opened to the network. The
+> answer this build gives is the rule below rather than a password, and that answer only holds
+> because the rule is written the way it is.
+
 The rule names **one** address — the controller's — and not the subnet. This redis has no password
-set; the only thing standing between it and anything that can reach port 6379 is this rule. These
-VMs are bridged onto your home LAN, so a `192.168.1.0/24` rule here would publish an unauthenticated
-redis to every device you own.
+set, so with protected mode off the only thing standing between it and anything that can reach port
+6379 is this rule. These VMs are bridged onto your home LAN, so a `192.168.1.0/24` rule here would
+publish an unauthenticated redis to every device you own.
+
+Prove both halves before moving on — the allowed node answers and a disallowed one does not:
+
+```bash
+exec 3<>/dev/tcp/ace-gateway/6379; printf 'PING\r\n' >&3; read -t 5 -r r <&3; echo "$r"; exec 3<&-
+```
+
+`+PONG` on **ace-controller**; `No route to host` on **ace-hub**, which has no rule yet.
 
 **Back on `ace-controller`** — confirm the path before trusting it:
 
