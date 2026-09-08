@@ -62,7 +62,7 @@ version 18, so every node that runs work needs a container runtime. That is not 
 bare-metal rule — nothing you *build* runs in a container; the runtime is the job sandbox.
 
 ```bash
-sudo dnf -y install podman crun
+sudo dnf -y install podman crun slirp4netns
 grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
 sudo loginctl enable-linger awx
 loginctl show-user awx --property=Linger
@@ -70,6 +70,23 @@ loginctl show-user awx --property=Linger
 cd /tmp
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/awx-ee:latest
 ```
+
+> **`slirp4netns` is not optional, and podman will not pull it in for you.** Fedora's podman
+> defaults to `netavark` with `pasta` (the `passt` package) for rootless networking, and no longer
+> depends on slirp4netns — where the enterprise rebuilds still install it as a matter of course.
+> ansible-runner asks for it by name when it starts an execution environment, so without it every
+> job and every project sync fails at the container, with the reason visible only in the job's own
+> output:
+>
+> ```
+> Error: could not find slirp4netns, the network namespace can't be configured:
+> exec: "slirp4netns": executable file not found in $PATH
+> ```
+>
+> Nothing upstream of that says anything useful — the project update simply reports `failed`, and
+> launching a template afterwards gives you `Missing a revision to run due to failed project
+> update`, which points at the project rather than the container runtime.
+
 
 > **`enable-linger` is not optional.** `/run/user/<uid>` is created by `systemd-logind` at a user's
 > first login and destroyed at their last logout. The `awx` user never logs in, so without linger
