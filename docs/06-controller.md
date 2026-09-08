@@ -273,8 +273,8 @@ network. This is that moment:
 **On `ace-gateway`:**
 
 ```bash
-sudo sed -i 's/^port 0$/port 6379/' /etc/redis/redis.conf
-sudo systemctl restart redis
+sudo sed -i 's/^port 0$/port 6379/' /etc/valkey/valkey.conf
+sudo systemctl restart valkey
 sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.1.42/32 port port=6379 protocol=tcp accept'
 sudo firewall-cmd --reload
 ```

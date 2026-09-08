@@ -55,16 +55,31 @@ ssh ace-gateway
 ## 1. Redis
 
 ```bash
-sudo dnf -y install redis
+sudo dnf -y install valkey
 redis-server --version
 ```
 
-The socket lives in its own directory, owned by `redis`, mode `0750`:
+> **Fedora ships Valkey, not Redis.** After Redis changed its licence in 2024 Fedora replaced it
+> with [Valkey](https://valkey.io/), the Linux Foundation fork, and there is no `redis` package left
+> — `dnf install redis` resolves to `valkey` through a `Provides`. Install it by its real name so
+> what you typed matches what you get.
+>
+> The compatibility surface is good and the wire protocol is identical, so the platform's Python
+> clients neither know nor care. What is *not* aliased is the packaging: the service account and
+> group are **`valkey`**, and the config lives in **`/etc/valkey/valkey.conf`**. The binaries
+> (`redis-server`, `redis-cli`) are symlinks and `redis.service` is an alias, which is exactly what
+> makes this trap quiet — every command you type appears to work right up until one wants the user
+> or the config file.
+>
+> The socket path below stays `/run/redis/redis.sock` on purpose: that is where the RPM installer
+> this build replicates puts it, and the gateway's settings name it explicitly either way.
+
+The socket lives in its own directory, owned by `valkey`, mode `0750`:
 
 ```bash
-sudo install -d -o redis -g redis -m 0750 /var/run/redis
+sudo install -d -o valkey -g valkey -m 0750 /var/run/redis
 sudo tee /etc/tmpfiles.d/redis.conf >/dev/null <<'EOF'
-D /run/redis 0750 redis redis -
+D /run/redis 0750 valkey valkey -
 EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/redis.conf
 sudo restorecon -Rv /var/run/redis
@@ -84,7 +99,7 @@ ls -ld /var/run/redis
 Now the config:
 
 ```bash
-sudo vim /etc/redis/redis.conf
+sudo vim /etc/valkey/valkey.conf
 ```
 
 ```
@@ -92,8 +107,8 @@ port 0                                # no TCP for local clients — socket only
 bind 127.0.0.1 192.168.1.41
 unixsocket /run/redis/redis.sock
 unixsocketperm 777
-dir /var/lib/redis
-logfile /var/log/redis/redis.log
+dir /var/lib/valkey
+logfile /var/log/valkey/valkey.log
 ```
 
 Two of those look wrong together and aren't:
@@ -101,12 +116,12 @@ Two of those look wrong together and aren't:
 - **`port 0` disables the TCP listener.** Not "bind to localhost" — off. The gateway talks to redis
   over the unix socket, which is faster and has nothing to firewall.
 - **`unixsocketperm 777` looks alarming and isn't**, because the *directory* is `0750`. A process
-  must be in the `redis` group to traverse `/var/run/redis` before it can even see the socket. The
+  must be in the `valkey` group to traverse `/var/run/redis` before it can even see the socket. The
   directory is the access control; the socket mode is not a second, redundant gate.
 
 ```bash
-sudo systemctl enable --now redis
-systemctl is-active redis
+sudo systemctl enable --now valkey
+systemctl is-active valkey
 ```
 
 > **The controller needs TCP next, and EDA needs it after that.** [Lab 6](06-controller.md) is
@@ -123,7 +138,7 @@ systemctl is-active redis
 ```bash
 sudo useradd --system --home-dir /var/lib/ansible-automation-platform/gateway \
              --create-home --shell /bin/bash gateway
-sudo usermod -aG redis gateway
+sudo usermod -aG valkey gateway
 sudo install -d -o gateway -g gateway -m 0750 /etc/ansible-automation-platform/gateway
 sudo install -d -o gateway -g gateway -m 2775 /var/log/ansible-automation-platform/gateway
 sudo install -d -o gateway -g gateway -m 0755 /var/lib/ansible-automation-platform/venv
@@ -133,7 +148,7 @@ sudo chmod 0755 /var/lib/ansible-automation-platform
 id gateway
 ```
 
-The redis group is not optional — the settings below cache on a socket in a directory only that
+The `valkey` group is not optional — the settings below cache on a socket in a directory only that
 group can enter. Miss it and the gateway starts, then fails the moment it touches the cache.
 
 The `venv` directory is created explicitly because the gateway's **home** is
