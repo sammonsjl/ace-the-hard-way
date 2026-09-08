@@ -763,12 +763,31 @@ this VM's 8 GB of RAM once the OS has taken its share, and a great deal more tha
 laptop-scale sizing gives it. Give it somewhere to spill either way:
 
 ```bash
-sudo fallocate -l 6G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
+sudo btrfs filesystem mkswapfile --size 6G /swapfile
 sudo swapon /swapfile
-free -h | grep -i swap
+swapon --show
 ```
+
+> **That is not the usual `fallocate` + `mkswap` + `swapon`, because the root filesystem is
+> btrfs.** Fedora Cloud Base installs on btrfs where the enterprise rebuilds give you xfs, and
+> btrfs will not swap to a file that is copy-on-write, compressed, or has holes in it. Build one
+> the ordinary way and the failure is at the last step, with no hint as to which of those three is
+> the problem:
+>
+> ```
+> swapon: /swapfile: swapon failed: Invalid argument
+> ```
+>
+> `btrfs filesystem mkswapfile` sets no-COW, disables compression and preallocates in one command.
+> It needs btrfs-progs 6.1 or newer, which Fedora has. On an xfs or ext4 root the classic sequence
+> is still correct — check with `findmnt -no FSTYPE /` if you are not sure what you are on.
+
+> **`free -h` already shows ~8 GB of swap before you run any of this, and it will not save you.**
+> Fedora enables **zram** by default — a compressed block device backed by RAM. Swapping to it
+> costs the very thing the build has run out of, so a heap that overflows physical memory does not
+> get rescued by it. `swapon --show` is the command that tells you the difference: a `zram0` of
+> type `partition` is the default, and `/swapfile` of type `file` is the one you just added.
+> Both can be present, and the file is the one doing the work here.
 
 ### Build
 
