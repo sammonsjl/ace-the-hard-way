@@ -55,7 +55,7 @@ sudo vim /var/lib/pgsql/data/postgresql.conf
 ```
 
 ```
-listen_addresses = '192.168.56.10,localhost'
+listen_addresses = '192.168.1.40,localhost'
 max_connections = 200
 ```
 
@@ -85,30 +85,28 @@ cannot work for a remote client — there is no local identity to check:
 sudo vim /var/lib/pgsql/data/pg_hba.conf
 ```
 
-Change the loopback rules and add one for the lab network:
+Change the loopback rules and add one per client:
 
 ```
-# TYPE  DATABASE  USER  ADDRESS            METHOD
-local   all       all                      peer
-host    all       all   127.0.0.1/32       scram-sha-256
-host    all       all   ::1/128            scram-sha-256
-host    all       all   192.168.56.0/24    scram-sha-256
+# TYPE  DATABASE  USER      ADDRESS           METHOD
+local   all       all                         peer
+host    all       all       127.0.0.1/32      scram-sha-256
+host    all       all       ::1/128           scram-sha-256
+host    awx       awx       192.168.1.42/32   scram-sha-256
+host    gateway   gateway   192.168.1.41/32   scram-sha-256
+host    pulp      pulp      192.168.1.43/32   scram-sha-256
+host    eda       eda       192.168.1.44/32   scram-sha-256
 ```
 
-That last line is what makes this a server rather than a standalone. It is also the line to think
-about: it says *any* host on the lab network may attempt to authenticate to *any* database. A
-tighter build writes four rules, one per database, each naming its own client:
+Those four `host` lines are what make this a server rather than a standalone, and each one names
+exactly one database, one role, and one address. A compromised hub cannot even attempt to log into
+the controller's database.
 
-```
-host    awx       awx       192.168.56.12/32   scram-sha-256
-host    gateway   gateway   192.168.56.11/32   scram-sha-256
-host    pulp      pulp      192.168.56.13/32   scram-sha-256
-host    eda       eda       192.168.56.14/32   scram-sha-256
-```
-
-Either works. The four-rule version is what you would write in production and is strictly better —
-a compromised hub cannot even attempt to log into the controller's database. Use it if you prefer;
-the single-subnet rule is kept above because it makes a first-time failure easier to diagnose.
+It is tempting to collapse them into a single subnet rule — `host all all 192.168.1.0/24` — and on
+an isolated hypervisor network that would be a reasonable lab shortcut. **It is not one here.**
+These VMs are bridged onto your home LAN, so `192.168.1.0/24` is not "the lab", it is your laptop,
+your phone, your TV and every other thing on the network. A subnet rule would let any of them
+attempt to authenticate to any database on this node. Write the four rules.
 
 Apply with a **reload**, not a restart — `pg_hba.conf` is re-read on `SIGHUP`:
 
@@ -163,10 +161,17 @@ sudo -iu postgres psql -c '\l' | grep -E 'awx|gateway|pulp|eda'
 ```bash
 sudo dnf -y install firewalld
 sudo systemctl enable --now firewalld
-sudo firewall-cmd --permanent --add-service=postgresql
+for ip in 192.168.1.41 192.168.1.42 192.168.1.43 192.168.1.44; do
+  sudo firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=$ip/32 port port=5432 protocol=tcp accept"
+done
 sudo firewall-cmd --reload
-sudo firewall-cmd --list-services
+sudo firewall-cmd --list-rich-rules
 ```
+
+Four rules naming four addresses, rather than the one-liner `--add-service=postgresql` — that
+opens 5432 to anything that can route to this node, and on a bridged network that is your whole
+home LAN. The `pg_hba.conf` rules above would still refuse those connections, but there is no
+reason to let them reach the authentication stage at all.
 
 ## Verify — from a client, not from here
 
@@ -187,7 +192,7 @@ error tells you which:
 | `could not translate host name "ace-db"` | `/etc/hosts` — see [Lab 2](02-vms.md) |
 | `No route to host`, or a timeout | firewalld on ace-db |
 | `Connection refused` | `listen_addresses` is still loopback-only, or postgres is down |
-| `no pg_hba.conf entry for host …` | the `192.168.56.0/24` line is missing, or postgres wasn't reloaded |
+| `no pg_hba.conf entry for host …` | this client's `host` line is missing or names the wrong address, or postgres wasn't reloaded |
 | `password authentication failed` | the password — everything else worked |
 
 That table is worth internalising, because those five failures look identical from the

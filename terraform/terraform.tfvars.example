@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars and fill in. That filename is gitignored; this one
+# is not, so keep real credentials out of it.
+
+proxmox_endpoint  = "https://proxmox.example.lan:8006"
+proxmox_api_token = "root@pam!ace=00000000-0000-0000-0000-000000000000"
+
+# The provider needs SSH to the node as well as the API, because uploading a
+# cloud-init snippet writes a file on the node rather than calling the API.
+# Either give it a password:
+proxmox_ssh_username = "root"
+proxmox_ssh_password = "changeme"
+# ...or, if root's key is already in your SSH agent, drop the password and set:
+# proxmox_ssh_agent = true
+
+# The Proxmox node name, as shown in the left-hand tree of the web UI.
+node_name = "pve"
+
+# Addresses. These have to be free on your LAN and outside your router's DHCP
+# pool — see Lab 2. The defaults in variables.tf use 192.168.1.40-.44.
+# gateway_ip  = "192.168.1.1"
+# dns_servers = ["192.168.1.1"]
+
+# Storage. `local-lvm` and `local` are the stock names on a single-disk install.
+# datastore_id         = "local-lvm"
+# image_datastore_id   = "local"
+# snippet_datastore_id = "local"

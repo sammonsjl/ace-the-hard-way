@@ -1,12 +1,13 @@
 # ACE the Hard Way — lab environment
 #
-# Five VMs, mirroring the shape of a distributed RPM deployment:
+# Five VMs on a Proxmox VE node, mirroring the shape of a distributed RPM
+# deployment:
 #
-#   ace-db          .10   PostgreSQL, alone on its own host
-#   ace-gateway     .11   platform gateway + colocated Redis + envoy + the console
-#   ace-controller  .12   AWX — a HYBRID node, so it also runs jobs in EE containers
-#   ace-hub         .13   automation hub (galaxy_ng on pulpcore)
-#   ace-eda         .14   Event-Driven Ansible
+#   ace-db          .40   PostgreSQL, alone on its own host
+#   ace-gateway     .41   platform gateway + colocated Redis + envoy + the console
+#   ace-controller  .42   AWX — a HYBRID node, so it also runs jobs in EE containers
+#   ace-hub         .43   automation hub (galaxy_ng on pulpcore)
+#   ace-eda         .44   Event-Driven Ansible
 #
 # A real deployment of this shape adds a sixth VM — a dedicated execution node —
 # and keeps the controller control-only. We fold that role into the controller by
@@ -17,166 +18,147 @@
 locals {
   ssh_pubkey = trimspace(file(pathexpand(var.ssh_public_key_path)))
 
-  # The repo root — the directory holding this terraform/ directory. Shared into
-  # every VM at var.share_mount.
-  repo_dir = abspath("${path.module}/..")
-
   # Rendered into /etc/hosts on every node, as quoted printf arguments.
   hosts_entries = join(" ", [
     for name, n in var.nodes : "'${n.ip} ${name}'"
   ])
+
+  # The node that exports the shared directory, and its address.
+  share_server_ip = var.nodes[var.share_server].ip
+
+  # Every other node is an NFS client of it. One export line per client rather
+  # than a whole-subnet export: the share carries certificate requests, and the
+  # lab nodes are on your home LAN alongside everything else you own.
+  share_clients = [
+    for name, n in var.nodes : n.ip if name != var.share_server
+  ]
 }
 
-# One network for all five: SSH and lab traffic share a single subnet, so there
-# is only one place to look when a firewall rule is wrong.
-resource "libvirt_network" "lab" {
-  name      = var.network_name
-  autostart = true
-  forward   = { mode = "nat" }
-  dns       = { enable = "yes" }
+# Downloaded to the Proxmox node once, then imported as the disk for all five
+# VMs. `import` is a content type the datastore has to allow — see Lab 1.
+resource "proxmox_download_file" "base" {
+  node_name    = var.node_name
+  content_type = "import"
+  datastore_id = var.image_datastore_id
+  url          = var.base_image_url
+  file_name    = "ace-rocky9-base.qcow2"
 
-  ips = [{
-    family  = "ipv4"
-    address = var.gateway_ip
-    netmask = cidrnetmask(var.network_cidr)
+  # The image is ~650 MB from dl.rockylinux.org and the default is two minutes.
+  upload_timeout = 1800
+}
 
-    # Addresses are pinned by MAC rather than configured inside the guest.
-    # libvirt's own DHCP hands each node the address the labs expect, so there is
-    # no guest-side network config to drift or to guess an interface name for.
-    dhcp = {
-      ranges = [{ start = cidrhost(var.network_cidr, 100), end = cidrhost(var.network_cidr, 200) }]
-      hosts = [
-        for name, n in var.nodes : { mac = n.mac, ip = n.ip, name = name }
-      ]
+# One cloud-init user-data document per node, uploaded to the snippets
+# datastore. This is the reason the provider needs SSH to the Proxmox host:
+# snippets are written as files on the node, not through the API.
+#
+# Proxmox can generate cloud-init itself from a username and a key, but that
+# form can only make a user — it cannot install a package or write a file. The
+# nodes need both, so the whole document is written here instead.
+resource "proxmox_virtual_environment_file" "user_data" {
+  for_each = var.nodes
+
+  node_name    = var.node_name
+  content_type = "snippets"
+  datastore_id = var.snippet_datastore_id
+
+  source_raw {
+    file_name = "${each.key}-user-data.yaml"
+
+    data = templatefile("${path.module}/cloud-init/user-data.yaml.tftpl", {
+      hostname        = each.key
+      guest_user      = var.guest_user
+      ssh_pubkey      = local.ssh_pubkey
+      share_mount     = var.share_mount
+      hosts_entries   = local.hosts_entries
+      is_share_server = each.key == var.share_server
+      share_server_ip = local.share_server_ip
+      share_clients   = local.share_clients
+    })
+  }
+}
+
+resource "proxmox_virtual_environment_vm" "node" {
+  for_each = var.nodes
+
+  node_name = var.node_name
+  vm_id     = each.value.vm_id
+  name      = each.key
+  tags      = ["ace", "the-hard-way"]
+
+  description = "ACE the Hard Way — ${each.key}"
+  on_boot     = true
+
+  machine       = "q35"
+  scsi_hardware = "virtio-scsi-single"
+  bios          = "seabios"
+
+  # Deliberately off. With the agent enabled the provider waits for the guest to
+  # answer before it considers the VM created — and the guest cannot answer
+  # until cloud-init has installed qemu-guest-agent, which happens well after
+  # boot. The addresses here are static and already known, so nothing is gained
+  # by waiting for the agent to report them.
+  agent {
+    enabled = false
+  }
+
+  # Without the guest agent Proxmox has no way to ask the OS to shut down, so
+  # tell it to pull the plug on destroy rather than wait for a graceful stop
+  # that will never come.
+  stop_on_destroy = true
+
+  cpu {
+    cores = each.value.vcpu
+    type  = "host"
+  }
+
+  memory {
+    dedicated = each.value.memory
+  }
+
+  network_device {
+    bridge = var.bridge
+  }
+
+  disk {
+    datastore_id = var.datastore_id
+    interface    = "scsi0"
+    iothread     = true
+    discard      = "on"
+    ssd          = true
+    size         = var.disk_size_gb
+    import_from  = proxmox_download_file.base.id
+  }
+
+  boot_order = ["scsi0"]
+
+  operating_system {
+    type = "l26"
+  }
+
+  initialization {
+    datastore_id = var.datastore_id
+    interface    = "ide2"
+
+    # Static addressing means no DHCP server is answering these nodes, so the
+    # resolvers have to be handed over explicitly or nothing resolves.
+    dns {
+      servers = var.dns_servers
     }
-  }]
-}
 
-# Downloaded once, then used as the backing store for all five overlays.
-# `capacity` is ignored when `create.content` is set ("required unless using
-# create.content"), so the image lands at its native 10 GiB and the overlays
-# below carry the size we actually want.
-resource "libvirt_volume" "base" {
-  name   = "ace-rocky9-base.qcow2"
-  pool   = var.pool
-  target = { format = { type = "qcow2" } }
-  create = {
-    content = { url = var.base_image_url }
-  }
-}
+    ip_config {
+      ipv4 {
+        address = "${each.value.ip}/${var.netmask}"
+        gateway = var.gateway_ip
+      }
+    }
 
-# A thin copy-on-write overlay per node. cloud-init's growpart then expands the
-# root partition to fill it on first boot.
-resource "libvirt_volume" "node" {
-  for_each = var.nodes
-
-  name          = "${each.key}.qcow2"
-  pool          = var.pool
-  capacity      = var.disk_size
-  capacity_unit = "B"
-  target        = { format = { type = "qcow2" } }
-  backing_store = {
-    path   = libvirt_volume.base.path
-    format = { type = "qcow2" }
-  }
-}
-
-resource "libvirt_cloudinit_disk" "node" {
-  for_each = var.nodes
-
-  name = "${each.key}-cloudinit.iso"
-
-  meta_data = <<-EOT
-    instance-id: ${each.key}
-    local-hostname: ${each.key}
-  EOT
-
-  user_data = templatefile("${path.module}/cloud-init/user-data.yaml.tftpl", {
-    hostname      = each.key
-    guest_user    = var.guest_user
-    ssh_pubkey    = local.ssh_pubkey
-    share_tag     = var.share_tag
-    share_mount   = var.share_mount
-    hosts_entries = local.hosts_entries
-  })
-}
-
-resource "libvirt_domain" "node" {
-  for_each = var.nodes
-
-  name        = each.key
-  type        = "kvm"
-  memory      = each.value.memory
-  memory_unit = "MiB"
-  vcpu        = each.value.vcpu
-
-  # Required. Without it the domain is defined but never started.
-  running = true
-
-  # Required. Omit this and the provider emits `acpi=off`, and a q35 guest then
-  # hangs before GRUB — no console output, no DHCP, no sign of life at all.
-  features = {
-    acpi = true
-    apic = {}
+    user_data_file_id = proxmox_virtual_environment_file.user_data[each.key].id
   }
 
-  os = {
-    type         = "hvm"
-    type_arch    = "x86_64"
-    type_machine = "q35"
-  }
-
-  cpu = { mode = "host-passthrough" }
-
-  # virtiofs needs shared memory backing for the vhost-user connection to
-  # virtiofsd. Without it the share simply does not appear.
-  memory_backing = {
-    memory_source = { type = "memfd" }
-    memory_access = { mode = "shared" }
-  }
-
-  devices = {
-    disks = [
-      {
-        device = "disk"
-        driver = { name = "qemu", type = "qcow2" }
-        source = { volume = { pool = var.pool, volume = libvirt_volume.node[each.key].name } }
-        target = { dev = "vda", bus = "virtio" }
-      },
-      {
-        device    = "cdrom"
-        driver    = { name = "qemu", type = "raw" }
-        source    = { file = { file = libvirt_cloudinit_disk.node[each.key].path } }
-        target    = { dev = "sda", bus = "sata" }
-        read_only = true
-      },
-    ]
-
-    interfaces = [{
-      mac    = { address = each.value.mac }
-      source = { network = { network = libvirt_network.lab.name } }
-      model  = { type = "virtio" }
-    }]
-
-    # The repo, shared in from the host. This is how Lab 3 moves signing
-    # requests and certificates between machines.
-    filesystems = [{
-      driver      = { type = "virtiofs" }
-      source      = { mount = { dir = local.repo_dir } }
-      target      = { dir = var.share_tag }
-      access_mode = "passthrough"
-    }]
-
-    # Required, and the least obvious requirement here. The provider adds no
-    # video device of its own, and SeaBIOS will not boot a guest that has none:
-    # the VM runs, consumes CPU, and produces no console output whatsoever.
-    #
-    # vram/primary/heads are set explicitly because leaving them null makes the
-    # provider return values it did not plan, which fails the apply.
-    videos = [{ model = { type = "vga", vram = 16384, primary = "yes", heads = 1 } }]
-
-    serials  = [{ type = "pty" }]
-    consoles = [{ type = "pty" }]
+  lifecycle {
+    # The provider records the disk's post-import size, which does not always
+    # round-trip identically to the requested value.
+    ignore_changes = [disk[0].size]
   }
 }
 

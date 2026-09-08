@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-Your laptop back.
+Your Proxmox node back.
 
 ## Before you burn it down
 
@@ -16,32 +16,44 @@ Everything you built lives inside the five VMs — destroying them destroys the 
 
 ## Burn it down
 
-From the `terraform/` directory on your laptop:
+From the `terraform/` directory on your workstation:
 
 ```bash
 cd terraform
 terraform destroy
 ```
 
-That removes all five VMs, their disks, the cloud-init images and the `ace-lab` network — Terraform
-knows exactly what it created, so there is nothing to hunt for.
+That removes all five VMs, their disks and their cloud-init snippets — Terraform knows exactly what
+it created, so there is nothing to hunt for.
 
-It also removes the downloaded Rocky base image. If you plan to rebuild soon and would rather keep
-that ~650 MB download, drop it from state first:
+It also removes the downloaded Rocky base image from the node. If you plan to rebuild soon and would
+rather keep that ~650 MB download, drop it from state first:
 
 ```bash
-terraform state rm libvirt_volume.base
+terraform state rm proxmox_download_file.base
 ```
 
-## Anything on the host?
+Terraform then leaves it in place, and the next `apply` adopts it rather than re-downloading.
 
-Almost nothing — that was the point of building inside VMs:
+## Anything left on the Proxmox node?
+
+Almost nothing — that was the point of building inside VMs. From a root shell on the node:
 
 ```bash
-virsh --connect qemu:///system list --all
-virsh --connect qemu:///system net-list --all
-virsh --connect qemu:///system vol-list default
-ls *.crt *.csr 2>/dev/null
+qm list
+pvesm list local --content snippets
+pvesm list local --content import
+```
+
+`qm list` should show none of `140`–`144`. Anything left under `snippets` named `ace-*-user-data.yaml`,
+or an `ace-rocky9-base.qcow2` under `import`, is a leftover you can delete — though if you dropped
+the image from state above, that last one is deliberate.
+
+The API token and the two content types you enabled in [Lab 1](01-prerequisites.md) are still there.
+Leave them if you might rebuild; otherwise:
+
+```bash
+pveum user token remove root@pam ace
 ```
 
 Remove the generated `ssh_config` include from `~/.ssh/config` if you added it in
@@ -51,7 +63,7 @@ Remove the generated `ssh_config` include from `~/.ssh/config` if you added it i
 rm -f ~/.ssh/ace_lab_ed25519 ~/.ssh/ace_lab_ed25519.pub
 ```
 
-If you imported the internal CA into your laptop's browser or trust store during Lab 4, remove it — it signed things; don't leave stray CAs installed:
+If you imported the internal CA into your browser or trust store during Lab 4, remove it — it signed things; don't leave stray CAs installed:
 
 - macOS: Keychain Access → search "ACE Lab CA" → delete
 - Firefox: Settings → Certificates → Authorities → remove

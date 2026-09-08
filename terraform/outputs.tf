@@ -9,6 +9,9 @@ output "ssh_config_path" {
 }
 
 output "share" {
-  description = "Where the repo appears inside every VM."
-  value       = var.share_mount
+  description = "Where the shared directory appears on every node, and which node exports it."
+  value = {
+    mount  = var.share_mount
+    server = var.share_server
+  }
 }

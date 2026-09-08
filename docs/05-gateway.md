@@ -41,7 +41,7 @@ the network for job control.
 
 ## What you will have at the end
 
-`https://192.168.56.11` serving a real console you can log into — with nothing in it, because no
+`https://192.168.1.41` serving a real console you can log into — with nothing in it, because no
 service has registered yet.
 
 All commands on **ace-gateway** unless stated otherwise.
@@ -89,7 +89,7 @@ sudo vim /etc/redis/redis.conf
 
 ```
 port 0                                # no TCP for local clients — socket only
-bind 127.0.0.1 192.168.56.11
+bind 127.0.0.1 192.168.1.41
 unixsocket /run/redis/redis.sock
 unixsocketperm 777
 dir /var/lib/redis
@@ -253,6 +253,14 @@ being root. On ace-controller the same line names `awx` instead, for the same re
 > releases, moving daily. The end state below is right, but requirements layout and module paths
 > may drift. When the repo disagrees with a build step, the repo wins — note the difference.
 
+> **The two requirements files install separately, and must.** `requirements.txt` is fully
+> hash-pinned — 900-odd `--hash=sha256:` lines — while `requirements_git.txt` is a single
+> `git+https://` URL for `django-ansible-base`. Hash-checking in pip is a *mode*, not a per-line
+> property: feed it one file containing both and it refuses the whole install with
+> `Can't verify hashes for these requirements because we don't have a way to hash version control
+> repositories`. Two `pip install -r` calls keep the hashed set hash-checked and let the VCS
+> requirement through on its own.
+
 ```bash
 sudo install -d -o gateway -g gateway /opt/jewel
 sudo -u gateway git clone https://github.com/ansible/jewel.git /opt/jewel
@@ -264,7 +272,8 @@ set -euo pipefail
 source /var/lib/ansible-automation-platform/venv/gateway/bin/activate
 cd /opt/jewel
 pip install --upgrade pip setuptools wheel setuptools_scm
-cat requirements/requirements.txt requirements/requirements_git.txt | pip install -r /dev/stdin
+pip install -r requirements/requirements.txt
+pip install -r requirements/requirements_git.txt
 pip install -e .
 pip install uwsgi
 EOF
@@ -358,8 +367,8 @@ GRPC_SERVER_PORT = '50051'
 GRPC_SERVER_PROCESSES = 2
 GRPC_SERVER_MAX_THREADS_PER_PROCESS = 10
 
-CSRF_TRUSTED_ORIGINS = ['https://192.168.56.11', 'https://ace-gateway']
-FRONT_END_URL = 'https://192.168.56.11'
+CSRF_TRUSTED_ORIGINS = ['https://192.168.1.41', 'https://ace-gateway']
+FRONT_END_URL = 'https://192.168.1.41'
 
 # Console logging off — otherwise every request is duplicated into uwsgi's log.
 LOGGING['handlers']['console'] = {'class': 'logging.NullHandler'}
@@ -381,7 +390,7 @@ The URLs carry **no port**, because envoy will own 443 on this host.
 `ENVOY_HOSTNAME` is **`ace-gateway`, not `127.0.0.1`**, and that matters more than it looks. The
 gateway calls *itself* through envoy during service registration, over TLS, and validates the
 certificate it gets back. That certificate's SAN covers `DNS:ace-gateway` and
-`IP:192.168.56.11` — a loopback address is in neither, so `127.0.0.1` produces a hostname
+`IP:192.168.1.41` — a loopback address is in neither, so `127.0.0.1` produces a hostname
 mismatch on a connection the gateway makes to its own machine.
 
 ---
@@ -665,8 +674,9 @@ That is why none of the component labs that follow have a UI step: there is noth
 
 ### Swap, first
 
-The build bundles Monaco and all of PatternFly and asks Node for an 8 GB heap. This VM has 5 GB.
-Give it somewhere to spill:
+The build bundles Monaco and all of PatternFly and asks Node for an 8 GB heap — which is more than
+this VM's 8 GB of RAM once the OS has taken its share, and a great deal more than the 5 GB the
+laptop-scale sizing gives it. Give it somewhere to spill either way:
 
 ```bash
 sudo fallocate -l 6G /swapfile
@@ -696,7 +706,7 @@ cd /opt/ansible-ui
 npm ci --ignore-scripts
 
 cd platform
-export PLATFORM_SERVER="https://192.168.56.11"
+export PLATFORM_SERVER="https://192.168.1.41"
 npm run build
 EOF
 ```
@@ -727,8 +737,8 @@ No nginx change, no restart, no route registration — section 9 already pointed
 `try_files` at this directory. Filling it in is the whole deployment.
 
 ```bash
-curl -sk -o /dev/null -w '%{http_code} %{content_type}\n' https://192.168.56.11:8443/
-curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.56.11:8443/access/users
+curl -sk -o /dev/null -w '%{http_code} %{content_type}\n' https://192.168.1.41:8443/
+curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.1.41:8443/access/users
 ```
 
 ---
@@ -871,8 +881,33 @@ sudo systemctl enable --now automation-gateway-proxy
 sudo dnf -y install firewalld
 sudo systemctl enable --now firewalld
 sudo firewall-cmd --permanent --add-port=443/tcp --add-port=80/tcp
+
+# This node also exports /srv/ace to the other four (Lab 2). Turning on a
+# default-deny firewall without this closes the courier.
+for ip in 192.168.1.40 192.168.1.42 192.168.1.43 192.168.1.44; do
+  sudo firewall-cmd --permanent \
+    --add-rich-rule="rule family=ipv4 source address=$ip/32 port port=2049 protocol=tcp accept"
+done
+
 sudo firewall-cmd --reload
+sudo firewall-cmd --list-ports --list-rich-rules
 ```
+
+> **Those NFS rules are not optional, and leaving them out fails in the worst possible way.** This
+> is the first firewall enabled anywhere in the build, and the gateway is wearing two hats: it is
+> the platform's front door *and* the machine exporting `/srv/ace`. firewalld's default zone permits
+> ssh and little else, so the moment it starts, port 2049 closes and every other node's share dies.
+>
+> Nothing here reports that. The share is an automount, so the next process to touch `/srv/ace` —
+> on `ace-controller`, in [Lab 6](06-controller.md), one lab later — simply **hangs** instead of
+> failing. A `sudo ls /srv/ace` that never returns is the symptom, and it points at NFS, at the
+> controller, at anything but a firewall rule you added on a different machine in the previous lab.
+>
+> Verify the courier still works before moving on:
+>
+> ```bash
+> ssh ace-db "timeout 5 bash -c 'echo > /dev/tcp/ace-gateway/2049' && echo NFS-OK"
+> ```
 
 > `AmbientCapabilities=CAP_NET_BIND_SERVICE` lets a process running as `gateway` bind a port below
 > 1024. Without it envoy exits immediately with a bind error, and the obvious "fix" — running it as
@@ -936,7 +971,7 @@ Watch envoy pick it up:
 ```bash
 sleep 6
 ss -tln | grep ':443 '
-curl -sk https://192.168.56.11/api/gateway/v1/ping/ | python3 -m json.tool | head -5
+curl -sk https://192.168.1.41/api/gateway/v1/ping/ | python3 -m json.tool | head -5
 ```
 
 > **A `404` on the first try is normal — wait five seconds and repeat.** The listener and the routes
@@ -959,11 +994,11 @@ curl -sk https://192.168.56.11/api/gateway/v1/ping/ | python3 -m json.tool | hea
 
 ```bash
 systemctl is-active supervisord nginx automation-gateway-proxy
-curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.56.11/
-curl -sk -u "admin:$GW_PW" -o /dev/null -w '%{http_code}\n' https://192.168.56.11/api/gateway/v1/me/
+curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.1.41/
+curl -sk -u "admin:$GW_PW" -o /dev/null -w '%{http_code}\n' https://192.168.1.41/api/gateway/v1/me/
 ```
 
-Then open **`https://192.168.56.11`** in a browser and log in as `admin`.
+Then open **`https://192.168.1.41`** in a browser and log in as `admin`.
 
 No certificate warning *if* you imported [Lab 3](03-internal-ca.md)'s root CA into your browser —
 that is the payoff for building a real CA. Otherwise accept the interstitial; the certificate is at

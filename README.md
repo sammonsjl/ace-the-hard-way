@@ -38,7 +38,7 @@ behind it is a process you started by hand, from a config file you wrote:
 flowchart TB
     browser(["browser"])
 
-    subgraph GW["ace-gateway · 192.168.56.11"]
+    subgraph GW["ace-gateway · 192.168.1.41"]
         envoy["envoy :443<br/>the single front door · TLS ends here"]
         gwnginx["nginx :8443<br/>gateway API + the console SPA"]
         gwuwsgi["uwsgi 127.0.0.1:8050<br/>REST API + the service registry"]
@@ -46,7 +46,7 @@ flowchart TB
         redis[("Redis<br/>unix socket for the gateway · :6379 for the others")]
     end
 
-    subgraph CTL["ace-controller · 192.168.56.12 — HYBRID node"]
+    subgraph CTL["ace-controller · 192.168.1.42 — HYBRID node"]
         direction TB
         ctlnginx["nginx :443"]
 
@@ -61,17 +61,17 @@ flowchart TB
         end
     end
 
-    subgraph HUB["ace-hub · 192.168.56.13"]
+    subgraph HUB["ace-hub · 192.168.1.43"]
         hubnginx["nginx :443"]
         hubproc["pulpcore-api · pulpcore-content<br/>pulpcore-worker@1 · @2"]
     end
 
-    subgraph EDA["ace-eda · 192.168.56.14"]
+    subgraph EDA["ace-eda · 192.168.1.44"]
         edanginx["nginx :443"]
         edaproc["eda api · websockets · scheduler · worker"]
     end
 
-    subgraph DB["ace-db · 192.168.56.10"]
+    subgraph DB["ace-db · 192.168.1.40"]
         pg[("PostgreSQL :5432<br/>awx · gateway · pulp · eda")]
     end
 
@@ -130,9 +130,10 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 
 ## What you need
 
-- **A Linux host on x86_64, with KVM.** The lab is built by [Terraform](https://developer.hashicorp.com/terraform) driving libvirt directly, so it is **Linux-only** — there is no macOS or Windows path. Details and the reasoning in [Lab 1](docs/01-prerequisites.md).
-- **16 GB of RAM, minimum.** `terraform/variables.tf` allocates 14.3 GB across the five VMs and leaves ~1.5 GB for the host. More is better; less will not work.
-- ~60 GB of free disk
+- **A Proxmox VE host, 8.4 or newer.** The lab is built by [Terraform](https://developer.hashicorp.com/terraform) driving the Proxmox API. Your own machine only needs Terraform and an SSH client, so you can drive it from **Linux, macOS or Windows**. Details and the reasoning in [Lab 1](docs/01-prerequisites.md).
+- **32 GB of RAM on that host, comfortably.** `terraform/variables.tf` allocates 23 GB across the five VMs, and ships laptop-scale numbers (14 GB total) as a documented alternative for a 16 GB node.
+- ~150 GB of free disk on the VM datastore (five thin 60 GiB disks)
+- Five free static addresses on a bridge, outside your DHCP pool
 - Patience — that's the "hard way" part
 
 ## Labs

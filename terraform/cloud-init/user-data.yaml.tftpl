@@ -14,19 +14,38 @@ users:
 
 # Minimal prep, and nothing more. Everything else is done BY HAND in the labs —
 # this is a hard-way tutorial, so provisioning stays out of the way.
+#
+# nfs-utils is the only addition to the original four, and it is here because
+# the labs hand certificates between machines through a shared directory.
+#
+# Deliberately NOT qemu-guest-agent: main.tf leaves the agent *device* off the
+# VMs, so the service has no virtio-serial port to talk through and fails to
+# start. Proxmox's "Shutdown" still works without it — that is ACPI, not the
+# agent — and all that is actually lost is the guest's IP in the web UI, which
+# is static and already known.
 packages:
   - vim
   - curl
   - jq
   - git
+  - nfs-utils
 
-# The repo, shared in from the host over virtiofs. Two-way: edit a lab on the
-# host and the change is visible in the VM immediately.
+%{ if is_share_server ~}
+# The export list for the shared directory, one line per client rather than a
+# whole-subnet export: this share carries certificate requests, and on a bridged
+# network the lab nodes sit on your home LAN alongside everything else you own.
 #
-# `nofail` matters — without it a VM whose share is unavailable drops to an
-# emergency shell at boot instead of coming up degraded.
-mounts:
-  - [ ${share_tag}, ${share_mount}, virtiofs, "defaults,nofail", "0", "0" ]
+# no_root_squash is required, not incidental. Both certificate scripts live in
+# /usr/local/sbin and run under sudo, so every write to this share arrives as
+# root — and the default root_squash would map that to nobody and refuse it.
+write_files:
+  - path: /etc/exports.d/ace.exports
+    permissions: "0644"
+    content: |
+%{ for client in share_clients ~}
+      ${share_mount} ${client}(rw,sync,no_root_squash,no_subtree_check)
+%{ endfor ~}
+%{ endif ~}
 
 runcmd:
   # The cloud image maps its own hostname to a loopback address. Leave it and
@@ -38,5 +57,34 @@ runcmd:
   # Every node needs every other node's name from Lab 3 onward — certificate
   # SANs, database connection strings, the gateway's service registry.
   - [ sh, -c, "grep -q ace-gateway /etc/hosts || printf '%s\\n' ${hosts_entries} >> /etc/hosts" ]
+%{ if is_share_server ~}
+  # This node exports the shared directory the labs use as a courier.
+  - [ install, -d, -o, root, -g, root, -m, "0755", "${share_mount}" ]
+  - [ systemctl, enable, --now, nfs-server ]
+  - [ exportfs, -ra ]
+  # Rocky's GenericCloud image ships without firewalld, but a reader may be on
+  # an image that has it. NFSv4 needs only 2049, so this is a single service.
+  - [ sh, -c, "systemctl is-active --quiet firewalld && firewall-cmd --permanent --add-service=nfs && firewall-cmd --reload || true" ]
+%{ else ~}
+  # Everyone else mounts it. x-systemd.automount is what makes the boot order
+  # irrelevant: the mount is attempted the first time something touches the
+  # directory — Lab 3, long after the whole estate is up — rather than at boot,
+  # when the exporting node may not be serving yet.
+  - [ install, -d, -o, root, -g, root, -m, "0755", "${share_mount}" ]
+  - [ sh, -c, "grep -q ' ${share_mount} ' /etc/fstab || echo '${share_server_ip}:${share_mount} ${share_mount} nfs4 _netdev,x-systemd.automount,x-systemd.mount-timeout=30,nofail 0 0' >> /etc/fstab" ]
+  # daemon-reload only *generates* the automount unit from that fstab line — it
+  # leaves it dead. Without the explicit start, /srv/ace stays an ordinary empty
+  # local directory: reads find nothing and writes go to the node's own disk,
+  # which looks like the share working right up until the certificate you wrote
+  # on one machine is missing on the other.
+  #
+  # `start`, not `enable` — systemd refuses to enable a unit its fstab generator
+  # produced ("is transient or generated"). Enabling it is also unnecessary: the
+  # generator re-creates and wires it into remote-fs.target on every boot. This
+  # start is only needed for *this* boot, where the generator ran before the
+  # fstab line existed.
+  - [ systemctl, daemon-reload ]
+  - [ sh, -c, "systemctl start \"$(systemd-escape -p --suffix=automount '${share_mount}')\"" ]
+%{ endif ~}
 
 final_message: "ace: ${hostname} ready after $UPTIME seconds"

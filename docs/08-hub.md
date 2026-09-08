@@ -30,7 +30,7 @@ and this lab ends with it appearing in the console.
 
 Automation Hub — **galaxy_ng** on **pulpcore** — built from source, running as a
 pulp service family (API + content + workers), fronted by its own nginx, and
-registered behind the gateway so `https://192.168.56.11/api/galaxy/…`
+registered behind the gateway so `https://192.168.1.41/api/galaxy/…`
 authenticates with the same platform login as the controller.
 
 ```
@@ -138,10 +138,10 @@ REDIS_URL = "redis://ace-gateway:6379/2"
 SECRET_KEY = "CHANGE-ME-RANDOM"
 DB_ENCRYPTION_KEY = "/etc/pulp/certs/database_fields.symmetric.key"
 
-CONTENT_ORIGIN = "https://192.168.56.11"
-ANSIBLE_API_HOSTNAME = "https://192.168.56.11"
-ANSIBLE_CONTENT_HOSTNAME = "https://192.168.56.11/pulp/content"
-TOKEN_SERVER = "https://192.168.56.11/token/"
+CONTENT_ORIGIN = "https://192.168.1.41"
+ANSIBLE_API_HOSTNAME = "https://192.168.1.41"
+ANSIBLE_CONTENT_HOSTNAME = "https://192.168.1.41/pulp/content"
+TOKEN_SERVER = "https://192.168.1.41/token/"
 API_ROOT = "/api/galaxy/pulp/"
 CONTENT_PATH_PREFIX = "/pulp/content/"
 STATIC_ROOT = "/var/lib/pulp/assets"
@@ -165,9 +165,9 @@ STORAGES = {
 # gateway integration (galaxy_ng JWT consumer)
 ANSIBLE_BASE_JWT_REDIRECT_TYPE = "hub"
 ANSIBLE_BASE_JWT_VALIDATE_CERT = False
-ANSIBLE_BASE_JWT_KEY = "https://192.168.56.11"
+ANSIBLE_BASE_JWT_KEY = "https://192.168.1.41"
 ANSIBLE_BASE_ROLES_REQUIRE_VIEW = False
-CSRF_TRUSTED_ORIGINS = ["https://192.168.56.11"]
+CSRF_TRUSTED_ORIGINS = ["https://192.168.1.41"]
 ENABLE_SERVICE_BACKED_SSO = False
 GALAXY_AUTHENTICATION_CLASSES = [
     "galaxy_ng.app.auth.session.SessionAuthentication",
@@ -509,7 +509,7 @@ st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
 hp  = find("/http_ports/", "API Port")
 hub = ensure("/service_clusters/", "hub", {"name": "hub", "service_type": st["hub"]})
 ensure("/service_nodes/", "Node hub - ace-hub",
-       {"name": "Node hub - ace-hub", "address": "192.168.56.13", "service_cluster": hub})
+       {"name": "Node hub - ace-hub", "address": "192.168.1.43", "service_cluster": hub})
 ensure("/services/", "galaxy api",
        {"name": "galaxy api", "api_slug": "galaxy", "http_port": hp, "service_cluster": hub,
         "is_service_https": True, "service_path": "/api/galaxy/", "service_port": 443, "order": 2})
@@ -529,7 +529,7 @@ sudo -u gateway aap-gateway-manage generate_service_secret galaxy
 
 sudo tee -a /etc/pulp/settings.py >/dev/null <<'EOF'
 RESOURCE_SERVER = {
-    "URL": "https://192.168.56.11",
+    "URL": "https://192.168.1.41",
     "SECRET_KEY": "PASTE-THE-GALAXY-SECRET",
     "VALIDATE_HTTPS": False,
 }
@@ -541,9 +541,9 @@ sudo systemctl restart pulpcore-api pulpcore-content pulpcore-worker@1 pulpcore-
 ## Verify — hub through the platform door
 
 ```bash
-curl -sk https://192.168.56.11/api/galaxy/pulp/api/v3/status/ | python3 -m json.tool | grep component
+curl -sk https://192.168.1.41/api/galaxy/pulp/api/v3/status/ | python3 -m json.tool | grep component
 
-curl -skL -u "admin:CHANGE-ME" https://192.168.56.11/api/galaxy/_ui/v1/me/ \
+curl -skL -u "admin:CHANGE-ME" https://192.168.1.41/api/galaxy/_ui/v1/me/ \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["username"], d["is_superuser"])'
 ```
 
@@ -560,7 +560,7 @@ curl -skL -u "admin:CHANGE-ME" https://192.168.56.11/api/galaxy/_ui/v1/me/ \
 
 ## The payoff — it appears in the console
 
-Now open the platform UI from [Lab 5](05-gateway.md) at **`https://192.168.56.11`** and
+Now open the platform UI from [Lab 5](05-gateway.md) at **`https://192.168.1.41`** and
 **refresh**. The navigation has grown a section: **Automation Content**, alongside Automation
 Execution.
 

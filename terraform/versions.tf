@@ -2,12 +2,9 @@ terraform {
   required_version = ">= 1.5"
 
   required_providers {
-    # Pinned deliberately. 0.9.x is a full rewrite on the Terraform Plugin
-    # Framework; the 0.8.x line is a different schema entirely and its
-    # `filesystem` block only speaks 9p, which Rocky 9 cannot mount.
-    libvirt = {
-      source  = "dmacvicar/libvirt"
-      version = "0.9.8"
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "0.111.1"
     }
     local = {
       source  = "hashicorp/local"
@@ -16,6 +13,17 @@ terraform {
   }
 }
 
-provider "libvirt" {
-  uri = var.libvirt_uri
+provider "proxmox" {
+  endpoint  = var.proxmox_endpoint
+  api_token = var.proxmox_api_token
+  insecure  = var.proxmox_insecure
+
+  # Uploading a cloud-init snippet is a file copy onto the node, not an API
+  # call, so the provider needs SSH to the Proxmox host in addition to the API
+  # token. Everything else here is API-only.
+  ssh {
+    agent    = var.proxmox_ssh_agent
+    username = var.proxmox_ssh_username
+    password = var.proxmox_ssh_password
+  }
 }

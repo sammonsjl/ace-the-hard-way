@@ -275,9 +275,14 @@ network. This is that moment:
 ```bash
 sudo sed -i 's/^port 0$/port 6379/' /etc/redis/redis.conf
 sudo systemctl restart redis
-sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.56.0/24 port port=6379 protocol=tcp accept'
+sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.1.42/32 port port=6379 protocol=tcp accept'
 sudo firewall-cmd --reload
 ```
+
+The rule names **one** address — the controller's — and not the subnet. This redis has no password
+set; the only thing standing between it and anything that can reach port 6379 is this rule. These
+VMs are bridged onto your home LAN, so a `192.168.1.0/24` rule here would publish an unauthenticated
+redis to every device you own.
 
 **Back on `ace-controller`** — confirm the path before trusting it:
 
@@ -736,10 +741,42 @@ the relabel and the children die with `203/EXEC`.
 sudo -u awx awx-manage list_instances
 ```
 
-Re-run it if the first answer is `capacity=0`. The dispatcher's `cluster_node_heartbeat` runs on a
-60-second schedule (`CLUSTER_NODE_HEARTBEAT_PERIOD`), and capacity stays zero until it has fired
-once. If it is still zero after a couple of minutes, the redis fragment is wrong or missing — not
-the scheduler.
+**Expect `capacity=0` and `version=?` here, and expect them to stay that way for the rest of this
+lab.** Capacity is reported by the dispatcher's `cluster_node_heartbeat`, and on a `devel` build the
+dispatcher refuses to start at all without receptor's configuration:
+
+```
+CommandError: Receptor config not found after 10s
+```
+
+`/etc/receptor/receptor.conf` is written in [Lab 7](07-execution.md), so until then
+`tower-processes:awx-dispatcher` starts, fails that check, and is restarted by supervisor on a loop.
+Everything else runs normally, which is why the node stays browsable and simply never reports
+capacity.
+
+This is worth checking rather than assuming, because two different faults look identical from
+`list_instances`. Read the dispatcher's own log:
+
+```bash
+sudo tail -20 /var/log/supervisor/awx-dispatcher.log
+sudo supervisorctl status tower-processes:awx-dispatcher
+```
+
+- `Receptor config not found` — expected at this point in the tutorial. Continue; Lab 7 fixes it.
+- A redis connection error — the `redis.py` fragment is wrong or the firewall rule on ace-gateway
+  never got added. Confirm the path directly before changing anything:
+
+  ```bash
+  sudo -u awx /var/lib/awx/venv/awx/bin/python -c \
+    "import redis; print(redis.Redis(host='ace-gateway', port=6379, db=0).ping())"
+  ```
+
+  `True` means redis is not your problem.
+
+> Note the group prefix on that `supervisorctl status`. A bare `supervisorctl status awx-dispatcher`
+> answers `ERROR (no such process)` — the programs live in the `tower-processes` group and are
+> addressed as `tower-processes:awx-dispatcher`. That error means you asked the wrong question, not
+> that the process is missing.
 
 ---
 
@@ -748,7 +785,7 @@ the scheduler.
 ```bash
 sudo tee /etc/tower/conf.d/csrf.py >/dev/null <<'EOF'
 CSRF_TRUSTED_ORIGINS = [
-    'https://192.168.56.11',
+    'https://192.168.1.41',
     'https://ace-gateway',
     'https://ace-controller',
 ]
@@ -1004,7 +1041,7 @@ CL=$(curl -sk -u "admin:$GW_PW" -X POST "$GW/service_clusters/" -H 'Content-Type
      -d "{\"name\":\"controller\",\"service_type\":$ST}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 
 curl -sk -u "admin:$GW_PW" -X POST "$GW/service_nodes/" -H 'Content-Type: application/json' \
-  -d "{\"name\":\"Node controller - ace-controller\",\"address\":\"192.168.56.12\",\"service_cluster\":$CL}" \
+  -d "{\"name\":\"Node controller - ace-controller\",\"address\":\"192.168.1.42\",\"service_cluster\":$CL}" \
   -o /dev/null -w 'service_node: %{http_code}\n'
 
 curl -sk -u "admin:$GW_PW" -X POST "$GW/services/" -H 'Content-Type: application/json' \
@@ -1036,7 +1073,7 @@ Back on **ace-controller**:
 ```bash
 sudo tee /etc/tower/conf.d/gateway.py >/dev/null <<'EOF'
 # JWTs: fetch the gateway's public key from this URL and trust its logins
-ANSIBLE_BASE_JWT_KEY = 'https://192.168.56.11'
+ANSIBLE_BASE_JWT_KEY = 'https://192.168.1.41'
 ANSIBLE_BASE_JWT_REDIRECT_TYPE = "awx"
 ANSIBLE_BASE_JWT_VALIDATE_CERT = True
 ANSIBLE_BASE_MANAGED_ROLE_REGISTRY = {'platform_auditor': {'name': 'Platform Auditor', 'shortname': 'sys_auditor'}}
@@ -1048,7 +1085,7 @@ ENABLE_SERVICE_BACKED_SSO = False
 
 # service-to-service: how AWX calls the gateway back, as itself
 RESOURCE_SERVER = {
-    'URL': 'https://192.168.56.11',
+    'URL': 'https://192.168.1.41',
     'SECRET_KEY': 'PASTE-THE-GENERATED-SECRET',
     'VALIDATE_HTTPS': True,
 }
@@ -1101,7 +1138,7 @@ sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 > first and it dies with:
 > ```
 > requests.exceptions.HTTPError: 423 Client Error: Locked for url:
->   https://192.168.56.11/api/gateway/v1/service-index/metadata/
+>   https://192.168.1.41/api/gateway/v1/service-index/metadata/
 > ```
 > `423 Locked` is the gateway saying "I have not migrated this service's data yet, so I will not
 > serve its identity index." `migrate_service_data` is what unlocks it — its last line is literally
@@ -1109,14 +1146,14 @@ sudo -u awx REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
 >
 > A `503` or `504` instead means you are racing the restart above — envoy answers `504` while the
 > upstream is still failing its health check, and the wait is a couple of minutes, not seconds.
-> Wait for `curl -sk https://192.168.56.11/api/controller/v2/ping/` to return `200` and re-run.
+> Wait for `curl -sk https://192.168.1.41/api/controller/v2/ping/` to return `200` and re-run.
 > Both commands are idempotent.
 
 ---
 
 ## 9. What you have, and what you don't
 
-Open **`https://192.168.56.11`** and log in as the **gateway** admin.
+Open **`https://192.168.1.41`** and log in as the **gateway** admin.
 
 The console has grown a section: **Automation Execution** — projects, templates, inventories,
 jobs. You did not rebuild the UI or restart it; the navigation is assembled from the gateway's
@@ -1168,7 +1205,7 @@ curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep me
 Then:
 
 ```bash
-curl -sk -u admin:CHANGE-ME https://192.168.56.11/api/controller/v2/config/ \
+curl -sk -u admin:CHANGE-ME https://192.168.1.41/api/controller/v2/config/ \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["license_info"]["compliant"])'
 ```
 
@@ -1236,7 +1273,7 @@ curl -s https://ace-controller/api/v2/ping/ | python3 -m json.tool | head -5
 From **ace-gateway**, through the platform door:
 
 ```bash
-curl -sk -u "admin:$GW_PW" https://192.168.56.11/api/controller/v2/ping/ | python3 -m json.tool | head -5
+curl -sk -u "admin:$GW_PW" https://192.168.1.41/api/controller/v2/ping/ | python3 -m json.tool | head -5
 ```
 
 Next: [Execution — receptor and podman](07-execution.md)

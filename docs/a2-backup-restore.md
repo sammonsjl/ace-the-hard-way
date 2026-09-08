@@ -128,7 +128,7 @@ sudo -u awx awx-manage list_instances
 
 ## Prove it — an untested restore is not a restore
 
-`list_instances` answering only proves the schema loaded. Run real work: in the UI (`https://192.168.56.10`), launch **Demo Job Template**. It should reach **Successful** on `Execution Node: ace-exec`, exactly as in [Lab 6](06-controller.md).
+`list_instances` answering only proves the schema loaded. Run real work: in the UI (`https://192.168.1.40`), launch **Demo Job Template**. It should reach **Successful** on `Execution Node: ace-exec`, exactly as in [Lab 6](06-controller.md).
 
 That one job exercises the restored database, the surviving `SECRET_KEY`, the mesh certs, and the work-signing keypair together.
 

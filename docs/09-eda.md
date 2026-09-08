@@ -54,7 +54,7 @@ the names say what they are. If you later add those services, renaming is the ob
 
 Event-Driven Ansible — **eda-server** — built from source, running as its systemd
 service family (API, websockets, scheduler, worker), fronted by its own nginx, and
-registered behind the gateway so `https://192.168.56.11/api/eda/…` authenticates
+registered behind the gateway so `https://192.168.1.41/api/eda/…` authenticates
 with the same platform login as the controller and the hub.
 
 ```
@@ -173,7 +173,7 @@ MQ_HOST: ace-gateway
 MQ_PORT: 6379
 MQ_DB: 5
 # gateway integration (JWT consumer)
-ANSIBLE_BASE_JWT_KEY: https://192.168.56.11
+ANSIBLE_BASE_JWT_KEY: https://192.168.1.41
 ANSIBLE_BASE_JWT_VALIDATE_CERT: false
 ANSIBLE_BASE_JWT_REDIRECT_TYPE: eda
 ANSIBLE_BASE_MANAGED_ROLE_REGISTRY:
@@ -181,7 +181,7 @@ ANSIBLE_BASE_MANAGED_ROLE_REGISTRY:
     name: Platform Auditor
     shortname: sys_auditor
 ENABLE_SERVICE_BACKED_SSO: false
-WEBSOCKET_BASE_URL: wss://192.168.56.14   # this node — ace-eda serves its own websocket
+WEBSOCKET_BASE_URL: wss://192.168.1.44   # this node — ace-eda serves its own websocket
 WEBSOCKET_SSL_VERIFY: "no"
 EOF
 sudo chown eda:eda /etc/ansible-automation-platform/eda/settings.yaml
@@ -192,21 +192,37 @@ sudo vim /etc/ansible-automation-platform/eda/settings.yaml
 ## Redis
 
 EDA addresses redis by **host:port** for its channels and websocket layer.
-[Lab 6](06-controller.md) already turned that port on and firewalled it to the lab network — the
-controller needed it first — and [Lab 8](08-hub.md) is already using it. Confirm the path before
-trusting it:
+[Lab 6](06-controller.md) turned that port on, but it opened it to **one address** — the
+controller's. This node is not that address, so it needs its own rule.
+
+**On `ace-gateway`:**
+
+```bash
+sudo firewall-cmd --permanent \
+  --add-rich-rule='rule family=ipv4 source address=192.168.1.44/32 port port=6379 protocol=tcp accept'
+sudo firewall-cmd --reload
+```
+
+**Back on `ace-eda`** — confirm the path before trusting it:
 
 ```bash
 sudo dnf -y install redis
 redis-cli -h ace-gateway -p 6379 ping
 ```
 
-> If that times out, the firewall rule on ace-gateway is missing; if it is refused, redis is bound
-> to loopback only. Both are Lab 6 problems, not EDA problems.
+`PONG` and you are done here.
+
+> **One rule per consumer is the point, not an inconvenience.** This redis has no password: the
+> firewall is the only thing in front of it, and these VMs are bridged onto your home LAN. Opening
+> `192.168.1.0/24` once in Lab 6 would have saved this step and published an unauthenticated cache
+> to every device you own.
 >
-> Note that EDA and hub use different redis **databases** (`/1` and `/2` in their URLs) on the same
-> server. That is not isolation in any security sense — anyone who can reach the port can select any
-> database — it just stops the two components colliding on key names.
+> If `ping` times out, this rule is missing or names the wrong address; if it is *refused*, redis is
+> still bound to loopback only, which is a Lab 6 problem rather than an EDA one.
+>
+> Note that EDA and hub use different redis **databases** (`/5` and `/2` in their settings) on the
+> same server. That is not isolation in any security sense — anyone who can reach the port can
+> select any database — it just stops the two components colliding on key names.
 
 ## Migrate, init, admin, static
 
@@ -442,7 +458,7 @@ st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
 hp  = find("/http_ports/", "API Port")
 eda = ensure("/service_clusters/", "eda", {"name": "eda", "service_type": st["eda"]})
 ensure("/service_nodes/", "Node eda - ace-eda",
-       {"name": "Node eda - ace-eda", "address": "192.168.56.14", "service_cluster": eda, "tags": "api"})
+       {"name": "Node eda - ace-eda", "address": "192.168.1.44", "service_cluster": eda, "tags": "api"})
 ensure("/services/", "eda api",
        {"name": "eda api", "api_slug": "eda", "http_port": hp, "service_cluster": eda,
         "is_service_https": True, "service_path": "/api/eda/", "service_port": 443,
@@ -454,7 +470,7 @@ sudo -u gateway aap-gateway-manage generate_service_secret eda
 
 sudo tee -a /etc/ansible-automation-platform/eda/settings.yaml >/dev/null <<'EOF'
 RESOURCE_SERVER:
-  URL: https://192.168.56.11
+  URL: https://192.168.1.41
   SECRET_KEY: PASTE-THE-EDA-SECRET
   VALIDATE_HTTPS: false
 EOF
@@ -476,9 +492,9 @@ sudo systemctl restart automation-eda-api automation-eda-default-worker
 > the service and the node disagree.
 
 ```bash
-curl -sk https://192.168.56.11/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"
+curl -sk https://192.168.1.41/api/eda/v1/status/ -o /dev/null -w "status: %{http_code}\n"
 
-curl -sk -u "admin:CHANGE-ME" https://192.168.56.11/api/eda/v1/users/me/ \
+curl -sk -u "admin:CHANGE-ME" https://192.168.1.41/api/eda/v1/users/me/ \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["username"], d["is_superuser"], d["resource"]["resource_type"])'
 ```
 
@@ -488,7 +504,7 @@ from source.
 
 ## The payoff — the console is complete
 
-Refresh the platform UI at **`https://192.168.56.11`** one last time. **Automation Decisions**
+Refresh the platform UI at **`https://192.168.1.41`** one last time. **Automation Decisions**
 joins Automation Execution and Automation Content, and the navigation you saw in Lab 7 with a
 single entry is now the full platform — one login reaching three services you built from source,
 on three different Python versions, sharing one identity.

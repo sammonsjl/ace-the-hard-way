@@ -79,10 +79,17 @@ sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman pull quay.io/ansible/a
 Smoke-test the sandbox, and make it exercise **crypto** rather than just the shell:
 
 ```bash
+cd /tmp
 sudo -u awx XDG_RUNTIME_DIR=/run/user/$(id -u awx) \
   podman run --rm quay.io/ansible/awx-ee:latest ansible-playbook --version
 echo $?
 ```
+
+> **That `cd /tmp` is load-bearing, here and in the `pull` above.** `sudo -u awx` keeps your current
+> directory, and `awx` cannot read your home directory — so running either command from `~` fails
+> with `cannot chdir to /home/<you>: Permission denied` before podman starts. It names your home
+> directory, not podman or the image, so it reads like a broken sudo rather than a working
+> directory you happened to be standing in.
 
 > On an aarch64 host this can exit **132** — a SIGILL from OpenSSL taking an accelerated code path
 > that traps under the hypervisor. The fix inside containers is an environment variable AWX passes
@@ -281,7 +288,7 @@ system service gets no `XDG_RUNTIME_DIR` for free.
 ---
 ## 3. Run something
 
-Open **`https://192.168.56.11`** — no port — and log in as the **gateway** admin.
+Open **`https://192.168.1.41`** — no port — and log in as the **gateway** admin.
 
 The console has grown a section. **Automation Execution** is there: projects, templates,
 inventories, jobs. You did not rebuild the UI, restart it, or edit a line of its config. The
@@ -329,7 +336,7 @@ The same thing from a terminal, if you would rather not click — through the pl
 also proves the gateway route while you are here:
 
 ```bash
-GW=https://192.168.56.11/api/controller/v2
+GW=https://192.168.1.41/api/controller/v2
 read -s -p "gateway admin password: " GW_PW; echo
 
 ID=$(curl -sk -u "admin:$GW_PW" $GW/projects/ \

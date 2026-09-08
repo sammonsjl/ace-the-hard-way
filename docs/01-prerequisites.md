@@ -2,80 +2,132 @@
 
 ## What you'll have at the end
 
-A laptop ready to run the five lab VMs.
+A Proxmox node ready to run the five lab VMs, and a workstation that can drive it with Terraform.
 
 ## What you need
 
+### The Proxmox host
+
 | | |
 |---|---|
-| **RAM** | **16 GB minimum.** `terraform/variables.tf` allocates 14.3 GB across five VMs and leaves ~1.5 GB for the host. More is better and the numbers are easy to raise; less will not work. |
-| **Disk** | ~60 GB free. Five Rocky VMs, four source checkouts, a node_modules tree and a container image. |
-| **CPU** | 4 cores is workable, 8 is comfortable. Two of the builds are long compiles. |
-| **Network** | The VMs pull from GitHub, PyPI, npm, quay.io and the Rocky mirrors. Nothing here works air-gapped. |
+| **Proxmox VE** | **8.4 or newer.** The configuration imports a downloaded cloud image straight into a VM disk, which needs the `import` content type. That landed in 8.4. Built and tested on 9.2. |
+| **RAM** | **32 GB comfortable.** `terraform/variables.tf` allocates 23 GB across five VMs. It also ships the laptop-scale numbers (14 GB total) as a comment — use those and 16 GB is workable, at the cost of the console build leaning on swap in [Lab 5](05-gateway.md). |
+| **Disk** | ~150 GB free on the VM datastore. Five 60 GiB disks, but thin-provisioned: they start near empty and grow to roughly 15–20 GB each as you build. On thick storage, budget the full 300 GB. |
+| **CPU** | 4 cores workable, 8 comfortable. The configuration asks for 14 vCPU across the five VMs, which deliberately overcommits — the nodes idle most of the time, and the two long compiles are on different machines. |
+| **Network** | A bridge onto a network with DHCP-free space you control, and outbound internet. The VMs pull from GitHub, PyPI, npm, quay.io and the Rocky mirrors. Nothing here works air-gapped. |
 
-Everything runs on one machine — the five VMs are a *topology*, not five computers.
+### Your workstation
 
-## Platform
+Terraform, an SSH client, and network reach to the Proxmox API. That is all — **any OS**.
 
-**Linux on x86_64, with KVM.** The lab is built by Terraform driving libvirt directly, so the
-host has to be a machine that can run KVM.
+This is the one advantage of building on a hypervisor you don't sit in front of: nothing is
+compiled, virtualised or mounted locally, so macOS and Windows are as good a driving seat as Linux.
+The five VMs are a *topology*, and it lives on the Proxmox node, not on your desk.
 
-| Your platform | Status |
-|---|---|
-| Linux (x86_64) with KVM | ✅ full run, amd64 (tested on an Arch host) |
-| macOS, Windows | ❌ not supported — see below |
+## Prepare the Proxmox host
 
-> **If you are on macOS or Windows**, run this on a Linux box: a spare machine, a homelab
-> hypervisor, or a cloud VM that supports nested virtualization. There is no macOS path.
-> `dmacvicar/libvirt` talks to libvirt, and libvirt/KVM is Linux-only — the provider publishes a
-> darwin binary, but only so a Mac can drive a *remote* Linux libvirt host, which is not the
-> single-laptop shape this tutorial is built around.
+### Two content types the stock install doesn't enable
 
-## Install the tools
+Terraform needs to put two kinds of file on the node, and a stock Proxmox install allows neither on
+the `local` datastore:
 
-You need the virtualization stack, Terraform, and `virtiofsd` (which shares this repo into the
-VMs).
+- **`snippets`** — the cloud-init user-data for each VM. Proxmox can generate cloud-init itself from
+  a username and a key, but that form can only create a user; it cannot install a package or write a
+  file. These nodes need both, so the whole document is uploaded as a snippet instead.
+- **`import`** — the downloaded Rocky cloud image, which becomes the VM disks.
 
-*Arch* — the host this was tested on:
-
-```bash
-sudo pacman -S --needed qemu-full libvirt dnsmasq dmidecode virtiofsd terraform
-```
-
-> **Don't add `ebtables` to that line.** It is no longer its own Arch package — `/usr/bin/ebtables`
-> ships in `iptables` now, which libvirt already depends on. pacman aborts the *entire* transaction
-> on a single unknown target, so one bad name means nothing gets installed.
-
-*Fedora / RHEL family* — package names are correct, but this wasn't tested as a **host** (the guest
-VMs are Rocky, so the tutorial's own `dnf` commands are covered — this line is just host prep):
+In the web UI: **Datacenter → Storage → `local` → Edit**, and tick **Snippets** and **Import**
+alongside whatever is already selected. Or from a root shell on the node:
 
 ```bash
-sudo dnf -y install qemu-kvm libvirt virt-install dnsmasq dmidecode virtiofsd terraform
+pvesm set local --content vztmpl,iso,import,snippets,backup
 ```
 
-If `terraform` isn't in your repos, add [HashiCorp's dnf repo](https://developer.hashicorp.com/terraform/install)
+Check it took:
+
+```bash
+pvesm status --content snippets
+pvesm status --content import
+```
+
+`local` should appear in both. If you keep images on a different datastore, point
+`image_datastore_id` and `snippet_datastore_id` at it in `terraform.tfvars` instead — the snippets
+one has to be a *directory-backed* store, so `local-lvm` cannot hold it.
+
+### An API token
+
+Terraform authenticates to the API with a token rather than a password. On the node:
+
+```bash
+pveum user token add root@pam ace --privsep 0
+```
+
+That prints the secret **once** — copy it. `--privsep 0` gives the token the same rights as the user
+that owns it, which for `root@pam` is everything. A production build would create a role with only
+the privileges this configuration needs and a non-root user to hold it; for a lab you will destroy
+next week, the root token is the honest shortcut.
+
+You want the full `user@realm!tokenid=uuid` string, e.g.
+`root@pam!ace=6f1e...`.
+
+### SSH to the node
+
+The provider also needs SSH to the Proxmox host as root. This is not belt-and-braces: uploading a
+snippet writes a *file* on the node, and there is no API call that does it. Everything else this
+configuration does is API-only.
+
+Either set a password in `terraform.tfvars`, or — better — put your key on the node and let the
+agent handle it:
+
+```bash
+ssh-copy-id root@your-proxmox-host
+```
+
+then set `proxmox_ssh_agent = true` and leave `proxmox_ssh_password` unset.
+
+### Addresses
+
+The five VMs take **static** addresses on your bridge. Pick five consecutive ones that are free and
+**outside your router's DHCP pool** — if the pool can hand out `.40`, something else will
+eventually take it and you will be debugging a duplicate address halfway through Lab 6.
+
+The defaults in `terraform/variables.tf` are `192.168.1.40`–`.44` with a gateway of `192.168.1.1`.
+Change them there, or in `terraform.tfvars`, to match your LAN. Whatever you choose, the addresses
+appear in `/etc/hosts` on every node and in the certificate SANs from [Lab 3](03-internal-ca.md)
+onward, so settle them now rather than later.
+
+> **These VMs are on your home network.** A hypervisor's private NAT network is a sealed box; a
+> bridge is not. The nodes can reach — and be reached by — everything else you own. Two labs care
+> about this and say so at the time: [Lab 4](04-postgresql.md) writes one `pg_hba.conf` rule per
+> client instead of a subnet rule, and [Lab 6](06-controller.md) opens redis to exactly one address.
+> Follow those as written; the subnet-wide shortcuts are wrong here.
+
+## Install Terraform
+
+On your workstation only — nothing is installed on the Proxmox node.
+
+*Arch:*
+
+```bash
+sudo pacman -S --needed terraform
+```
+
+*Fedora / RHEL family:*
+
+```bash
+sudo dnf -y install terraform
+```
+
+If it isn't in your repos, add [HashiCorp's dnf repo](https://developer.hashicorp.com/terraform/install)
 or drop the release binary on your `PATH`.
 
-*Ubuntu / Debian* — package names are correct, untested as a host:
-
-```bash
-sudo apt update
-sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients dnsmasq dmidecode virtiofsd
-```
-
-Terraform is not in Debian/Ubuntu's own repos — use
+*Debian / Ubuntu:* not in the distro repos — use
 [HashiCorp's apt repo](https://developer.hashicorp.com/terraform/install).
 
-Then, on any distro:
+*macOS:*
 
 ```bash
-sudo systemctl enable --now libvirtd
-sudo usermod -aG libvirt "$USER"
-
-sudo virsh pool-define-as default dir --target /var/lib/libvirt/images
-sudo virsh pool-build default
-sudo virsh pool-start default
-sudo virsh pool-autostart default
+brew install terraform
 ```
 
 `terraform` may be replaced with `tofu` (OpenTofu) throughout — the configuration uses nothing
@@ -94,59 +146,36 @@ Keep it at that path, or point `ssh_public_key_path` in `terraform/variables.tf`
 
 > **Keep the private key on local disk**, even if this repo lives on a NAS. `ssh` refuses a key it
 > does not believe you own, and a network filesystem often presents files under a different uid
-> than your local account. `~/.ssh` on the host is the right place; the default above already does
-> this.
+> than your local account. `~/.ssh` on your workstation is the right place; the default above
+> already does this.
 
-### Host-side things worth knowing
+## Configure
 
-Most are distro or firewall specific — you may hit none of them.
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+```
 
-- **Firewall on the libvirt bridge.** If the VMs get no DHCP, or come up but can't reach each other
-  on `192.168.56.0/24`, a default-drop firewall (ufw, or Docker's rules) is blocking libvirt's
-  bridge. Bridge numbers are handed out in creation order, so don't guess — allow the whole family
-  at once:
-
-  ```bash
-  sudo ufw allow in on 'virbr+'
-  sudo ufw route allow in on 'virbr+'
-  sudo ufw route allow out on 'virbr+'
-  ```
-
-  `virbr+` is an iptables prefix wildcard, so those three rules cover every libvirt bridge you have
-  now or create later. To see what you actually got:
-
-  ```bash
-  sudo virsh net-list --all
-  ip -br link show type bridge
-  ```
-
-  There is only **one** network here (`ace-lab`), carrying both SSH and lab traffic.
-
-  > Confirmed on the tested Arch host: `ufw` ships active by default (Omarchy enables it), with
-  > `Default: deny (routed)` and no rule for `virbr+`. That's enough to silently drop DHCP with zero
-  > leases ever issued — not a partial failure, `virsh net-dhcp-leases ace-lab` comes back empty.
-  > **If VMs were already running while this was blocking them, adding the `ufw` rules alone is not
-  > enough** — their DHCP clients had already given up retrying. Reboot each domain
-  > (`virsh reboot <name>`) after fixing the firewall to make them ask again.
-
-- **`libvirtd` won't start on a TPM box.** If `virt-secret-init-encryption.service` aborts, seal the
-  key to the host instead of the TPM:
-  `systemd-creds encrypt --with-key=host --name=secrets-encryption-key - /var/lib/libvirt/secrets/secrets-encryption-key`.
-
-- **This repo may live on a NAS.** `virtiofsd` serves the directory to the guests rather than
-  re-exporting it over NFS, so a network-mounted clone is
-  fine. Two caveats: the daemon runs as root, so the export must not squash root; and inside the VM
-  the share carries the *host's* ownership, so unprivileged writes may be refused. Every lab that
-  writes to the share does so with `sudo`, which is why this doesn't bite in practice.
+Fill in the endpoint, the token, the SSH credentials and your node name. `terraform.tfvars` is
+gitignored; the `.example` is not, so keep real credentials out of the latter.
 
 ## Verify
 
 ```bash
 terraform version
-virsh --connect qemu:///system version
-virsh --connect qemu:///system pool-info default
-ls /usr/lib/virtiofsd || ls /usr/libexec/virtiofsd
 ```
+
+Then check the API answers and the node is what you think it is — substitute your own endpoint and
+token:
+
+```bash
+curl -sk -H "Authorization: PVEAPIToken=root@pam!ace=YOUR-SECRET" \
+  https://your-proxmox-host:8006/api2/json/version
+```
+
+A JSON blob with a `version` of 8.4 or higher means the token works, the endpoint is right, and the
+release is new enough. A `401` means the token string is wrong — it must be the whole
+`user@realm!tokenid=uuid`, not just the uuid.
 
 ## Why VMs?
 

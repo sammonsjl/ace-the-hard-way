@@ -12,11 +12,11 @@ each component on its own host:
 
 | VM                 | Address       | Runs                                                            |
 | ------------------ | ------------- | --------------------------------------------------------------- |
-| **ace-db**         | 192.168.56.10 | PostgreSQL, and nothing else                                    |
-| **ace-gateway**    | 192.168.56.11 | the platform gateway, Redis, envoy, and the console             |
-| **ace-controller** | 192.168.56.12 | the automation controller — and, as a **hybrid** node, jobs too |
-| **ace-hub**        | 192.168.56.13 | automation hub                                                  |
-| **ace-eda**        | 192.168.56.14 | Event-Driven Ansible                                            |
+| **ace-db**         | 192.168.1.40 | PostgreSQL, and nothing else                                    |
+| **ace-gateway**    | 192.168.1.41 | the platform gateway, Redis, envoy, and the console             |
+| **ace-controller** | 192.168.1.42 | the automation controller — and, as a **hybrid** node, jobs too |
+| **ace-hub**        | 192.168.1.43 | automation hub                                                  |
+| **ace-eda**        | 192.168.1.44 | Event-Driven Ansible                                            |
 
 The real shape has a **sixth** VM: a dedicated execution node, with the controller kept
 control-only. We fold that role into the controller by making it a **hybrid** node — one that
@@ -47,24 +47,29 @@ seams made visible, and the seams are the interesting part:
   quietly depend on a file the hub created. Five machines make that impossible.
 - **The gateway's job stops being abstract.** Four services on four hosts, one URL, one login.
 
-## Memory
+## Memory and CPU
 
-The whole estate has to fit in 16 GB *in total*, so the numbers in `terraform/variables.tf` are a
-lab compromise:
+The numbers in `terraform/variables.tf` are sized for a Proxmox node with 32 GB:
 
 ```
-ace-db           1024      postgres alone needs very little
-ace-gateway      5120      the console's npm build is the hungriest step in the tutorial
-ace-controller   3584      tight — it runs AWX and EE containers
-ace-hub          2560
-ace-eda          2048
-                ------
-                14336      leaves ~1.5 GB for the host
+                 MB    vCPU
+ace-db          2048     2    postgres alone needs very little
+ace-gateway     8192     4    the console's npm build is the hungriest step in the tutorial
+ace-controller  6144     4    runs AWX, and as a hybrid node the EE containers too
+ace-hub         4096     2
+ace-eda         3072     2
+               -----    --
+               23552    14
 ```
 
-If your host has more, raise them — nothing in the tutorial depends on these being small. If it
-has exactly 16 GB, expect the console build in [Lab 5](05-gateway.md) to lean on swap, which that
-lab sets up.
+Nothing in the tutorial depends on these exact numbers. On a smaller host, the laptop-scale set
+that also works is `1024 / 5120 / 3584 / 2560 / 2048` — 14 GB in total, at the cost of the console
+build in [Lab 5](05-gateway.md) leaning on swap, which that lab sets up. Those numbers are kept in
+the `nodes` variable's description so you don't have to re-derive them.
+
+The 14 vCPU deliberately overcommits an 8-core host. The nodes are idle most of the time and the two
+long compiles are on different machines, so the overcommit buys parallelism during the builds and
+costs nothing at rest.
 
 ## Bring them up
 
@@ -76,8 +81,12 @@ terraform init
 terraform apply
 ```
 
-That takes a while on first run: it downloads the Rocky 9 cloud image once (~650 MB), gives each
-VM a thin copy-on-write overlay of it, and boots all five.
+That takes a while on first run. In order, it: downloads the Rocky 9 cloud image once (~650 MB) —
+onto the *Proxmox node*, not your workstation, so the speed that matters is the node's link to
+`dl.rockylinux.org`; uploads five cloud-init documents to the snippets datastore; then creates and
+boots five VMs, importing that one image as each VM's disk.
+
+Expect a minute for the download and around twenty seconds for the VMs.
 
 Terraform prints the addresses when it finishes. To see them again:
 
@@ -127,8 +136,8 @@ That is the command used throughout the rest of the tutorial. If you would rathe
 
 ### What cloud-init did
 
-Beyond booting, each VM does only two things: it installs `vim curl jq git`, and it writes
-`/etc/hosts`.
+Beyond booting, each VM does only three things: it installs `vim curl jq git nfs-utils`, it writes
+`/etc/hosts`, and it wires up the shared directory described below.
 
 The `/etc/hosts` part is not laziness. Every node needs every other node's name from
 [Lab 3](03-internal-ca.md) onward — certificate SANs, database connection strings, the gateway's
@@ -147,8 +156,10 @@ ssh ace-controller 'getent ahostsv4 ace-db ace-gateway | head -2; grep -c 127.0.
 > Also note `getent ahostsv4`, not `getent hosts`. On a multi-homed machine the latter returns a
 > link-local `fe80::` address first, and an `fe80::` in a certificate SAN is worse than no SAN.
 
-Addresses are pinned in libvirt's own DHCP by MAC rather than configured inside the guests, so each
-node gets the address the labs expect without any guest-side network config to drift.
+Addresses are set by Proxmox's cloud-init drive rather than by DHCP, so each node comes up on the
+address the labs expect whether or not anything on your network is handing out leases. Static
+addressing also means no DHCP server is supplying resolvers, which is why `dns_servers` is a
+variable — get it wrong and the symptom is a VM that boots fine and cannot resolve anything.
 
 > **Give cloud-init time to finish.** `terraform apply` returns when the VMs are *defined and
 > booting*, not when they are ready — first boot still has to grow the root filesystem, create your
@@ -165,16 +176,52 @@ node gets the address the labs expect without any guest-side network config to d
 
 ### The shared directory
 
-The repo is mounted inside every VM at **`/srv/ace`**, over virtiofs, two-way. Edit a lab on your
-host and the change is visible in the VM immediately — and, more importantly, it is the courier
-that carries certificates between machines in [Lab 3](03-internal-ca.md).
+Every node has **`/srv/ace`**. On `ace-gateway` it is a real directory; on the other four it is an
+NFS mount of the gateway's copy. It exists for exactly one job: it is the courier that carries
+certificate requests and signed certificates between machines in [Lab 3](03-internal-ca.md).
+
+The gateway holds it because the gateway holds the CA — the courier lives where the signing does,
+so a certificate is only ever one hop from the key that signs it.
 
 ```bash
-ssh ace-db 'ls /srv/ace'
+ssh ace-gateway 'sudo touch /srv/ace/hello'
+ssh ace-db      'sudo ls -l /srv/ace/'
+ssh ace-gateway 'sudo rm /srv/ace/hello'
 ```
 
-Writes to it need `sudo` inside the VM. The share carries the host's file ownership, which will not
-match the in-guest user; every lab that writes there already uses `sudo`.
+If `ace-db` sees `hello`, the courier works. If it sees an empty directory, it is writing to its own
+local `/srv/ace` instead of the gateway's — see below.
+
+Three things about it are worth knowing, because each one is a way it can look fine and not be:
+
+- **Writes need `sudo`.** The directory is root-owned, and both certificate scripts in
+  [Lab 3](03-internal-ca.md) live in `/usr/local/sbin` and run under `sudo` anyway. The export is
+  `no_root_squash` for that reason: the default would map those root writes to `nobody` and refuse
+  them.
+- **It mounts on demand, not at boot.** The fstab entry uses `x-systemd.automount`, so the mount is
+  attempted the first time something touches the directory — Lab 3, long after the estate is up —
+  rather than at boot, when the gateway may not be exporting yet. This is what makes the boot order
+  of the five VMs irrelevant.
+- **An unmounted share is silent.** `/srv/ace` exists on every node whether or not the NFS mount is
+  live, so a broken mount does not produce an error — it produces an empty directory, and a
+  certificate written on one machine that simply isn't there on the other. `findmnt` is the check
+  that actually answers the question:
+
+  ```bash
+  for vm in ace-db ace-controller ace-hub ace-eda; do
+    printf "%-16s " "$vm"; ssh "$vm" 'sudo ls /srv/ace >/dev/null; findmnt -no SOURCE,FSTYPE /srv/ace || echo "NOT MOUNTED"'
+  done
+  ```
+
+  Each should report `192.168.1.41:/srv/ace nfs4`. The `ls` first is deliberate — it pokes the
+  automount into mounting, which `findmnt` alone would not do.
+
+> **Why not share the repo itself?** The libvirt build of this lab mounted the repo into each VM
+> over virtiofs, which is neat when the hypervisor is the machine you are sitting at. Proxmox is
+> not: the repo is on your workstation and the VMs are somewhere else entirely. Since nothing in the
+> tutorial ever reads a repo file from inside a VM — every source checkout is a `git clone` over the
+> network — the share only ever needed to move certificates between the five nodes, and NFS between
+> the nodes themselves does that without involving your workstation at all.
 
 ## Bring them current
 
@@ -206,8 +253,14 @@ done
 ```
 
 All five should report the same, newer kernel. If one still shows the old version, that VM didn't
-come back cleanly — `virsh --connect qemu:///system reboot ace-<name>` it on its own before
-continuing.
+come back cleanly — reboot it on its own before continuing, either from the Proxmox UI or from a
+root shell on the node:
+
+```bash
+qm reboot 140      # ace-db; .41 is 141, and so on
+```
+
+The VM IDs are `140`–`144`, chosen to match the last octet of each node's address.
 
 Do this **here**, not later. Three of the things in that backlog are load-bearing for what follows:
 `ca-certificates` and `openssl` decide whether the private CA in [Lab 3](03-internal-ca.md)
@@ -232,7 +285,7 @@ that makes a machine *the controller* or *the hub* happens in that component's l
 ## Preflight checks
 
 Each of these is a precondition the rest of the tutorial silently assumes, and each has to hold on
-**all five** machines. Rather than SSH into each box in turn, run the whole set from your host:
+**all five** machines. Rather than SSH into each box in turn, run the whole set from your workstation:
 
 ```bash
 PREFLIGHT=$(cat <<'EOF'
@@ -275,7 +328,7 @@ for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
 done
 ```
 
-The quoted heredoc (`<<'EOF'`) matters: it stops your host's shell expanding `$d`, `$h` and the
+The quoted heredoc (`<<'EOF'`) matters: it stops your workstation's shell expanding `$d`, `$h` and the
 `$(...)` calls before they ever reach a VM. The script travels across as literal text and is
 evaluated by the remote shell, which is where every one of those variables belongs.
 
