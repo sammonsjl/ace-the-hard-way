@@ -205,9 +205,9 @@ sudo supervisord --version
 ```
 
 > **`ensurepip`, because there is no `python3.12-pip` package.** Fedora packages pip only for the
-> *default* interpreter — 3.14 here. The alternate versioned interpreters this build uses (3.12 on
-> the gateway, controller and EDA; 3.11 on the hub) each ship `ensurepip` with a pip wheel bundled
-> inside instead, which is what bootstraps it. `--altinstall` is what stops it stamping on the
+> *default* interpreter — 3.14 here. The alternate versioned interpreter this build uses on all
+> four components, 3.12, ships `ensurepip` with a pip wheel bundled inside instead, which is what
+> bootstraps it. `--altinstall` is what stops it stamping on the
 > system `pip3`. Ask dnf for `python3.12-pip` and you get `No match for argument`.
 >
 > Inside a venv this never comes up — `python3.12 -m venv` bootstraps pip on its own. It only
