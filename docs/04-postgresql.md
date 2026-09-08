@@ -18,14 +18,19 @@ It is also the only VM in this build that serves no HTTP at all. It has no certi
 no place in the gateway's registry, and no user-facing surface. It exists to be connected to, on
 one port, by four hosts.
 
-> **Why 15 and not something newer.** PostgreSQL 15 is what this platform's components are built
-> and tested against, and Rocky 9 ships it as a module stream. Newer majors are supported for
-> customer-managed databases, but the version the product installs for itself is 15 — so we pin the
-> module stream explicitly rather than inheriting whatever the distro's default becomes.
+> **Why whatever Fedora ships, and not a pinned major.** The RPM installer this build replicates
+> pins PostgreSQL 15 — every component sets `postgresql:15` and enables that dnf module stream.
+> Fedora has no modularity to pin with, and ships one PostgreSQL major at a time. Rather than put a
+> third-party repo on the critical path to recreate a version pin, we take the distro's.
+>
+> That is less of a departure than it looks. The platform's components need a PostgreSQL new enough
+> for `scram-sha-256` and the SQL these migrations emit, not specifically 15; and the vendor is
+> moving anyway — RHEL 9.8's own package list names `postgresql-18.4`. Where a version difference
+> does bite, this lab says so at the point it bites.
 
 ## What you will have at the end
 
-PostgreSQL 15 on **ace-db**, listening on the lab network, with four roles and four databases, and
+PostgreSQL on **ace-db**, listening on the lab network, with four roles and four databases, and
 `scram-sha-256` password authentication for every remote client.
 
 All commands on **ace-db** unless stated otherwise.
@@ -37,7 +42,6 @@ ssh ace-db
 ## Install
 
 ```bash
-sudo dnf -y module enable postgresql:15
 sudo dnf -y install postgresql-server postgresql
 sudo postgresql-setup --initdb
 sudo systemctl enable --now postgresql
@@ -78,8 +82,8 @@ Confirm the server will hash passwords the modern way:
 sudo -iu postgres psql -c "SHOW password_encryption;"
 ```
 
-Then make the client rules match. Rocky's stock `initdb` ships the TCP rules as `ident`, which
-cannot work for a remote client — there is no local identity to check:
+Then make the client rules match. The stock `initdb` ships the TCP rules as `ident`, which cannot
+work for a remote client — there is no local identity to check:
 
 ```bash
 sudo vim /var/lib/pgsql/data/pg_hba.conf

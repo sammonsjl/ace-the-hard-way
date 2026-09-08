@@ -351,7 +351,6 @@ sudo install -o root -g pulp -m 0644 /srv/ace/ace-hub-pulp_webserver.crt /etc/pu
 sudo rm -f /srv/ace/ace-hub-pulp_webserver.crt
 sudo openssl verify /etc/pulp/certs/pulp_webserver.crt
 
-sudo dnf -y module enable nginx:1.24
 sudo dnf -y install nginx
 sudo setsebool -P httpd_can_network_connect on
 
@@ -400,7 +399,7 @@ sudo systemctl enable --now firewalld
 sudo firewall-cmd --permanent --add-port=443/tcp && sudo firewall-cmd --reload
 ```
 
-> **firewalld is not on this box yet.** The Rocky GenericCloud image does not ship it, and only
+> **firewalld is not on this box yet.** The Fedora Cloud Base image does not ship it, and only
 > [Lab 6](06-controller.md) has installed it so far — on the controller. Skip the install line and
 > the next command is `sudo: firewall-cmd: command not found`, which reads like a broken lab rather
 > than a missing package.

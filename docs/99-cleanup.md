@@ -26,8 +26,8 @@ terraform destroy
 That removes all five VMs, their disks and their cloud-init snippets — Terraform knows exactly what
 it created, so there is nothing to hunt for.
 
-It also removes the downloaded Rocky base image from the node. If you plan to rebuild soon and would
-rather keep that ~650 MB download, drop it from state first:
+It also removes the downloaded Fedora base image from the node. If you plan to rebuild soon and
+would rather keep that ~557 MB download, drop it from state first:
 
 ```bash
 terraform state rm proxmox_download_file.base
@@ -46,8 +46,9 @@ pvesm list local --content import
 ```
 
 `qm list` should show none of `140`–`144`. Anything left under `snippets` named `ace-*-user-data.yaml`,
-or an `ace-rocky9-base.qcow2` under `import`, is a leftover you can delete — though if you dropped
-the image from state above, that last one is deliberate.
+or an `ace-fedora-*.qcow2` under `import`, is a leftover you can delete — though if you dropped the
+image from state above, that last one is deliberate. More than one `ace-fedora-*.qcow2` means you
+have rebuilt across a Fedora release; the older one is safe to remove.
 
 The API token and the two content types you enabled in [Lab 1](01-prerequisites.md) are still there.
 Leave them if you might rebuild; otherwise:

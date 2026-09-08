@@ -387,7 +387,7 @@ best. [Appendix A1](a1-epel-uwsgi-conflict.md) breaks this on purpose.
 supervisord is the opposite case and can live system-wide, because it only ever *spawns* processes:
 
 ```bash
-sudo dnf -y install python3.12-pip
+sudo python3.12 -m ensurepip --altinstall
 sudo python3.12 -m pip install supervisor
 sudo ln -sf /usr/local/bin/supervisord  /usr/bin/supervisord
 sudo ln -sf /usr/local/bin/supervisorctl /usr/bin/supervisorctl
@@ -402,9 +402,13 @@ sudo supervisord --version
 > args = ['supervisorctl']
 > args.extend([command, ':'.join(['tower-processes', service])])
 > ```
-> `/usr/bin/supervisorctl` plus `/etc/supervisord.conf` is exactly what that expects. Rocky's `sudo`
-> also excludes `/usr/local` from its `secure_path`, so without the links every `sudo supervisorctl`
-> in this lab is `command not found`.
+> `/usr/bin/supervisorctl` plus `/etc/supervisord.conf` is exactly what that expects, and pip puts
+> the real binaries in `/usr/local/bin`.
+>
+> **`ensurepip`, because there is no `python3.12-pip` package.** Fedora packages pip only for its
+> *default* interpreter. The alternate versioned interpreters — 3.11, 3.12, 3.13 — ship
+> `ensurepip` with a pip wheel bundled inside instead, and `--altinstall` is what keeps it from
+> stamping on the system `pip3`.
 >
 > **This is also why supervisord and not eight systemd units.** Native units would be nicer in every
 > way except the one that matters: remove supervisord and AWX's own restart calls have nothing to
@@ -413,7 +417,6 @@ sudo supervisord --version
 ### nginx package, and the socket directory
 
 ```bash
-sudo dnf -y module enable nginx:1.24
 sudo dnf -y install nginx
 sudo usermod -aG nginx awx
 

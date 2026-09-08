@@ -149,7 +149,6 @@ The gateway does SAML federation, which pulls in `python3-saml` → `xmlsec`, an
 in `python-ldap`. Both compile against native libraries:
 
 ```bash
-sudo dnf config-manager --set-enabled crb
 sudo dnf -y install \
   gcc gcc-c++ make git \
   python3.12 python3.12-devel python3.12-pip \
@@ -159,14 +158,16 @@ sudo dnf -y install \
   libxml2-devel xmlsec1-devel xmlsec1-openssl-devel libtool-ltdl-devel
 ```
 
-> **CRB, and *only* CRB.** Rocky's CodeReady Builder repo is off by default and holds exactly three
-> things this list needs — `xmlsec1-devel`, `xmlsec1-openssl-devel` and `libtool-ltdl-devel`.
-> Without it those three are the only ones that fail (`No match for argument: xmlsec1-devel`);
-> everything else comes from BaseOS or AppStream. **Do not enable EPEL here.** Nothing in this
-> tutorial — on any of the five machines — needs a package from it, and an enabled EPEL puts its
-> `uwsgi` one careless `dnf install` away from the venv-built one this platform runs on. That
-> failure is worth understanding, so [Appendix A1](a1-epel-uwsgi-conflict.md) has you enable EPEL
-> deliberately, break the platform with it, and then armor the box.
+> **One repository, no extras.** Everything above comes from Fedora's own repository, which is
+> worth noticing because on RHEL and its rebuilds it does not: `xmlsec1-devel`,
+> `xmlsec1-openssl-devel` and `libtool-ltdl-devel` live in CodeReady Builder there, a repo that is
+> off by default, and those three are the only ones that fail without it (`No match for argument:
+> xmlsec1-devel`). Fedora needs no equivalent step.
+>
+> **Do not install the distribution's `uwsgi` on any of these machines.** Fedora ships one, and it
+> is one careless `dnf install` away from the venv-built uwsgi this platform actually runs on — a
+> packaged uwsgi links the system interpreter and cannot import a venv's C extensions. Nothing in
+> this tutorial needs it.
 
 ---
 
@@ -187,12 +188,12 @@ sudo which supervisord supervisorctl
 sudo supervisord --version
 ```
 
-> **The symlinks are not cosmetic.** Rocky's `sudo` replaces `PATH` with a `secure_path` of
-> `/sbin:/bin:/usr/sbin:/usr/bin` — no `/usr/local`
-> (`sudo grep secure_path /etc/sudoers`). Without them every `sudo supervisorctl` in this tutorial
-> is `command not found` while the binary sits one directory over. `/usr/bin` is also where a
-> packaged supervisord lives, which matters a great deal in [Lab 6](06-controller.md) — AWX shells
-> out to a **bare** `supervisorctl` resolved from `PATH`, reading its **default** config path.
+> **The symlinks are not cosmetic**, though not for the reason you might expect. Fedora's `sudo`
+> *does* keep `/usr/local/bin` on its `secure_path` (`sudo grep secure_path /etc/sudoers`), so
+> `sudo supervisorctl` resolves without them. They matter for [Lab 6](06-controller.md) instead:
+> AWX restarts its own processes by shelling out to a **bare** `supervisorctl`, resolved from
+> `PATH`, reading its **default** config path — and `/usr/bin` is where a packaged supervisord
+> would have lived. Put the links in here so that lab has them.
 
 ```bash
 sudo install -d -o root -g root -m 0755 /var/log/supervisor /etc/supervisord.d /var/run/supervisor
@@ -432,7 +433,6 @@ nginx terminates TLS for the gateway API and serves the console's static files. 
 component in this build gets 443 on its own host, because it has a host to itself.
 
 ```bash
-sudo dnf -y module enable nginx:1.24
 sudo dnf -y install nginx
 
 sudo tee /etc/nginx/nginx.conf >/dev/null <<'EOF'
@@ -689,9 +689,7 @@ free -h | grep -i swap
 ### Build
 
 ```bash
-sudo dnf -y module reset nodejs
-sudo dnf -y module enable nodejs:20
-sudo dnf -y install nodejs
+sudo dnf -y install nodejs20 nodejs20-npm
 node --version && npm --version
 
 sudo install -d -o gateway -g gateway /opt/ansible-ui

@@ -250,24 +250,29 @@ x509 -req`, deliberately, because a CSR is attacker-controlled input in the gene
 out and your certificates come out with a CN and nothing else — no SAN, no key usage — and every
 modern client rejects them with a hostname error that never mentions SANs.
 
-**There is no `-not_before` backdating, and that is a version fact, not a choice.** Certificates
-are validated against the *verifier's* clock, not the signer's, so a machine whose clock is a few
-minutes behind would reject a certificate issued seconds ago as not-yet-valid — the standard fix is
-backdating `notBefore` by a day of slack. `openssl x509 -req` grew a `-not_before` flag for exactly
-this in OpenSSL 3.3. Rocky 9 ships 3.2.2 (`openssl version`), which does not recognise it — and
-because `-req`'s option parser buckets any unrecognised `-word` as a candidate digest name, adding
-it produces `Multiple digest or unknown options: -sha256 and -not_before` and every signing call
-fails outright, not just the edge case it exists to cover. There is nothing here to patch: instead
-this is why [Lab 2](02-vms.md)'s preflight checks `chronyd` on every node — with clocks kept in
-sync, the backdating was only ever a safety margin, not the thing making certificates valid.
+**There is no `-not_before` backdating, and that is now a choice rather than a constraint.**
+Certificates are validated against the *verifier's* clock, not the signer's, so a machine whose
+clock is a few minutes behind would reject a certificate issued seconds ago as not-yet-valid — the
+standard fix is backdating `notBefore` by a day of slack. `openssl x509 -req` grew a `-not_before`
+flag for exactly this in OpenSSL 3.3, and Fedora 44 ships 3.5.5 (`openssl version`), so the flag is
+available here.
+
+We still do not use it, because the thing it guards against is already handled: [Lab
+2](02-vms.md)'s preflight checks `chronyd` on every node, and with clocks in sync the backdating
+was only ever a safety margin, not what makes a certificate valid. Reach for it if you are signing
+for a machine whose clock you do not control. (Worth knowing if you carry these scripts to a RHEL 9
+box: it ships OpenSSL 3.2, which does not recognise the flag, and `-req`'s option parser buckets
+any unrecognised `-word` as a candidate digest name — so adding it there fails *every* signing call
+with `Multiple digest or unknown options`, not just the edge case.)
 
 **Validity is 365 days.** Certificates that outlive the service are how you end up with a ten-year
 key nobody remembers generating.
 
-> **Call both scripts by their full path.** Rocky's `sudo` replaces `PATH` with a `secure_path` of
-> `/sbin:/bin:/usr/sbin:/usr/bin` — no `/usr/local` anywhere
-> (`sudo grep secure_path /etc/sudoers`). `sudo ace-sign-request …` gives you `command not found`
-> while the file sits there, executable, one directory over.
+> **A note on `/usr/local` and `sudo`.** Fedora's `secure_path` includes `/usr/local/sbin` and
+> `/usr/local/bin` (`sudo grep secure_path /etc/sudoers`), so `sudo ace-sign-request …` resolves
+> without a full path. That is not true everywhere — RHEL and its rebuilds drop `/usr/local` from
+> `secure_path` entirely — so the full-path form is the portable habit if you carry these scripts
+> off this lab.
 
 ## Verify
 

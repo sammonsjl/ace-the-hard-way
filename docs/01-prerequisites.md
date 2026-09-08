@@ -14,7 +14,7 @@ A Proxmox node ready to run the five lab VMs, and a workstation that can drive i
 | **RAM** | **32 GB comfortable.** `terraform/variables.tf` allocates 23 GB across five VMs. It also ships the laptop-scale numbers (14 GB total) as a comment — use those and 16 GB is workable, at the cost of the console build leaning on swap in [Lab 5](05-gateway.md). |
 | **Disk** | ~150 GB free on the VM datastore. Five 60 GiB disks, but thin-provisioned: they start near empty and grow to roughly 15–20 GB each as you build. On thick storage, budget the full 300 GB. |
 | **CPU** | 4 cores workable, 8 comfortable. The configuration asks for 14 vCPU across the five VMs, which deliberately overcommits — the nodes idle most of the time, and the two long compiles are on different machines. |
-| **Network** | A bridge onto a network with DHCP-free space you control, and outbound internet. The VMs pull from GitHub, PyPI, npm, quay.io and the Rocky mirrors. Nothing here works air-gapped. |
+| **Network** | A bridge onto a network with DHCP-free space you control, and outbound internet. The VMs pull from GitHub, PyPI, npm, quay.io and the Fedora mirrors. Nothing here works air-gapped. |
 
 ### Your workstation
 
@@ -34,7 +34,7 @@ the `local` datastore:
 - **`snippets`** — the cloud-init user-data for each VM. Proxmox can generate cloud-init itself from
   a username and a key, but that form can only create a user; it cannot install a package or write a
   file. These nodes need both, so the whole document is uploaded as a snippet instead.
-- **`import`** — the downloaded Rocky cloud image, which becomes the VM disks.
+- **`import`** — the downloaded Fedora cloud image, which becomes the VM disks.
 
 In the web UI: **Datacenter → Storage → `local` → Edit**, and tick **Snippets** and **Import**
 alongside whatever is already selected. Or from a root shell on the node:
@@ -192,7 +192,13 @@ out the topology and why each component gets its own machine.
 
 Cloud images and cloud-init are how these machines get built everywhere else — a homelab, a
 hypervisor, a cloud account. The VM definitions are declarative and diffable, and
-`terraform destroy` is exact about what it removes. The Rocky 9 GenericCloud image this lab
-downloads comes straight from `dl.rockylinux.org`.
+`terraform destroy` is exact about what it removes. The Fedora Cloud Base image this lab downloads
+is chosen from Fedora's own release index and verified against the SHA-256 published there.
+
+> **The lab follows Fedora forward.** Left alone, every `terraform apply` builds on the newest
+> stable Fedora, which is the point: this tutorial tracks the upstream of the enterprise
+> distributions rather than trailing them. When a new Fedora lands mid-build and you would rather
+> not move, `terraform output base_image` prints the release number to pin in
+> `terraform.tfvars`.
 
 Next: [Provisioning the VMs](02-vms.md)

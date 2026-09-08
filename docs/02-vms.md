@@ -2,7 +2,7 @@
 
 ## What you will have at the end
 
-Five Rocky Linux 9 VMs that can see and name each other, and all pass the preflight checks.
+Five Fedora VMs that can see and name each other, and all pass the preflight checks.
 Nothing component-specific — that starts in Lab 4.
 
 ## The topology, and why it has this shape
@@ -81,10 +81,14 @@ terraform init
 terraform apply
 ```
 
-That takes a while on first run. In order, it: downloads the Rocky 9 cloud image once (~650 MB) —
-onto the *Proxmox node*, not your workstation, so the speed that matters is the node's link to
-`dl.rockylinux.org`; uploads five cloud-init documents to the snippets datastore; then creates and
-boots five VMs, importing that one image as each VM's disk.
+That takes a while on first run. In order, it: reads Fedora's release index to find the newest
+stable Cloud Base image; downloads it once (~557 MB) — onto the *Proxmox node*, not your
+workstation, so the speed that matters is the node's link to whichever mirror
+`download.fedoraproject.org` redirects it to; uploads five cloud-init documents to the snippets
+datastore; then creates and boots five VMs, importing that one image as each VM's disk.
+
+Proxmox verifies the image's SHA-256 before using it, which matters here because that download is a
+redirect to a community mirror rather than a single origin.
 
 Expect a minute for the download and around twenty seconds for the VMs.
 
@@ -279,7 +283,7 @@ in [Lab 8](08-hub.md), EDA in [Lab 9](09-eda.md). That is not tidiness for its o
 user on the hub node would be a lie about what runs there, and a reader who stops after Lab 5
 should have a gateway machine with nothing else pre-seeded on it.
 
-What this lab leaves you is five interchangeable Rocky machines that can find each other. Everything
+What this lab leaves you is five interchangeable Fedora machines that can find each other. Everything
 that makes a machine *the controller* or *the hub* happens in that component's lab.
 
 ## Preflight checks

@@ -373,7 +373,6 @@ sudo install -o root -g eda -m 0644 /srv/ace/ace-eda-server.cert \
 sudo rm -f /srv/ace/ace-eda-server.cert
 sudo openssl verify /etc/ansible-automation-platform/eda/server.cert
 
-sudo dnf -y module enable nginx:1.24
 sudo dnf -y install nginx
 sudo setsebool -P httpd_can_network_connect on
 
