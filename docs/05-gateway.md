@@ -298,6 +298,10 @@ being root. On ace-controller the same line names `awx` instead, for the same re
 > repositories`. Two `pip install -r` calls keep the hashed set hash-checked and let the VCS
 > requirement through on its own.
 
+> **Two of the pinned C extensions are older than this compiler, and will not build.** This is the
+> sharpest edge of building on Fedora, and it is worth understanding rather than working around
+> blindly — see the note after the commands.
+
 ```bash
 sudo install -d -o gateway -g gateway /opt/jewel
 sudo -u gateway git clone https://github.com/ansible/jewel.git /opt/jewel
@@ -308,12 +312,56 @@ sudo -u gateway bash <<'EOF'
 set -euo pipefail
 source /var/lib/ansible-automation-platform/venv/gateway/bin/activate
 cd /opt/jewel
+
 pip install --upgrade pip setuptools wheel setuptools_scm
-pip install -r requirements/requirements.txt
-pip install -r requirements/requirements_git.txt
-pip install -e .
-pip install uwsgi
+
+# 1. Current uwsgi and xmlsec, before anything can ask for the pinned ones.
+pip install uwsgi xmlsec
+
+# 2. Everything else, still hash-checked. The awk drops each of those two
+#    packages *and* its --hash continuation lines; leave a stray hash behind
+#    and pip rejects the file.
+awk '/^(uwsgi|xmlsec)==/ {skip=1} skip {if ($0 !~ /\\$/) skip=0; next} {print}' \
+  requirements/requirements.txt > /tmp/req-no-c-ext.txt
+pip install -r /tmp/req-no-c-ext.txt
+
+# 3. --no-deps, because django-ansible-base re-pins xmlsec==1.3.13 itself.
+pip install --no-deps -r requirements/requirements_git.txt
+pip install --no-deps -e .
 EOF
+```
+
+> **Why those three steps, and not just `pip install -r`.**
+>
+> `requirements.txt` pins `uwsgi==2.0.28` and `xmlsec==1.3.13`. Both are C extensions, both are
+> compiled here rather than downloaded as wheels, and **neither compiles against GCC 15**:
+>
+> ```
+> core/master_utils.c:711:34: error: passing argument 2 of 'signal' from incompatible pointer type
+> ```
+>
+> GCC 14 promoted several long-standing C warnings — `-Wincompatible-pointer-types` among them — to
+> **errors** by default. Code that built with warnings for a decade now fails outright. uwsgi fixed
+> it in 2.0.31 and xmlsec in 1.3.17; the pins predate both. Nothing is wrong with the pins, and
+> nothing is wrong with Fedora — the pins were simply chosen against an older toolchain, which is
+> exactly what you signed up for by building on the upstream distribution. Expect to meet this
+> again, and expect the enterprise rebuilds to meet it when they catch up.
+>
+> **Step 2 keeps hash-checking.** The other 82 packages stay hash-pinned; only the two that cannot
+> build are removed. Dropping the whole file's hashes to route around two packages would be a much
+> larger concession than it looks.
+>
+> **Step 3 is `--no-deps` for a specific reason.** `django-ansible-base` carries its own
+> `xmlsec==1.3.13` pin, so pip re-resolves it and downloads 1.3.13 again even though a working
+> 1.3.17 is already installed. `--no-deps` is safe *here* precisely because `requirements.txt` is
+> the complete, pinned dependency set — it has already installed everything the git requirement
+> needs. Do not reach for `--no-deps` casually elsewhere.
+
+Confirm the build before moving on:
+
+```bash
+sudo -u gateway /var/lib/ansible-automation-platform/venv/gateway/bin/python \
+  -c 'import aap_gateway_api, ansible_base; print("ok")'
 ```
 
 The manage entrypoint is **`aap-gateway-manage`**. Give it a PATH wrapper:
