@@ -206,7 +206,7 @@ sudo firewall-cmd --reload
 **Back on `ace-eda`** — confirm the path before trusting it:
 
 ```bash
-sudo dnf -y install redis
+sudo dnf -y install valkey-compat-redis
 redis-cli -h ace-gateway -p 6379 ping
 ```
 

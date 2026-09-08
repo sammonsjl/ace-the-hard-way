@@ -55,7 +55,7 @@ ssh ace-gateway
 ## 1. Redis
 
 ```bash
-sudo dnf -y install valkey
+sudo dnf -y install valkey valkey-compat-redis
 redis-server --version
 ```
 
@@ -64,12 +64,16 @@ redis-server --version
 > — `dnf install redis` resolves to `valkey` through a `Provides`. Install it by its real name so
 > what you typed matches what you get.
 >
-> The compatibility surface is good and the wire protocol is identical, so the platform's Python
-> clients neither know nor care. What is *not* aliased is the packaging: the service account and
-> group are **`valkey`**, and the config lives in **`/etc/valkey/valkey.conf`**. The binaries
-> (`redis-server`, `redis-cli`) are symlinks and `redis.service` is an alias, which is exactly what
-> makes this trap quiet — every command you type appears to work right up until one wants the user
-> or the config file.
+> The wire protocol is identical, so the platform's Python clients neither know nor care. The
+> familiar command names come from a **separate subpackage**, `valkey-compat-redis`, which is what
+> supplies `redis-server`, `redis-cli` and the `redis.service` alias. `dnf install redis` pulls it
+> in as part of resolving the `Provides`; asking for plain `valkey` does **not**, and you get a box
+> where `valkey-cli` exists and `redis-cli` is `command not found`. Install both by name so the
+> result does not depend on which spelling you happened to use.
+>
+> What no alias covers is the packaging underneath: the service account and group are **`valkey`**,
+> and the config lives in **`/etc/valkey/valkey.conf`**. That is what makes this trap quiet — every
+> command you type appears to work right up until one wants the user or the config file.
 >
 > The socket path below stays `/run/redis/redis.sock` on purpose: that is where the RPM installer
 > this build replicates puts it, and the gateway's settings name it explicitly either way.
