@@ -991,7 +991,8 @@ for ip in 192.168.1.40 192.168.1.42 192.168.1.43 192.168.1.44; do
 done
 
 sudo firewall-cmd --reload
-sudo firewall-cmd --list-ports --list-rich-rules
+sudo firewall-cmd --list-ports
+sudo firewall-cmd --list-rich-rules
 ```
 
 > **Those NFS rules are not optional, and leaving them out fails in the worst possible way.** This
