@@ -62,9 +62,16 @@ runcmd:
   - [ install, -d, -o, root, -g, root, -m, "0755", "${share_mount}" ]
   - [ systemctl, enable, --now, nfs-server ]
   - [ exportfs, -ra ]
-  # Rocky's GenericCloud image ships without firewalld, but a reader may be on
-  # an image that has it. NFSv4 needs only 2049, so this is a single service.
-  - [ sh, -c, "systemctl is-active --quiet firewalld && firewall-cmd --permanent --add-service=nfs && firewall-cmd --reload || true" ]
+  # Fedora Cloud Base runs firewalld from first boot, and its default zone
+  # permits ssh and almost nothing else — so 2049 is shut before Lab 3 ever
+  # reaches for the share. One rule per client, the same addresses as the export
+  # list above and for the same reason: this share carries certificate requests,
+  # and these nodes are bridged onto your home LAN.
+  #
+  # Lab 5 adds 443 and 80 to this zone when the gateway comes up. It leaves
+  # these alone. The is-active guard is here so the template still does the
+  # right thing on an image that ships without firewalld.
+  - [ sh, -c, "systemctl is-active --quiet firewalld && firewall-cmd --permanent ${share_firewall_rules} && firewall-cmd --reload || true" ]
 %{ else ~}
   # Everyone else mounts it. x-systemd.automount is what makes the boot order
   # irrelevant: the mount is attempted the first time something touches the

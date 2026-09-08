@@ -90,18 +90,51 @@ variable "dns_servers" {
   default     = ["192.168.1.1"]
 }
 
+variable "fedora_release" {
+  description = <<-EOT
+    Which Fedora to build the nodes from — 44, say. Leave it null and every plan
+    reads fedoraproject.org's release index and takes the highest stable
+    release, so the lab rolls forward on its own.
+
+    Set it when your estate is up and you want it to stop moving. The release
+    number alone is enough: the image URL embeds a build number as well
+    (44-1.7), and that, and the checksum, still come out of the index.
+    `terraform output base_image` prints the number to paste here.
+  EOT
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.fedora_release == null || try(var.fedora_release >= 40, false)
+    error_message = "fedora_release is a Fedora release number — 42 or later in practice — or null to roll to the latest."
+  }
+}
+
+variable "fedora_releases_url" {
+  description = "Fedora's machine-readable release index. The only reason to change this is a mirror."
+  type        = string
+  default     = "https://fedoraproject.org/releases.json"
+}
+
 variable "base_image_url" {
   description = <<-EOT
-    Rocky 9 GenericCloud qcow2. Downloaded to the Proxmox node once and imported
-    as the disk for all five VMs. Served straight from dl.rockylinux.org, so
-    there is no third-party image registry on the critical path.
+    The other escape hatch, and the only way to build the lab when
+    fedoraproject.org is not reachable at plan time: a complete URL to a cloud
+    image qcow2. Setting it skips the release index entirely, so
+    base_image_checksum has to be set with it.
   EOT
   type        = string
-  default     = "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
+  default     = null
+}
+
+variable "base_image_checksum" {
+  description = "SHA-256 of base_image_url. Required with it, ignored without it — the rolling path takes the checksum straight out of the release index."
+  type        = string
+  default     = null
 }
 
 variable "disk_size_gb" {
-  description = "Per-VM disk size in GiB. The image is 10 GiB; cloud-init's growpart expands the root filesystem to fill this on first boot."
+  description = "Per-VM disk size in GiB. The image's virtual disk is 5 GiB; cloud-init's growpart expands the root filesystem to fill this on first boot."
   type        = number
   default     = 60
 }
@@ -113,9 +146,9 @@ variable "ssh_public_key_path" {
 }
 
 variable "guest_user" {
-  description = "Login user created on every node. This is the Rocky cloud image's own default user; it gets passwordless sudo."
+  description = "Login user created on every node. This is the Fedora cloud image's own default user; it gets passwordless sudo."
   type        = string
-  default     = "rocky"
+  default     = "fedora"
 }
 
 variable "share_mount" {

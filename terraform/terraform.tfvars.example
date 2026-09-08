@@ -12,6 +12,11 @@ proxmox_ssh_password = "changeme"
 # ...or, if root's key is already in your SSH agent, drop the password and set:
 # proxmox_ssh_agent = true
 
+# Fedora release. Unset, every apply rolls to the newest stable Fedora. Once
+# your lab is up, `terraform output base_image` prints the number to put here
+# so it stops moving under you.
+# fedora_release = 44
+
 # The Proxmox node name, as shown in the left-hand tree of the web UI.
 node_name = "pve"
 

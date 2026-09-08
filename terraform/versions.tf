@@ -6,6 +6,12 @@ terraform {
       source  = "bpg/proxmox"
       version = "0.111.1"
     }
+    # Reads Fedora's release index so the lab can roll to the newest stable
+    # release on its own. Not a built-in — it has to be declared.
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.4"
+    }
     local = {
       source  = "hashicorp/local"
       version = "~> 2.5"
