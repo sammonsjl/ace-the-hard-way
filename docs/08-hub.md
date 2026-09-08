@@ -68,17 +68,28 @@ sudo -iu postgres psql -d pulp -c "CREATE EXTENSION IF NOT EXISTS hstore;"
 sudo -iu postgres psql -d pulp -c '\dx' | grep hstore
 ```
 
-## Build toolchain, and Python 3.11 rather than 3.12
+## Build toolchain
 
-The galaxy_ng/pulpcore stack of this era pins `setuptools<66`, and that setuptools calls
-`pkgutil.ImpImporter`, which **Python 3.12 removed**. So the hub venv is built on **Python 3.11**,
-even though the controller used 3.12. Two components, two interpreters, on two machines — which is
-one of the quieter arguments for giving each component its own host.
+Python **3.12**, the same interpreter as the gateway, controller and EDA.
+
+> **This lab used to say 3.11, and that is worth knowing if you have run it before.** galaxy_ng
+> once pinned `setuptools<66`, which calls `pkgutil.ImpImporter` — removed in Python 3.12 — so the
+> hub was the one component built on a different interpreter. Both halves of that have since
+> moved: galaxy_ng now allows `setuptools<=81`, and `django-ansible-base` requires **Python
+> >= 3.12**. Build this venv on 3.11 today and the install stops with:
+>
+> ```
+> ERROR: Package 'django-ansible-base' requires a different Python: 3.11.16 not in '>=3.12'
+> ```
+>
+> Nothing about that is Fedora-specific — it is upstream drift, and it would bite identically on
+> RHEL. It is a reminder of what `@main` means: this lab builds unreleased code, and a constraint
+> that justified an odd decision six months ago can quietly reverse it.
 
 ```bash
 sudo dnf -y install \
   gcc gcc-c++ make git \
-  python3.11 python3.11-devel \
+  python3.12 python3.12-devel \
   libffi-devel openssl-devel \
   libpq-devel postgresql-devel \
   openldap-devel cyrus-sasl-devel \
@@ -96,11 +107,11 @@ is **`main`**:
 
 ```bash
 sudo install -d -o pulp -g pulp /opt/galaxy_ng
-sudo -u pulp python3.11 -m venv /var/lib/pulp/venv
+sudo -u pulp python3.12 -m venv /var/lib/pulp/venv
 sudo -u pulp bash <<'EOF'
 set -euo pipefail
 source /var/lib/pulp/venv/bin/activate
-pip install --upgrade pip "setuptools<66" wheel
+pip install --upgrade pip setuptools wheel
 pip install "galaxy_ng @ git+https://github.com/ansible/galaxy_ng.git@main" gunicorn
 pip list | grep -iE 'galaxy-ng|pulpcore|django-ansible-base'
 EOF
