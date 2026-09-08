@@ -315,17 +315,24 @@ cd /opt/jewel
 
 pip install --upgrade pip setuptools wheel setuptools_scm
 
-# 1. Current uwsgi and xmlsec, before anything can ask for the pinned ones.
-pip install uwsgi xmlsec
-
-# 2. Everything else, still hash-checked. The awk drops each of those two
-#    packages *and* its --hash continuation lines; leave a stray hash behind
-#    and pip rejects the file.
+# 1. Everything except the two that will not compile, still hash-checked. The
+#    awk drops each of those packages *and* its --hash continuation lines;
+#    leave a stray hash behind and pip rejects the whole file. This runs FIRST
+#    because it is what pins lxml — see step 3.
 awk '/^(uwsgi|xmlsec)==/ {skip=1} skip {if ($0 !~ /\\$/) skip=0; next} {print}' \
   requirements/requirements.txt > /tmp/req-no-c-ext.txt
 pip install -r /tmp/req-no-c-ext.txt
 
-# 3. --no-deps, because django-ansible-base re-pins xmlsec==1.3.13 itself.
+# 2. uwsgi links nothing from the venv, so a current one just works.
+pip install uwsgi
+
+# 3. xmlsec must link the SAME lxml the application imports, so build isolation
+#    is off and it compiles against what step 1 installed. That means supplying
+#    its build dependencies by hand.
+pip install pkgconfig setuptools_scm
+pip install --no-build-isolation --no-binary xmlsec xmlsec
+
+# 4. --no-deps, because django-ansible-base re-pins xmlsec==1.3.13 itself.
 pip install --no-deps -r requirements/requirements_git.txt
 pip install --no-deps -e .
 EOF
@@ -347,21 +354,47 @@ EOF
 > exactly what you signed up for by building on the upstream distribution. Expect to meet this
 > again, and expect the enterprise rebuilds to meet it when they catch up.
 >
-> **Step 2 keeps hash-checking.** The other 82 packages stay hash-pinned; only the two that cannot
+> **Step 1 keeps hash-checking.** The other 82 packages stay hash-pinned; only the two that cannot
 > build are removed. Dropping the whole file's hashes to route around two packages would be a much
 > larger concession than it looks.
 >
-> **Step 3 is `--no-deps` for a specific reason.** `django-ansible-base` carries its own
-> `xmlsec==1.3.13` pin, so pip re-resolves it and downloads 1.3.13 again even though a working
-> 1.3.17 is already installed. `--no-deps` is safe *here* precisely because `requirements.txt` is
-> the complete, pinned dependency set — it has already installed everything the git requirement
-> needs. Do not reach for `--no-deps` casually elsewhere.
+> **Step 3 is the subtle one, and getting it wrong costs you an afternoon.** `xmlsec` is a C
+> extension that links `libxml2` *through* lxml, so the lxml it compiles against and the lxml the
+> application imports at runtime must be the same one. pip's default build isolation defeats that:
+> it builds in a throwaway environment holding the **newest** lxml, while `requirements.txt` pins
+> the venv to an older one. The build succeeds, the install succeeds, `import xmlsec` on its own
+> succeeds — and then the gateway starts and logs:
+>
+> ```
+> ERROR ansible_base.authentication.authenticator_plugins.utils Failed to load urls from
+> ansible_base.authentication.authenticator_plugins.saml
+> (-1, 'lxml & xmlsec libxml2 library version mismatch')
+> ```
+>
+> DAB catches that while loading its authenticator plugins, so the *visible* symptom is not a stack
+> trace about xmlsec. It is that **every login fails with "Invalid username/password"** — including
+> one whose password you just reset. Nothing in that message names lxml, xmlsec, or SAML.
+>
+> `--no-build-isolation` forces the build to use the venv's own lxml. With isolation off pip no
+> longer supplies build dependencies, which is why `pkgconfig` and `setuptools_scm` go in first;
+> without them the build stops at `ModuleNotFoundError: No module named 'pkgconfig'`.
+>
+> This is the same shape as the packaged-uwsgi trap: a C extension linked against one library and
+> run against another. Worth recognising, because the error never surfaces where the mistake was.
+>
+> **Step 4 is `--no-deps` for a different reason.** `django-ansible-base` carries its own
+> `xmlsec==1.3.13` pin, so pip re-resolves it and downloads 1.3.13 again — undoing step 3 — even
+> though a working xmlsec is already installed. `--no-deps` is safe *here* precisely because
+> `requirements.txt` is the complete, pinned dependency set. Do not reach for it casually elsewhere.
 
-Confirm the build before moving on:
+Confirm the build before moving on. The second line is what catches a mismatched xmlsec — check it
+here rather than meeting it as a login failure six sections later:
 
 ```bash
 sudo -u gateway /var/lib/ansible-automation-platform/venv/gateway/bin/python \
   -c 'import aap_gateway_api, ansible_base; print("ok")'
+sudo -u gateway /var/lib/ansible-automation-platform/venv/gateway/bin/python \
+  -c 'import lxml.etree, xmlsec; print("lxml + xmlsec agree")'
 ```
 
 The manage entrypoint is **`aap-gateway-manage`**. Give it a PATH wrapper:
