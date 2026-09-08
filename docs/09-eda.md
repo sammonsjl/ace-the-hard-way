@@ -326,12 +326,45 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+sudo tee /etc/systemd/system/automation-eda-activation-worker.service >/dev/null <<EOF
+[Unit]
+Description=EDA activation worker (dispatcherd)
+After=network-online.target postgresql.service redis.service
+Wants=network-online.target
+[Service]
+EnvironmentFile=/etc/default/eda
+User=eda
+Group=eda
+ExecStart=${VENV}/aap-eda-manage dispatcherd --worker-class ActivationWorker
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo dnf -y install policycoreutils-python-utils
 sudo semanage fcontext -a -t bin_t '/var/lib/ansible-automation-platform/eda/venv/bin(/.*)?'
 sudo restorecon -Rv /var/lib/ansible-automation-platform/eda/venv/bin
 sudo systemctl daemon-reload
-sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-scheduler automation-eda-default-worker
+sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-scheduler \
+  automation-eda-default-worker automation-eda-activation-worker
 
 curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/
+
+> **Two workers, not one, and the status endpoint is what tells you.** `dispatcherd` takes a
+> `--worker-class` of either `DefaultWorker` or `ActivationWorker`, and EDA needs both: the default
+> worker drains the general task queue, the activation worker runs rulebook activations. Start only
+> the default one and everything looks fine — all units `active`, the API answering `200` — while
+> `/api/eda/v1/status/` quietly reports:
+>
+> ```json
+> {"status":"degraded","message":"Dispatcherd workers unavailable"}
+> ```
+>
+> The reason is one line in the API's log, and it names the queue rather than the unit:
+> `Worker queue [activation] was found to not be healthy`. With both workers running the endpoint
+> returns `{"status":"good"}`, and that is the check to trust — `systemctl is-active` cannot see
+> this.
 ```
 
 > **`{"status": "degraded", "message": "Dispatcherd workers unavailable"}` is the correct, permanent
@@ -474,7 +507,7 @@ RESOURCE_SERVER:
   VALIDATE_HTTPS: false
 EOF
 sudo vim /etc/ansible-automation-platform/eda/settings.yaml
-sudo systemctl restart automation-eda-api automation-eda-default-worker
+sudo systemctl restart automation-eda-api automation-eda-default-worker automation-eda-activation-worker
 ```
 
 ## Verify — EDA through the platform door
