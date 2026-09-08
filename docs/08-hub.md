@@ -298,6 +298,7 @@ LimitNOFILE=524288
 WantedBy=multi-user.target
 EOF
 
+sudo dnf -y install policycoreutils-python-utils
 sudo semanage fcontext -a -t bin_t '/var/lib/pulp/venv/bin(/.*)?'
 sudo restorecon -Rv /var/lib/pulp/venv/bin
 ```
