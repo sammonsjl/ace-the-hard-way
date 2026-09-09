@@ -64,9 +64,10 @@ Remove the generated `ssh_config` include from `~/.ssh/config` if you added it i
 rm -f ~/.ssh/ace_lab_ed25519 ~/.ssh/ace_lab_ed25519.pub
 ```
 
-If you imported the internal CA into your browser or trust store during Lab 4, remove it — it signed things; don't leave stray CAs installed:
+If you imported the internal CA into your browser or trust store during [Lab 3](03-internal-ca.md),
+remove it — it signed things; don't leave stray CAs installed:
 
-- macOS: Keychain Access → search "ACE Lab CA" → delete
+- macOS: Keychain Access → search "ACE Managed CA" → delete
 - Firefox: Settings → Certificates → Authorities → remove
 
 The `receptor`/`envoy` binaries, venvs, postgres — all died with the VMs. Nothing else to clean.
