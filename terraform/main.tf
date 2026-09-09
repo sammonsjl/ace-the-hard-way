@@ -213,18 +213,30 @@ resource "proxmox_virtual_environment_vm" "node" {
   scsi_hardware = "virtio-scsi-single"
   bios          = "seabios"
 
-  # Deliberately off. With the agent enabled the provider waits for the guest to
-  # answer before it considers the VM created — and the guest cannot answer
-  # until cloud-init has installed qemu-guest-agent, which happens well after
-  # boot. The addresses here are static and already known, so nothing is gained
-  # by waiting for the agent to report them.
+  # On. Fedora Cloud Base ships qemu-guest-agent in the image, so the guest can
+  # answer as soon as Proxmox gives it something to answer on: the agent's
+  # systemd unit is activated by the virtio-serial channel appearing, and that
+  # channel only exists when this is enabled. Leave it off and the package sits
+  # there installed and inert, with the service `inactive` and no
+  # /dev/virtio-ports entry to trigger it.
+  #
+  # What it buys: the node reports each guest's IP in the Proxmox UI rather than
+  # showing nothing, `qm shutdown` becomes a real ACPI-free graceful stop, and
+  # snapshots can fsfreeze the filesystem instead of catching it mid-write.
+  #
+  # The cost is on create: the provider waits for the agent before it considers
+  # a VM created. That is a real wait, but a short one here because the agent is
+  # already in the image — it is not waiting on cloud-init to install anything.
+  # The timeout is generous so a slow first boot does not fail an apply.
   agent {
-    enabled = false
+    enabled = true
+    timeout = "5m"
   }
 
-  # Without the guest agent Proxmox has no way to ask the OS to shut down, so
-  # tell it to pull the plug on destroy rather than wait for a graceful stop
-  # that will never come.
+  # Pull the plug on destroy rather than asking politely. With the agent enabled
+  # a graceful shutdown would now work, so this is a choice rather than a
+  # necessity: teardown is faster this way, and the disks are being deleted in
+  # the same breath.
   stop_on_destroy = true
 
   cpu {
@@ -292,7 +304,22 @@ resource "proxmox_virtual_environment_vm" "node" {
     # replaced, five running machines are not touched. ignore_changes applies
     # only to objects that already exist, so a first apply — and any single VM
     # rebuilt later — still imports from the current image.
-    ignore_changes = [disk[0].size, disk[0].import_from]
+    #
+    # user_data_file_id is here for the same reason and is the sharper of the
+    # two. cloud-init user-data is a FIRST-BOOT input: editing the template
+    # cannot change a machine that has already booted, but Terraform sees a new
+    # snippet id and plans to REPLACE the VM to deliver it. Edit one line of the
+    # template — the NFS rule below, say, which only affects the share server —
+    # and the next apply proposes destroying ace-gateway, taking the internal
+    # CA, envoy and the whole gateway build with it. The template still governs
+    # what a freshly built estate gets; it just no longer rebuilds a standing
+    # one. If you genuinely want new cloud-init applied, rebuild that VM
+    # deliberately with `terraform taint`.
+    ignore_changes = [
+      disk[0].size,
+      disk[0].import_from,
+      initialization[0].user_data_file_id,
+    ]
   }
 }
 

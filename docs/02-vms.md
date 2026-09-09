@@ -92,6 +92,18 @@ redirect to a community mirror rather than a single origin.
 
 Expect a minute for the download and around twenty seconds for the VMs.
 
+> **The QEMU guest agent is on, and Fedora makes that free.** Fedora Cloud Base ships
+> `qemu-guest-agent` in the image, so there is nothing to install — but its systemd unit is
+> activated by a virtio-serial channel that Proxmox only attaches when the agent is enabled in the
+> VM's config. Leave it off and the package sits there inert: `systemctl is-active
+> qemu-guest-agent` says `inactive` and `/dev/virtio-ports/` is empty, which reads like a broken
+> package rather than a missing switch on the hypervisor.
+>
+> With it on, the Proxmox UI shows each node's IP on its summary page instead of nothing, `qm
+> shutdown` becomes a real graceful stop, and snapshots can freeze the filesystem rather than
+> catching it mid-write. The cost is that `terraform apply` waits for each guest to answer before
+> calling it created — a short wait, because the agent is already in the image.
+
 Terraform prints the addresses when it finishes. To see them again:
 
 ```bash
