@@ -1,0 +1,36 @@
+ACE
+Copyright 2026 Jamie L Sammons
+
+This product includes software developed as part of the ACE project,
+licensed under the Apache License, Version 2.0. See LICENSE.
+
+TRADEMARKS
+----------
+
+Ansible, Red Hat, and Red Hat Ansible Automation Platform are trademarks
+or registered trademarks of Red Hat, Inc. in the United States and other
+countries. This project is not affiliated with, endorsed by, or sponsored
+by Red Hat, Inc.
+
+Names such as "Ansible" appear here only to identify the upstream projects
+this software is built from, and to describe interoperability. No claim is
+made to any trademark.
+
+PROVENANCE
+----------
+
+Every container image in the ACE project is built from upstream, Apache-2.0
+licensed source, cloned at a pinned commit at build time:
+
+  ansible/jewel, ansible/ansible-ui, ansible/awx, ansible/galaxy_ng,
+  ansible/eda-server, ansible/receptor, ansible/django-ansible-base
+
+Red Hat's own distribution of this platform was examined as a BEHAVIORAL
+SPECIFICATION only: to learn what the official images and installer produce,
+so that an equivalent end state could be written independently. Observing a
+released artifact and describing what it does is the whole of that exercise.
+
+No Red Hat file, template, role, playbook, manifest, or configuration has
+been copied into this project, and no vendor distribution is redistributed
+by it.
+
