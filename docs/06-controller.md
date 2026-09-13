@@ -274,11 +274,25 @@ network. This is that moment:
 
 ```bash
 sudo sed -i 's/^port 0$/port 6379/' /etc/valkey/valkey.conf
-sudo sed -i 's/^protected-mode yes$/protected-mode no/' /etc/valkey/valkey.conf
+
+# Append rather than substitute. Lab 5 replaced valkey.conf with a six-line
+# file of our own, so there is no `protected-mode yes` line to rewrite -- a
+# sed would match nothing, succeed, and leave the default (on) in place.
+sudo grep -q '^protected-mode' /etc/valkey/valkey.conf \
+  && sudo sed -i 's/^protected-mode .*/protected-mode no/' /etc/valkey/valkey.conf \
+  || echo 'protected-mode no' | sudo tee -a /etc/valkey/valkey.conf
+
 sudo systemctl restart valkey
 sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.1.42/32 port port=6379 protocol=tcp accept'
 sudo firewall-cmd --reload
 ```
+
+> **If the PING below comes back `-DENIED Running in protected mode`, that sed matched nothing.**
+> Valkey defaults protected mode *on*, and it refuses every non-loopback connection while no
+> password is set — so the symptom is a remote client being rejected by a server that is listening
+> on the right address, with a five-sentence error that never mentions the config line you thought
+> you changed. `sudo grep -c '^protected-mode' /etc/valkey/valkey.conf` returning `0` is the tell.
+
 
 > **`protected-mode no` is not optional here, and it is worth reading the error it prevents.**
 > Valkey refuses non-loopback connections whenever no password is set — and unlike classic Redis,
