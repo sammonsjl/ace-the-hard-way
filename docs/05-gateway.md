@@ -323,9 +323,18 @@ pip install --upgrade pip setuptools wheel setuptools_scm
 #    awk drops each of those packages *and* its --hash continuation lines;
 #    leave a stray hash behind and pip rejects the whole file. This runs FIRST
 #    because it is what pins lxml — see step 3.
+#
+#    --no-deps is load-bearing, not an optimisation. requirements.txt is a
+#    pip-compile lockfile: every transitive dependency is already in it,
+#    pinned and hashed, so resolving only lets pip re-derive what the file
+#    already states. Let it, and python3-saml asks for xmlsec>=1.3.9 — the
+#    pin the awk just removed — and hash mode refuses anything not ==:
+#        ERROR: In --require-hashes mode, all requirements must have their
+#        versions pinned with ==. These do not:
+#            xmlsec>=1.3.9 ... (from python3-saml==1.16.0)
 awk '/^(uwsgi|xmlsec)==/ {skip=1} skip {if ($0 !~ /\\$/) skip=0; next} {print}' \
   requirements/requirements.txt > /tmp/req-no-c-ext.txt
-pip install -r /tmp/req-no-c-ext.txt
+pip install --no-deps -r /tmp/req-no-c-ext.txt
 
 # 2. uwsgi links nothing from the venv, so a current one just works.
 pip install uwsgi
