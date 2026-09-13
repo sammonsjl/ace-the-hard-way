@@ -216,7 +216,7 @@ variable — get it wrong and the symptom is a VM that boots fine and cannot res
 > almost always cloud-init still working rather than anything broken. To wait properly:
 >
 > ```bash
-> for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+> for vm in ace-db ace-gateway ace-controller ace-exec ace-hub ace-eda; do
 >   printf "%-16s " "$vm"; ssh "$vm" 'sudo cloud-init status --wait'
 > done
 > ```
@@ -257,7 +257,7 @@ Three things about it are worth knowing, because each one is a way it can look f
   that actually answers the question:
 
   ```bash
-  for vm in ace-db ace-controller ace-hub ace-eda; do
+  for vm in ace-db ace-controller ace-exec ace-hub ace-eda; do
     printf "%-16s " "$vm"; ssh "$vm" 'sudo ls /srv/ace >/dev/null; findmnt -no SOURCE,FSTYPE /srv/ace || echo "NOT MOUNTED"'
   done
   ```
@@ -278,7 +278,7 @@ A cloud image is a snapshot of some Tuesday months ago, so all six VMs boot well
 repos — several hundred packages, including a kernel. Update the estate now, in one loop:
 
 ```bash
-for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+for vm in ace-db ace-gateway ace-controller ace-exec ace-hub ace-eda; do
   echo "───── $vm"
   ssh "$vm" 'sudo dnf -y update'
 done
@@ -289,13 +289,13 @@ per VM, downloaded six times over. Then reboot, because that set almost always i
 and you are still running the old one:
 
 ```bash
-for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+for vm in ace-db ace-gateway ace-controller ace-exec ace-hub ace-eda; do
   ssh "$vm" 'sudo systemctl reboot' || true
 done
 
 sleep 45
 
-for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+for vm in ace-db ace-gateway ace-controller ace-exec ace-hub ace-eda; do
   printf "%-16s " "$vm"
   ssh "$vm" 'uname -r'
 done
@@ -363,7 +363,7 @@ done
               || echo "FAIL noexec on:$bad"
 
 down=""
-for h in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+for h in ace-db ace-gateway ace-controller ace-exec ace-hub ace-eda; do
   ping -c1 -W2 "$h" >/dev/null 2>&1 || down="$down $h"
 done
 [ -z "$down" ] && echo "OK   reaches all six nodes by name" \
@@ -371,7 +371,7 @@ done
 EOF
 )
 
-for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
+for vm in ace-db ace-gateway ace-controller ace-exec ace-hub ace-eda; do
   echo "───── $vm"
   ssh "$vm" "$PREFLIGHT"
 done
@@ -381,7 +381,7 @@ The quoted heredoc (`<<'EOF'`) matters: it stops your workstation's shell expand
 `$(...)` calls before they ever reach a VM. The script travels across as literal text and is
 evaluated by the remote shell, which is where every one of those variables belongs.
 
-Six `OK` lines per machine, thirty in all, and the estate is ready:
+Six `OK` lines per machine, thirty-six in all, and the estate is ready:
 
 ```
 ───── ace-db
