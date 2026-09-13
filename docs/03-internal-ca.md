@@ -99,7 +99,7 @@ VMs — the courier for anything that has to cross machines in this tutorial:
 sudo cp /etc/ansible-automation-platform/ca/ansible-automation-platform-managed-ca-cert.crt /srv/ace/
 ```
 
-Then on **each of the other four** (`ace-db`, `ace-controller`, `ace-hub`, `ace-eda`):
+Then on **each of the other five** (`ace-db`, `ace-controller`, `ace-exec`, `ace-hub`, `ace-eda`):
 
 ```bash
 sudo cp /srv/ace/ansible-automation-platform-managed-ca-cert.crt /etc/pki/ca-trust/source/anchors/
