@@ -2,9 +2,9 @@
 
 This tutorial walks you through building an open source automation platform the hard way — **from source, bare metal** — so you understand every process, every config file, and every wire. "Bare metal" means literally that: every service is a real process on the box, and containers appear in exactly one role — as execution-environment sandboxes for jobs.
 
-The goal is precise: **hand-build a complete automation platform from upstream source, spread across five machines** — a dedicated service user per component, a deliberate directory layout (AWX's historical `/etc/tower` paths included, on purpose), a supervisor process family you write yourself, one private CA signing every service, and nginx wiring you can read end to end. Every piece is a real process you can inspect, restart, and break.
+The goal is precise: **hand-build a complete automation platform from upstream source, spread across six machines** — a dedicated service user per component, a deliberate directory layout (AWX's historical `/etc/tower` paths included, on purpose), a supervisor process family you write yourself, one private CA signing every service, and nginx wiring you can read end to end. Every piece is a real process you can inspect, restart, and break.
 
-Five machines rather than one is the point, not an inconvenience. On a single box "the controller talks to the database" is a unix socket and a shrug; across five it is a hostname, a port, a firewall rule, and a certificate whose SAN has to match — and when it breaks, you find out which.
+Six machines rather than one is the point, not an inconvenience. On a single box "the controller talks to the database" is a unix socket and a shrug; across six it is a hostname, a port, a firewall rule, and a certificate whose SAN has to match — and when it breaks, you find out which.
 
 It builds that architecture from upstream community projects:
 
@@ -31,7 +31,7 @@ the sidebar are not a theme or a mock-up: **Automation Execution**, **Automation
 the gateway, and the navigation is assembled from its service registry at page load. The jobs at the
 bottom really ran, in a container, on the hybrid node.
 
-Five VMs, nine labs later. Nothing in that screenshot was installed by a package — every service
+Six VMs, nine labs later. Nothing in that screenshot was installed by a package — every service
 behind it is a process you started by hand, from a config file you wrote:
 
 ```mermaid
@@ -122,7 +122,7 @@ A few things the picture is meant to make obvious.
 - **nginx-to-app hops are unix sockets, not TCP** — nothing there for a remote client to reach.
 - **The controller box is split in two on purpose.** The control plane decides a job should run, the execution plane runs it, and the only thing joining them is a *signed work unit over a local socket*. That is why they are two labs — and why on a production build of this topology the execution half is a sixth VM instead, with nothing else changing.
 - **Receptor is the parent of podman**, never the reverse: the dispatcher hands receptor a work unit, receptor's work-command spawns `ansible-runner`, and ansible-runner starts the container (purple — the only container in the build).
-- **One root, five trust stores.** The CA in [Lab 3](docs/03-internal-ca.md) signs every certificate in the picture, and no private key ever crosses a machine boundary.
+- **One root, six trust stores.** The CA in [Lab 3](docs/03-internal-ca.md) signs every certificate in the picture, and no private key ever crosses a machine boundary.
 
 ## Who this is for
 
@@ -131,9 +131,9 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 ## What you need
 
 - **A Proxmox VE host, 8.4 or newer.** The lab is built by [Terraform](https://developer.hashicorp.com/terraform) driving the Proxmox API. Your own machine only needs Terraform and an SSH client, so you can drive it from **Linux, macOS or Windows**. Details and the reasoning in [Lab 1](docs/01-prerequisites.md).
-- **32 GB of RAM on that host, comfortably.** `terraform/variables.tf` allocates 23 GB across the five VMs, and ships laptop-scale numbers (14 GB total) as a documented alternative for a 16 GB node.
-- ~150 GB of free disk on the VM datastore (five thin 60 GiB disks)
-- Five free static addresses on a bridge, outside your DHCP pool
+- **32 GB of RAM on that host, comfortably.** `terraform/variables.tf` allocates 25 GB across the six VMs, and ships laptop-scale numbers (15.5 GB total) as a documented alternative for a 16 GB node.
+- ~180 GB of free disk on the VM datastore (six thin 60 GiB disks)
+- Six free static addresses on a bridge, outside your DHCP pool
 - Patience — that's the "hard way" part
 
 ## Labs
@@ -141,7 +141,7 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 **Foundations**
 
 1. [Prerequisites](docs/01-prerequisites.md)
-2. [The five VMs](docs/02-vms.md) — the estate, and why each component gets its own machine
+2. [The six VMs](docs/02-vms.md) — the estate, and why each component gets its own machine
 3. [The internal CA](docs/03-internal-ca.md) — one root, trusted everywhere, signing every service
 
 **The components, one lab each**
@@ -149,14 +149,9 @@ You run (or will run) AWX or a similar automation platform, and you want to know
 4. [PostgreSQL](docs/04-postgresql.md) — `ace-db`; four roles, four databases, one server
 5. [The platform gateway](docs/05-gateway.md) — `ace-gateway`; jewel, Redis, nginx, the console, envoy — then it registers itself and 443 opens
 6. [The automation controller](docs/06-controller.md) — `ace-controller`; AWX, its eight processes, nginx — registered and browsable, and unable to run a thing
-7. [Execution: receptor and podman](docs/07-execution.md) — the other end of that; the controller becomes a hybrid node and the first job runs
+7. [Execution: receptor and podman](docs/07-execution.md) — the other end of that; a receptor mesh spans two nodes and the first job runs on `ace-exec`
 8. [Automation hub](docs/08-hub.md) — `ace-hub`; galaxy_ng on pulpcore
 9. [Event-Driven Ansible](docs/09-eda.md) — `ace-eda`; eda-server, and the loop closes
-
-**Appendix labs — break it on purpose**
-
-- [A1: The EPEL uwsgi conflict](docs/a1-epel-uwsgi-conflict.md) — deliberately clobber your uwsgi, diagnose the ABI mismatch, armor the box with `excludepkgs`
-- [A2: Backup and restore](docs/a2-backup-restore.md) — what actually holds state, and proving you can get it back
 
 — [Glossary](docs/glossary.md) · [Cleanup](docs/99-cleanup.md)
 

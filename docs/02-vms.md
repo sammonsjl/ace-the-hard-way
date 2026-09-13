@@ -1,8 +1,8 @@
-# Lab 2 — The five VMs
+# Lab 2 — The six VMs
 
 ## What you will have at the end
 
-Five Fedora VMs that can see and name each other, and all pass the preflight checks.
+Six Fedora VMs that can see and name each other, and all pass the preflight checks.
 Nothing component-specific — that starts in Lab 4.
 
 ## The topology, and why it has this shape
@@ -10,41 +10,40 @@ Nothing component-specific — that starts in Lab 4.
 A real deployment of this platform is not one machine. Its smallest tested distributed shape puts
 each component on its own host:
 
-| VM                 | Address       | Runs                                                            |
-| ------------------ | ------------- | --------------------------------------------------------------- |
-| **ace-db**         | 192.168.1.40 | PostgreSQL, and nothing else                                    |
-| **ace-gateway**    | 192.168.1.41 | the platform gateway, Redis, envoy, and the console             |
-| **ace-controller** | 192.168.1.42 | the automation controller — and, as a **hybrid** node, jobs too |
-| **ace-hub**        | 192.168.1.43 | automation hub                                                  |
-| **ace-eda**        | 192.168.1.44 | Event-Driven Ansible                                            |
+| VM                 | Address      | Runs                                                |
+| ------------------ | ------------ | --------------------------------------------------- |
+| **ace-db**         | 192.168.1.40 | PostgreSQL, and nothing else                        |
+| **ace-gateway**    | 192.168.1.41 | the platform gateway, Redis, envoy, and the console |
+| **ace-controller** | 192.168.1.42 | the automation controller, as a **control** node    |
+| **ace-exec**       | 192.168.1.45 | the execution node — where jobs actually run        |
+| **ace-hub**        | 192.168.1.43 | automation hub                                      |
+| **ace-eda**        | 192.168.1.44 | Event-Driven Ansible                                |
 
-The real shape has a **sixth** VM: a dedicated execution node, with the controller kept
-control-only. We fold that role into the controller by making it a **hybrid** node — one that
-both schedules work and runs it. That is the single deliberate departure in this tutorial, and it
-is worth understanding rather than skipping past:
+The controller and the execution node are two machines because that is what the tested
+distributed shape does, and because the split is the only way to see how work actually travels:
 
-- A **control** node schedules jobs and hands them to receptor. It never runs a playbook itself,
-  except for control-plane work like project syncs.
+- A **control** node schedules jobs and hands them to receptor. It never runs a user playbook
+  itself — only control-plane work like project updates and inventory syncs.
 - An **execution** node runs jobs and nothing else.
-- A **hybrid** node does both.
+- A **hybrid** node does both, on one machine.
 
-Splitting them is what lets you scale execution independently of the control plane, and it is why
-production deployments do it. Combining them costs you that, saves a VM, and changes nothing else
-about how execution works — the controller still submits signed work to receptor, receptor still
-spawns `ansible-runner`, and jobs still run in containers. The only difference is that the
-receptor receiving the work is the same one that submitted it — one node, no peer, and no network
-hop between them.
+Folding them together saves a VM and changes nothing about how execution works *logically* — the
+controller still submits signed work to receptor and receptor still spawns `ansible-runner`. What
+it hides is the mesh: with one node there is no peer, no listener, and no TLS between nodes, so
+the most opaque part of the platform stays invisible. Keeping them apart costs one VM and buys
+[Lab 7](07-execution.md) a real receptor mesh — two nodes, a listener, a peer, and a second CA
+whose certificates carry the node ID in a place you have probably never had to look.
 
 ## Why each component gets its own machine
 
-It is tempting to read this as five times the work. It isn't — it is the *same* work with the
+It is tempting to read this as six times the work. It isn't — it is the *same* work with the
 seams made visible, and the seams are the interesting part:
 
 - **Every connection becomes real.** With everything on one box, "the controller talks to the
   database" is a unix socket and a shrug. Here it is a hostname, a port, a firewall rule, and a
   certificate whose SAN has to match. When something breaks, you find out which of those it was.
 - **You cannot accidentally share state.** One machine makes it very easy to have the controller
-  quietly depend on a file the hub created. Five machines make that impossible.
+  quietly depend on a file the hub created. Six machines make that impossible.
 - **The gateway's job stops being abstract.** Four services on four hosts, one URL, one login.
 
 ## Memory and CPU
@@ -55,29 +54,30 @@ The numbers in `terraform/variables.tf` are sized for a Proxmox node with 32 GB:
                  MB    vCPU
 ace-db          2048     2    postgres alone needs very little
 ace-gateway     8192     4    the console's npm build is the hungriest step in the tutorial
-ace-controller  6144     4    runs AWX, and as a hybrid node the EE containers too
+ace-controller  4096     4    control-only: schedules work, runs no user jobs
+ace-exec        4096     4    runs the EE containers, and nothing else
 ace-hub         4096     2
 ace-eda         3072     2
                -----    --
-               23552    14
+               25600    18
 ```
 
 Nothing in the tutorial depends on these exact numbers. On a smaller host, the laptop-scale set
-that also works is `1024 / 5120 / 3584 / 2560 / 2048` — 14 GB in total, at the cost of the console
-build in [Lab 5](05-gateway.md) leaning on swap, which that lab sets up. Those numbers are kept in
-the `nodes` variable's description so you don't have to re-derive them.
+that also works is `1024 / 5120 / 2560 / 2560 / 2560 / 2048` — 15.5 GB in total, at the cost of the
+console build in [Lab 5](05-gateway.md) leaning on swap, which that lab sets up. Those numbers are
+kept in the `nodes` variable's description so you don't have to re-derive them.
 
-The 14 vCPU deliberately overcommits an 8-core host. The nodes are idle most of the time and the two
+The 18 vCPU deliberately overcommits an 8-core host. The nodes are idle most of the time and the two
 long compiles are on different machines, so the overcommit buys parallelism during the builds and
 costs nothing at rest.
 
 ### If the host has 32 GB and nothing else on it
 
 The defaults leave headroom on purpose, because a Proxmox node usually has other things on it. If
-yours does not, the one number worth raising is the gateway's. Its console build asks Node for an
-8 GB heap, which on an 8 GB VM is the whole machine — so it spills into the swapfile [Lab
-5](05-gateway.md) sets up, and the build takes longer than it needs to. At 12 GB the heap fits in
-RAM with room for the OS and V8's own non-heap allocations, and the swap step becomes a no-op.
+yours does not, the number worth raising is the gateway's. Its console build asks Node for an 8 GB
+heap, which on an 8 GB VM is the whole machine — so it spills into the swapfile [Lab
+5](05-gateway.md) sets up and takes longer than it needs to. At 10 GB the heap fits in RAM with
+room for the OS and V8's own non-heap allocations, and the swap step becomes a no-op.
 
 Put it in `terraform.tfvars`, not `variables.tf` — that filename is gitignored, so your lab can
 differ from the tutorial without the two drifting apart in git:
@@ -85,23 +85,22 @@ differ from the tutorial without the two drifting apart in git:
 ```hcl
 nodes = {
   ace-db         = { vm_id = 140, ip = "192.168.1.40", memory = 2048,  vcpu = 2 }
-  ace-gateway    = { vm_id = 141, ip = "192.168.1.41", memory = 12288, vcpu = 4 }
-  ace-controller = { vm_id = 142, ip = "192.168.1.42", memory = 7168,  vcpu = 4 }
+  ace-gateway    = { vm_id = 141, ip = "192.168.1.41", memory = 10240, vcpu = 4 }
+  ace-controller = { vm_id = 142, ip = "192.168.1.42", memory = 5120,  vcpu = 4 }
+  ace-exec       = { vm_id = 145, ip = "192.168.1.45", memory = 4096,  vcpu = 4 }
   ace-hub        = { vm_id = 143, ip = "192.168.1.43", memory = 4096,  vcpu = 2 }
   ace-eda        = { vm_id = 144, ip = "192.168.1.44", memory = 3072,  vcpu = 2 }
 }
 ```
 
 That is 28 GB allocated, leaving about 3 GB for Proxmox itself — which idles near 2 GB and wants
-roughly 80 MB more per running guest. The controller gets the other GB because it is the only node
-that does real work during the labs: AWX, plus the EE containers it runs as a hybrid node in [Lab
-7](07-execution.md).
+roughly 80 MB more per running guest.
 
-> **All five nodes have to be listed, even though only two of them move.** Terraform replaces a map
+> **All six nodes have to be listed, even though only two of them move.** Terraform replaces a map
 > variable wholesale rather than merging it into the default, so anything you leave out of this
 > block does not fall back to `variables.tf` — it simply stops existing, and the plan quietly shows
-> you three VMs instead of five. It also means a later change to an `ip` or `vm_id` upstream will
-> not reach a copy you have pinned here.
+> you four VMs instead of six. It also means a later change to an `ip` or `vm_id` upstream will not
+> reach a copy you have pinned here.
 
 Leave the vCPU alone. Adding more to an 8-core host buys contention, not speed.
 
@@ -118,8 +117,8 @@ terraform apply
 That takes a while on first run. In order, it: reads Fedora's release index to find the newest
 stable Cloud Base image; downloads it once (~557 MB) — onto the *Proxmox node*, not your
 workstation, so the speed that matters is the node's link to whichever mirror
-`download.fedoraproject.org` redirects it to; uploads five cloud-init documents to the snippets
-datastore; then creates and boots five VMs, importing that one image as each VM's disk.
+`download.fedoraproject.org` redirects it to; uploads six cloud-init documents to the snippets
+datastore; then creates and boots six VMs, importing that one image as each VM's disk.
 
 Proxmox verifies the image's SHA-256 before using it, which matters here because that download is a
 redirect to a community mirror rather than a single origin.
@@ -191,7 +190,7 @@ Beyond booting, each VM does only three things: it installs `vim curl jq git nfs
 
 The `/etc/hosts` part is not laziness. Every node needs every other node's name from
 [Lab 3](03-internal-ca.md) onward — certificate SANs, database connection strings, the gateway's
-service registry — and hand-editing five files five times teaches nothing. It also deletes the cloud
+service registry — and hand-editing six files six times teaches nothing. It also deletes the cloud
 image's own `127.0.1.1` self-mapping first, which matters more than it looks:
 
 ```bash
@@ -222,7 +221,7 @@ variable — get it wrong and the symptom is a VM that boots fine and cannot res
 > done
 > ```
 >
-> All five should report `status: done`.
+> All six should report `status: done`.
 
 ### The shared directory
 
@@ -251,7 +250,7 @@ Three things about it are worth knowing, because each one is a way it can look f
 - **It mounts on demand, not at boot.** The fstab entry uses `x-systemd.automount`, so the mount is
   attempted the first time something touches the directory — Lab 3, long after the estate is up —
   rather than at boot, when the gateway may not be exporting yet. This is what makes the boot order
-  of the five VMs irrelevant.
+  of the six VMs irrelevant.
 - **An unmounted share is silent.** `/srv/ace` exists on every node whether or not the NFS mount is
   live, so a broken mount does not produce an error — it produces an empty directory, and a
   certificate written on one machine that simply isn't there on the other. `findmnt` is the check
@@ -270,12 +269,12 @@ Three things about it are worth knowing, because each one is a way it can look f
 > over virtiofs, which is neat when the hypervisor is the machine you are sitting at. Proxmox is
 > not: the repo is on your workstation and the VMs are somewhere else entirely. Since nothing in the
 > tutorial ever reads a repo file from inside a VM — every source checkout is a `git clone` over the
-> network — the share only ever needed to move certificates between the five nodes, and NFS between
+> network — the share only ever needed to move certificates between the six nodes, and NFS between
 > the nodes themselves does that without involving your workstation at all.
 
 ## Bring them current
 
-A cloud image is a snapshot of some Tuesday months ago, so all five VMs boot well behind their own
+A cloud image is a snapshot of some Tuesday months ago, so all six VMs boot well behind their own
 repos — several hundred packages, including a kernel. Update the estate now, in one loop:
 
 ```bash
@@ -286,7 +285,7 @@ done
 ```
 
 Expect this to be the slowest step in the lab and to print a great deal — several hundred packages
-per VM, downloaded five times over. Then reboot, because that set almost always includes a kernel
+per VM, downloaded six times over. Then reboot, because that set almost always includes a kernel
 and you are still running the old one:
 
 ```bash
@@ -302,7 +301,7 @@ for vm in ace-db ace-gateway ace-controller ace-hub ace-eda; do
 done
 ```
 
-All five should report the same, newer kernel. If one still shows the old version, that VM didn't
+All six should report the same, newer kernel. If one still shows the old version, that VM didn't
 come back cleanly — reboot it on its own before continuing, either from the Proxmox UI or from a
 root shell on the node:
 
@@ -329,13 +328,13 @@ in [Lab 8](08-hub.md), EDA in [Lab 9](09-eda.md). That is not tidiness for its o
 user on the hub node would be a lie about what runs there, and a reader who stops after Lab 5
 should have a gateway machine with nothing else pre-seeded on it.
 
-What this lab leaves you is five interchangeable Fedora machines that can find each other. Everything
+What this lab leaves you is six interchangeable Fedora machines that can find each other. Everything
 that makes a machine *the controller* or *the hub* happens in that component's lab.
 
 ## Preflight checks
 
 Each of these is a precondition the rest of the tutorial silently assumes, and each has to hold on
-**all five** machines. Rather than SSH into each box in turn, run the whole set from your workstation:
+**all six** machines. Rather than SSH into each box in turn, run the whole set from your workstation:
 
 ```bash
 PREFLIGHT=$(cat <<'EOF'
@@ -367,7 +366,7 @@ down=""
 for h in ace-db ace-gateway ace-controller ace-hub ace-eda; do
   ping -c1 -W2 "$h" >/dev/null 2>&1 || down="$down $h"
 done
-[ -z "$down" ] && echo "OK   reaches all five nodes by name" \
+[ -z "$down" ] && echo "OK   reaches all six nodes by name" \
                || echo "FAIL cannot reach:$down"
 EOF
 )
@@ -391,7 +390,7 @@ OK   clock synced to 40832FB2 (64-131-47-178.metronet.net)
 OK   UTF-8 locale
 OK   hostname ace-db
 OK   /var /tmp /var/tmp all exec
-OK   reaches all five nodes by name
+OK   reaches all six nodes by name
 ───── ace-gateway
 ...
 ```

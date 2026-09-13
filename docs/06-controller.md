@@ -407,7 +407,7 @@ sudo -u awx /var/lib/awx/venv/awx/bin/pip install uwsgi
 uwsgi must be pip-built inside the venv: that build is **monolithic**, with the venv's Python
 compiled into the binary, which is what lets it import `awx` and load the venv's C extensions. A
 distro uwsgi is **modular** — its plugin links the *system* interpreter — and gives `ImportError` at
-best. [Appendix A1](a1-epel-uwsgi-conflict.md) breaks this on purpose.
+best. Anything that later installs a distro uwsgi, EPEL included, will shadow this one.
 
 supervisord is the opposite case and can live system-wide, because it only ever *spawns* processes:
 

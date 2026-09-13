@@ -7,7 +7,7 @@ TLS certificate for every service you are about to build.
 
 ## Where it fits
 
-Four of your five VMs will serve HTTPS, and they all have to trust each other. The gateway proxies
+Four of your six VMs will serve HTTPS, and they all have to trust each other. The gateway proxies
 to the controller, hub, and EDA over TLS. The controller fetches a signing key from the gateway
 over TLS. Your browser talks to envoy over TLS. That is a lot of certificates, and the question of
 who trusts whom has exactly two answers:
@@ -15,12 +15,12 @@ who trusts whom has exactly two answers:
 - **Self-signed everywhere.** Every service is its own root, so every service needs every other
   service's certificate in its trust store. Four services means twelve trust relationships, and
   reissuing any one of them breaks three others.
-- **One CA that signs all of them.** One root goes into the OS trust store on all five nodes. Every
+- **One CA that signs all of them.** One root goes into the OS trust store on all six nodes. Every
   service validates every other automatically, because they all chain to the same root. Reissue a
   leaf and nothing else changes.
 
 Real deployments do the second, and so do we. It is barely more work — the whole CA is four
-commands — and on a five-node estate it is the difference between a build that works and one that
+commands — and on a six-node estate it is the difference between a build that works and one that
 spends its life failing certificate checks.
 
 **This CA does not authenticate receptor nodes to each other.** A multi-node receptor mesh secures
@@ -40,7 +40,7 @@ path never engages and Redis never presents a certificate here.
 
 ## What you will have at the end
 
-A root CA on **ace-gateway**, its certificate trusted by all five VMs, and a two-part signing
+A root CA on **ace-gateway**, its certificate trusted by all six VMs, and a two-part signing
 procedure that later labs use to issue each service its certificate — without the CA's private key
 ever leaving ace-gateway, and without any service's private key ever leaving the node that owns it.
 
@@ -55,7 +55,7 @@ sudo install -d -o root -g root -m 0700 /etc/ansible-automation-platform/ca
 ```
 
 `0700` and root-owned. The CA private key is the most sensitive file in the entire build: with it,
-an attacker mints a certificate for any service and all five nodes trust it. No service user ever
+an attacker mints a certificate for any service and all six nodes trust it. No service user ever
 needs to read this directory.
 
 ## The root
@@ -89,7 +89,7 @@ sudo openssl x509 -in /etc/ansible-automation-platform/ca/ansible-automation-pla
 
 ## Trust it everywhere
 
-Publish the root certificate through `/srv/ace`, which is the repo directory shared into all five
+Publish the root certificate through `/srv/ace`, which is the repo directory shared into all six
 VMs — the courier for anything that has to cross machines in this tutorial:
 
 **On `ace-gateway`** — the PUBLIC certificate only, never the key:

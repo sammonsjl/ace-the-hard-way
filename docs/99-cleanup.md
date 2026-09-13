@@ -6,7 +6,7 @@ Your Proxmox node back.
 
 ## Before you burn it down
 
-Everything you built lives inside the five VMs — destroying them destroys the platform. Two things are worth saving first:
+Everything you built lives inside the six VMs — destroying them destroys the platform. Two things are worth saving first:
 
 1. **Your recorded pins** — the AWX, ansible-ui and jewel commit SHAs, the package versions, and the
    EE digest. They are what makes *your* build reproducible. If you kept them in the repo or your
@@ -23,7 +23,7 @@ cd terraform
 terraform destroy
 ```
 
-That removes all five VMs, their disks and their cloud-init snippets — Terraform knows exactly what
+That removes all six VMs, their disks and their cloud-init snippets — Terraform knows exactly what
 it created, so there is nothing to hunt for.
 
 It also removes the downloaded Fedora base image from the node. If you plan to rebuild soon and

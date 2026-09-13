@@ -165,14 +165,14 @@ variable "share_server" {
 
 variable "nodes" {
   description = <<-EOT
-    The five machines, mirroring the shape of a distributed RPM deployment.
+    The six machines, mirroring the shape of a distributed RPM deployment.
 
-    MEMORY. These are sized for a Proxmox host with 32 GB, and total 23 GB —
+    MEMORY. These are sized for a Proxmox host with 32 GB, and total 25 GB —
     generous enough that no step in the tutorial has to lean on swap. On a
-    smaller host, the laptop-scale numbers that also work are 1024 / 5120 /
-    3584 / 2560 / 2048, totalling 14 GB.
+    smaller host, the laptop-scale numbers that also work are
+    1024 / 5120 / 2560 / 2560 / 2560 / 2048, totalling 15.5 GB.
 
-    CPU. 14 vCPU across five VMs deliberately overcommits an 8-core host. The
+    CPU. 18 vCPU across six VMs deliberately overcommits an 8-core host. The
     nodes are idle most of the time and the two long compiles are on different
     machines, so the overcommit buys parallelism during the builds without
     costing anything at rest.
@@ -187,11 +187,14 @@ variable "nodes" {
     # postgres alone needs very little
     ace-db = { vm_id = 140, ip = "192.168.1.40", memory = 2048, vcpu = 2 }
     # the biggest, because the console's npm build is the single most
-    # memory-hungry step in the tutorial — and it also exports the share
+    # memory-hungry step in the tutorial -- and it also exports the share
     ace-gateway = { vm_id = 141, ip = "192.168.1.41", memory = 8192, vcpu = 4 }
-    # runs AWX and, as a hybrid node, the EE containers that execute jobs
-    ace-controller = { vm_id = 142, ip = "192.168.1.42", memory = 6144, vcpu = 4 }
-    ace-hub        = { vm_id = 143, ip = "192.168.1.43", memory = 4096, vcpu = 2 }
-    ace-eda        = { vm_id = 144, ip = "192.168.1.44", memory = 3072, vcpu = 2 }
+    # control-only: schedules work and runs control-plane jobs like project
+    # updates, but hands user jobs to the execution node over the mesh
+    ace-controller = { vm_id = 142, ip = "192.168.1.42", memory = 4096, vcpu = 4 }
+    # runs the EE containers, and nothing else
+    ace-exec = { vm_id = 145, ip = "192.168.1.45", memory = 4096, vcpu = 4 }
+    ace-hub  = { vm_id = 143, ip = "192.168.1.43", memory = 4096, vcpu = 2 }
+    ace-eda  = { vm_id = 144, ip = "192.168.1.44", memory = 3072, vcpu = 2 }
   }
 }

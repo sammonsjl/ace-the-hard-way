@@ -2,7 +2,7 @@
 
 ## What you'll have at the end
 
-A Proxmox node ready to run the five lab VMs, and a workstation that can drive it with Terraform.
+A Proxmox node ready to run the six lab VMs, and a workstation that can drive it with Terraform.
 
 ## What you need
 
@@ -11,9 +11,9 @@ A Proxmox node ready to run the five lab VMs, and a workstation that can drive i
 | | |
 |---|---|
 | **Proxmox VE** | **8.4 or newer.** The configuration imports a downloaded cloud image straight into a VM disk, which needs the `import` content type. That landed in 8.4. Built and tested on 9.2. |
-| **RAM** | **32 GB comfortable.** `terraform/variables.tf` allocates 23 GB across five VMs. It also ships the laptop-scale numbers (14 GB total) as a comment — use those and 16 GB is workable, at the cost of the console build leaning on swap in [Lab 5](05-gateway.md). |
-| **Disk** | ~150 GB free on the VM datastore. Five 60 GiB disks, but thin-provisioned: they start near empty and grow to roughly 15–20 GB each as you build. On thick storage, budget the full 300 GB. |
-| **CPU** | 4 cores workable, 8 comfortable. The configuration asks for 14 vCPU across the five VMs, which deliberately overcommits — the nodes idle most of the time, and the two long compiles are on different machines. |
+| **RAM** | **32 GB comfortable.** `terraform/variables.tf` allocates 25 GB across six VMs. It also ships the laptop-scale numbers (15.5 GB total) as a comment — use those and 16 GB is workable, at the cost of the console build leaning on swap in [Lab 5](05-gateway.md). |
+| **Disk** | ~180 GB free on the VM datastore. Six 60 GiB disks, but thin-provisioned: they start near empty and grow to roughly 15–20 GB each as you build. On thick storage, budget the full 360 GB. |
+| **CPU** | 4 cores workable, 8 comfortable. The configuration asks for 18 vCPU across the six VMs, which deliberately overcommits — the nodes idle most of the time, and the two long compiles are on different machines. |
 | **Network** | A bridge onto a network with DHCP-free space you control, and outbound internet. The VMs pull from GitHub, PyPI, npm, quay.io and the Fedora mirrors. Nothing here works air-gapped. |
 
 ### Your workstation
@@ -22,7 +22,7 @@ Terraform, an SSH client, and network reach to the Proxmox API. That is all — 
 
 This is the one advantage of building on a hypervisor you don't sit in front of: nothing is
 compiled, virtualised or mounted locally, so macOS and Windows are as good a driving seat as Linux.
-The five VMs are a *topology*, and it lives on the Proxmox node, not on your desk.
+The six VMs are a *topology*, and it lives on the Proxmox node, not on your desk.
 
 ## Prepare the Proxmox host
 
@@ -87,7 +87,7 @@ then set `proxmox_ssh_agent = true` and leave `proxmox_ssh_password` unset.
 
 ### Addresses
 
-The five VMs take **static** addresses on your bridge. Pick five consecutive ones that are free and
+The six VMs take **static** addresses on your bridge. Pick six consecutive ones that are free and
 **outside your router's DHCP pool** — if the pool can hand out `.40`, something else will
 eventually take it and you will be debugging a duplicate address halfway through Lab 6.
 
@@ -135,7 +135,7 @@ proprietary to either.
 
 ### An SSH key for the lab
 
-Terraform injects a public key into all five VMs. Use a dedicated one so lab machines never see
+Terraform injects a public key into all six VMs. Use a dedicated one so lab machines never see
 your everyday key:
 
 ```bash
@@ -183,8 +183,8 @@ Because this tutorial builds everything **bare metal**: real systemd units, real
 files on a real Linux system. That needs disposable Linux machines you can break and rebuild. It
 also matches what you'd run in a homelab or datacenter.
 
-**And why five of them?** Because the seams are the lesson. On one box, "the controller talks to the
-database" is a unix socket and a shrug; across five, it is a hostname, a port, a firewall rule and a
+**And why six of them?** Because the seams are the lesson. On one box, "the controller talks to the
+database" is a unix socket and a shrug; across six, it is a hostname, a port, a firewall rule and a
 certificate whose SAN has to match — and when it breaks you find out which. [Lab 2](02-vms.md) lays
 out the topology and why each component gets its own machine.
 
