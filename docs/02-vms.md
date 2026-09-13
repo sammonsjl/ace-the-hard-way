@@ -71,6 +71,40 @@ The 14 vCPU deliberately overcommits an 8-core host. The nodes are idle most of 
 long compiles are on different machines, so the overcommit buys parallelism during the builds and
 costs nothing at rest.
 
+### If the host has 32 GB and nothing else on it
+
+The defaults leave headroom on purpose, because a Proxmox node usually has other things on it. If
+yours does not, the one number worth raising is the gateway's. Its console build asks Node for an
+8 GB heap, which on an 8 GB VM is the whole machine — so it spills into the swapfile [Lab
+5](05-gateway.md) sets up, and the build takes longer than it needs to. At 12 GB the heap fits in
+RAM with room for the OS and V8's own non-heap allocations, and the swap step becomes a no-op.
+
+Put it in `terraform.tfvars`, not `variables.tf` — that filename is gitignored, so your lab can
+differ from the tutorial without the two drifting apart in git:
+
+```hcl
+nodes = {
+  ace-db         = { vm_id = 140, ip = "192.168.1.40", memory = 2048,  vcpu = 2 }
+  ace-gateway    = { vm_id = 141, ip = "192.168.1.41", memory = 12288, vcpu = 4 }
+  ace-controller = { vm_id = 142, ip = "192.168.1.42", memory = 7168,  vcpu = 4 }
+  ace-hub        = { vm_id = 143, ip = "192.168.1.43", memory = 4096,  vcpu = 2 }
+  ace-eda        = { vm_id = 144, ip = "192.168.1.44", memory = 3072,  vcpu = 2 }
+}
+```
+
+That is 28 GB allocated, leaving about 3 GB for Proxmox itself — which idles near 2 GB and wants
+roughly 80 MB more per running guest. The controller gets the other GB because it is the only node
+that does real work during the labs: AWX, plus the EE containers it runs as a hybrid node in [Lab
+7](07-execution.md).
+
+> **All five nodes have to be listed, even though only two of them move.** Terraform replaces a map
+> variable wholesale rather than merging it into the default, so anything you leave out of this
+> block does not fall back to `variables.tf` — it simply stops existing, and the plan quietly shows
+> you three VMs instead of five. It also means a later change to an `ip` or `vm_id` upstream will
+> not reach a copy you have pinned here.
+
+Leave the vCPU alone. Adding more to an 8-core host buys contention, not speed.
+
 ## Bring them up
 
 From the `terraform/` directory:

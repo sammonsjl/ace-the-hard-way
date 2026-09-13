@@ -29,3 +29,9 @@ node_name = "pve"
 # datastore_id         = "local-lvm"
 # image_datastore_id   = "local"
 # snippet_datastore_id = "local"
+
+# Per-VM memory and CPU. The defaults in variables.tf total 23 GB and suit a
+# 32 GB host that has other things on it. If yours is dedicated to this lab,
+# Lab 2 gives a 28 GB set that keeps the console build out of swap. Terraform
+# replaces this map wholesale, so list all five nodes if you override it.
+# nodes = { ... }
