@@ -11,7 +11,7 @@ It builds that architecture from upstream community projects:
 - **ace-db** — PostgreSQL on a host of its own, serving four databases to four machines. No HTTP, no certificate, nothing to register.
 - **ace-gateway** — the [platform gateway](https://github.com/ansible/jewel) built from source, with Redis colocated, the unified console ([ansible-ui](https://github.com/ansible/ansible-ui)) built from source, and **envoy** on 443 in front. It is not a reverse proxy you point at things: every route envoy serves is a row in the gateway's registry, and every other component *registers itself* here.
 - **ace-controller** — [AWX](https://github.com/ansible/awx) built from source into a virtualenv, with every process (uwsgi, daphne, dispatcher, callback receiver, wsrelay, ws-heartbeat, and the rsyslog pair) running under **supervisord drop-ins you wrote** — the same process topology a real deployment runs — behind its own nginx.
-- **The execution plane** — [receptor](https://github.com/ansible/receptor) from the release binary, with **work signing you set up yourself**, plus podman. The controller hands receptor a *signed work unit* over a local socket; receptor spawns `ansible-runner`; ansible-runner starts the job in an execution environment. Built as its own lab because on a production build of this topology it is its own VM — here the controller doubles as a **hybrid** node to save a machine.
+- **The execution plane** — [receptor](https://github.com/ansible/receptor) from the release binary, with **work signing you set up yourself**, plus podman, on its own VM. The controller signs a work unit and hands it to receptor; receptor routes it over a mutually-authenticated TCP mesh to `ace-exec`; receptor there verifies the signature and spawns `ansible-runner`, which starts the job in an execution environment. The mesh has its own CA, because receptor authenticates a peer by a node ID carried inside the certificate.
 - **ace-hub** — [galaxy_ng](https://github.com/ansible/galaxy_ng) on pulpcore, the private content repository the controller pulls collections and EE images from.
 - **ace-eda** — [eda-server](https://github.com/ansible/eda-server), which closes the loop: an event fires a rulebook, the rulebook launches a job template on the controller.
 
@@ -29,7 +29,7 @@ That is the finish line — one console, one login, on `https://ace-gateway`. Th
 the sidebar are not a theme or a mock-up: **Automation Execution**, **Automation Decisions** and
 **Automation Content** appear because the controller, EDA and hub each *registered themselves* with
 the gateway, and the navigation is assembled from its service registry at page load. The jobs at the
-bottom really ran, in a container, on the hybrid node.
+bottom really ran, in a container, on the execution node.
 
 Six VMs, nine labs later. Nothing in that screenshot was installed by a package — every service
 behind it is a process you started by hand, from a config file you wrote:
@@ -46,7 +46,7 @@ flowchart TB
         redis[("Redis<br/>unix socket for the gateway · :6379 for the others")]
     end
 
-    subgraph CTL["ace-controller · 192.168.1.42 — HYBRID node"]
+    subgraph CTL["ace-controller · 192.168.1.42 — CONTROL node"]
         direction TB
         ctlnginx["nginx :443"]
 
@@ -54,11 +54,17 @@ flowchart TB
             ctlsup["supervisord · tower-processes<br/>awx-uwsgi · awx-daphne · awx-dispatcher<br/>awx-callback-receiver · awx-wsrelay · awx-ws-heartbeat<br/>awx-rsyslogd · awx-rsyslog-configurer"]
         end
 
-        subgraph EXEC["execution plane — Lab 7"]
-            rcontrol["receptor<br/>control socket · work signing · worktype: local"]
-            runner["ansible-runner worker"]
-            podmanc["podman — EE container<br/>project syncs, system jobs AND your jobs"]
+        subgraph CMESH["mesh — Lab 7"]
+            rcontrol["receptor<br/>control socket · work signing<br/>tls-client · tcp-peer → ace-exec:27199"]
+            clocal["worktype: local<br/>project syncs, system jobs"]
         end
+    end
+
+    subgraph EXECN["ace-exec · 192.168.1.45 — EXECUTION node"]
+        direction TB
+        rexec["receptor<br/>tls-server · tcp-listener :27199<br/>work verification · worktype: ansible-runner"]
+        runner["ansible-runner worker"]
+        podmanc["podman — EE container<br/>your jobs"]
     end
 
     subgraph HUB["ace-hub · 192.168.1.43"]
@@ -102,7 +108,9 @@ flowchart TB
     edaproc -.->|"6379 · db 5"| redis
 
     ctlsup ==>|"signed work unit<br/>over a local socket"| rcontrol
-    rcontrol --> runner
+    rcontrol ==>|"mutual TLS · 27199<br/>routed by node id"| rexec
+    rcontrol --> clocal
+    rexec --> runner
     runner --> podmanc
 
     classDef front fill:#ddf4ff,stroke:#0969da,color:#0a3069

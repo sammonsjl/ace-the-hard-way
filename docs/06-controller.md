@@ -374,18 +374,18 @@ broke.
 
 ---
 
-## 5. Register this node — as a hybrid
+## 5. Register this node — as a control node
 
 ```bash
-sudo -u awx awx-manage provision_instance --hostname="$(hostname)" --node_type=hybrid
+sudo -u awx awx-manage provision_instance --hostname="$(hostname)" --node_type=control
 sudo -u awx awx-manage register_queue --queuename=controlplane --hostnames="$(hostname)"
-sudo -u awx awx-manage register_queue --queuename=default      --hostnames="$(hostname)"
 ```
 
-**Both queues, and that is the whole point of a hybrid node.** `controlplane` is where AWX puts its
-own housekeeping — project updates, inventory syncs, scheduled system jobs. `default` is where user
-jobs go. On a split deployment the controller is in `controlplane` only and execution nodes are in
-`default`. Here one machine is in both.
+**One queue, because this node schedules work rather than running it.** `controlplane` is where AWX
+puts its own housekeeping — project updates, inventory syncs, scheduled system jobs, all of which a
+control node does run. `default` is where user jobs go, and nothing is in it yet: the execution node
+joins that queue in [Lab 7](07-execution.md). Until then the platform can accept a job and will
+never start one, which is exactly the state this lab ends in.
 
 ```bash
 sudo -u awx awx-manage create_preload_data

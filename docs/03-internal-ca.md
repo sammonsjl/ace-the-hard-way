@@ -23,13 +23,14 @@ Real deployments do the second, and so do we. It is barely more work — the who
 commands — and on a six-node estate it is the difference between a build that works and one that
 spends its life failing certificate checks.
 
-**This CA does not authenticate receptor nodes to each other.** A multi-node receptor mesh secures
-node-to-node traffic with mutual TLS on a private port, and a real distributed build would give that
-its own dedicated CA — kept separate from this one on purpose, so a compromised web certificate
-could never mint a mesh node, and either could be rotated without touching the other. This tutorial
-runs a single **hybrid** node, so there is no node-to-node traffic and it builds no mesh CA or node
-certificates at all ([Lab 7](07-execution.md) explains why). This CA's only job is to authenticate
-*services* — to browsers and to each other.
+**This CA does not authenticate receptor nodes to each other.** The receptor mesh secures
+node-to-node traffic with mutual TLS on a private port, and it gets its own dedicated CA — kept
+separate from this one on purpose, so a compromised web certificate could never mint a mesh node,
+and either can be rotated without touching the other. That second CA is built in
+[Lab 7](07-execution.md), not here, for a practical reason as well as a tidy one: receptor's
+certificates carry the node ID in a custom X.509 extension, so they are issued with receptor's own
+tooling, on a machine that has receptor installed. This CA's only job is to authenticate
+*services* — to browsers and to each other. Note that the mesh CA never enters any trust store.
 
 **Redis is a third case — it leans on this CA, but only when clustered.** A multi-node Redis cluster
 runs over TLS: each node gets a certificate signed by *this* CA (one cert doing both client- and
