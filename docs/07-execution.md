@@ -191,7 +191,31 @@ sudo dnf -y install podman crun slirp4netns
 grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
 sudo loginctl enable-linger awx
 loginctl show-user awx --property=Linger
+
+# Rootless podman caches the id mapping it saw the first time it ran. If that
+# was before awx had subuid ranges, it keeps the single-uid fallback until told
+# otherwise -- and pulling an EE then fails on lchown deep inside a layer.
+sudo -u awx -H bash -c 'cd /var/lib/awx && podman system migrate'
+sudo -u awx -H bash -c 'cd /var/lib/awx && podman unshare cat /proc/self/uid_map'
 ```
+
+> **That last command is the check that matters, and it should print two lines** — a single-uid
+> line for root plus `1  100000  65536`. One line alone means the range never took, and the
+> failure you get is not a permissions error where you would look for one. It arrives much later,
+> inside a project update, as podman failing to unpack an execution environment:
+>
+> ```
+> ERRO cannot find UID/GID for user awx: no subuid ranges found for user "awx" in /etc/subuid
+> Error: ... unpacking failed ... potentially insufficient UIDs or GIDs available in user
+> namespace (requested 0:12 for /var/spool/mail) ... lchown /var/spool/mail: invalid argument
+> ```
+>
+> `/etc/subuid` can look perfectly correct while this happens, because the stale mapping lives in
+> podman's own state, not in the file. `podman system migrate` is idempotent — run it whenever the
+> ranges change.
+>
+> Note the `-H` and the `cd`: `sudo -u awx` alone keeps your own `HOME` and working directory, and
+> podman fails with `cannot chdir to /home/<you>: Permission denied` before it does anything useful.
 
 ### ansible-runner
 
@@ -261,7 +285,8 @@ EOF
 ### The unit, and the port
 
 ```bash
-sudo tee /etc/systemd/system/receptor.service >/dev/null <<'EOF'
+AWX_UID=$(id -u awx)
+sudo tee /etc/systemd/system/receptor.service >/dev/null <<EOF
 [Unit]
 Description=Receptor mesh node
 After=network-online.target
@@ -271,8 +296,10 @@ Wants=network-online.target
 Type=simple
 User=awx
 Group=awx
+Environment=XDG_RUNTIME_DIR=/run/user/${AWX_UID}
 ExecStart=/usr/local/bin/receptor --config /etc/receptor/receptor.conf
-Restart=always
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
 RestartSec=5
 LimitNOFILE=8192
 
@@ -284,6 +311,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now receptor
 systemctl is-active receptor
 ```
+
+> **`XDG_RUNTIME_DIR` is not optional, and leaving it out fails two labs away.** receptor starts
+> fine without it and the mesh comes up clean — but the podman it eventually spawns has nowhere to
+> put its rootless runtime state, picks a different id mapping from the one you verified by hand,
+> and the first job dies unpacking its execution environment with
+> `potentially insufficient UIDs or GIDs available in user namespace`. `/etc/subuid` looks correct
+> the whole time.
+>
+> Note the heredoc is **unquoted** here so `${AWX_UID}` expands as the file is written, which is
+> why `\$MAINPID` has to be escaped.
 
 Only the controller may reach the mesh port:
 
@@ -304,6 +341,43 @@ sudo firewall-cmd --list-rich-rules
 ---
 
 ## 4. `ace-controller`: peer to it
+
+### It runs containers too
+
+A control node is not a container-free node. It runs *control-plane* work — project updates,
+inventory syncs — and it runs that work in the Control Plane Execution Environment, under podman,
+exactly as `ace-exec` runs user jobs. So it needs the same rootless plumbing:
+
+```bash
+sudo dnf -y install podman crun slirp4netns
+grep -q ^awx: /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 awx
+sudo loginctl enable-linger awx
+loginctl show-user awx --property=Linger
+
+sudo -u awx -H bash -c 'cd /var/lib/awx && podman system migrate'
+test -d /run/user/$(id -u awx) && echo "runtime dir present"
+```
+
+> **`enable-linger` is what creates `/run/user/<uid>`, and the receptor unit below names that path
+> in `XDG_RUNTIME_DIR`.** Without it the directory does not exist, and podman refuses to start with
+>
+> ```
+> Failed to obtain podman configuration: lstat /run/user/991: no such file or directory
+> ```
+>
+> That message never reaches you. ansible-runner probes for the runtime by running
+> `podman --version` and checking only the exit code, so a podman that is installed but cannot
+> configure itself is reported as a podman that is not installed at all:
+>
+> ```
+> Unable to find process isolation executable: podman
+> ```
+>
+> `command -v podman` answers happily the whole time. The honest test is
+> `sudo -u awx env XDG_RUNTIME_DIR=/run/user/$(id -u awx) podman --version; echo $?`.
+
+### The mesh side
+
 
 AWX's dispatcher has no "receptor URL" setting. It **reads `/etc/receptor/receptor.conf`
 directly** — the path is hardcoded in `awx/main/tasks/receptor.py` — finds the `control-service`
@@ -384,18 +458,22 @@ EOF
 Same unit as `ace-exec`, with the socket path the dispatcher expects:
 
 ```bash
-sudo tee /etc/systemd/system/receptor.service >/dev/null <<'EOF'
+AWX_UID=$(id -u awx)
+sudo tee /etc/systemd/system/receptor.service >/dev/null <<EOF
 [Unit]
 Description=Receptor mesh node
 After=network-online.target
 Wants=network-online.target
+PartOf=automation-controller.service
 
 [Service]
 Type=simple
 User=awx
 Group=awx
+Environment=XDG_RUNTIME_DIR=/run/user/${AWX_UID}
 ExecStart=/usr/local/bin/receptor --config /etc/receptor/receptor.conf
-Restart=always
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
 RestartSec=5
 LimitNOFILE=8192
 
@@ -407,6 +485,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now receptor
 sudo systemctl restart supervisord
 ```
+
+`PartOf` here and not on `ace-exec`: the controller has an `automation-controller.service` target
+from [Lab 6](06-controller.md) that stops and starts the node's services together. The execution
+node has no such umbrella — receptor is the only thing on it.
 
 The mesh should now have two nodes:
 
