@@ -283,9 +283,35 @@ sudo grep -q '^protected-mode' /etc/valkey/valkey.conf \
   || echo 'protected-mode no' | sudo tee -a /etc/valkey/valkey.conf
 
 sudo systemctl restart valkey
+
+# Fedora Cloud Base ships without firewalld, so this is the first firewall on
+# ace-gateway -- which means turning it on closes /srv/ace along with
+# everything else. Open NFS back up in the same breath as redis, or the next
+# certificate this lab issues will hang instead of failing. See the note below.
+sudo dnf -y install firewalld
+sudo systemctl enable --now firewalld
+
+for ip in 192.168.1.40 192.168.1.42 192.168.1.43 192.168.1.44 192.168.1.45; do
+  sudo firewall-cmd --permanent \
+    --add-rich-rule="rule family=ipv4 source address=$ip/32 port port=2049 protocol=tcp accept"
+done
 sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.1.42/32 port port=6379 protocol=tcp accept'
 sudo firewall-cmd --reload
+sudo firewall-cmd --list-rich-rules
 ```
+
+> **Enabling firewalld here is what closes the share, and the failure gives you nothing to go on.**
+> `terraform/cloud-init/user-data.yaml.tftpl` adds the NFS rules only
+> `systemctl is-active --quiet firewalld &&` — true on a rebuild where a firewall already exists,
+> false on a stock Fedora Cloud Base where firewalld is not installed. So on a first build those
+> rules were never written, and the moment you start firewalld for the redis rule, every other node
+> loses `/srv/ace`.
+>
+> Nothing reports it. NFS does not refuse the connection, it blocks — so the *next* thing that
+> writes to the share, `ace-request-cert` in section 7, hangs forever inside `openssl req` with no
+> error, no CPU, and a load average that climbs while you wonder what you broke. `pgrep -a openssl`
+> showing a stuck `-out /srv/ace/...` is the tell, and
+> `sudo firewall-cmd --list-rich-rules | grep 2049` is the confirmation.
 
 > **If the PING below comes back `-DENIED Running in protected mode`, that sed matched nothing.**
 > Valkey defaults protected mode *on*, and it refuses every non-loopback connection while no
