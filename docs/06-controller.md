@@ -291,12 +291,22 @@ sudo systemctl restart valkey
 sudo dnf -y install firewalld
 sudo systemctl enable --now firewalld
 
+# 443 and 80 first: envoy is the platform's front door and it has been serving
+# on an unfirewalled box until now. Starting firewalld without these closes the
+# console on yourself.
+sudo firewall-cmd --permanent --add-service=https --add-service=http
+
+# Then NFS, to the five nodes that mount /srv/ace.
 for ip in 192.168.1.40 192.168.1.42 192.168.1.43 192.168.1.44 192.168.1.45; do
   sudo firewall-cmd --permanent \
     --add-rich-rule="rule family=ipv4 source address=$ip/32 port port=2049 protocol=tcp accept"
 done
+
+# And redis, for the controller only.
 sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.1.42/32 port port=6379 protocol=tcp accept'
+
 sudo firewall-cmd --reload
+sudo firewall-cmd --list-services
 sudo firewall-cmd --list-rich-rules
 ```
 
@@ -312,6 +322,12 @@ sudo firewall-cmd --list-rich-rules
 > error, no CPU, and a load average that climbs while you wonder what you broke. `pgrep -a openssl`
 > showing a stuck `-out /srv/ace/...` is the tell, and
 > `sudo firewall-cmd --list-rich-rules | grep 2049` is the confirmation.
+>
+> **It closes 443 on you at the same time**, which is the louder half of the same mistake: envoy
+> has been serving the console on an unfirewalled box since [Lab 5](05-gateway.md), so the browser
+> tab you had open stops loading and `curl` returns nothing rather than a status. `sudo ss -tln |
+> grep ':443 '` still showing four listeners while curl gives you `000` is the shape of a firewall
+> problem, not a service one.
 
 > **If the PING below comes back `-DENIED Running in protected mode`, that sed matched nothing.**
 > Valkey defaults protected mode *on*, and it refuses every non-loopback connection while no
