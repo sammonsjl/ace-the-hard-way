@@ -141,7 +141,7 @@ sudo tee /etc/pulp/settings.py >/dev/null <<'EOF'
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "pulp", "USER": "pulp", "PASSWORD": "CHANGE-ME",
+        "NAME": "pulp", "USER": "pulp", "PASSWORD": "CHANGE-ME-pulp",
         "HOST": "ace-db", "PORT": 5432,
     }
 }
