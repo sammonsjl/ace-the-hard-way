@@ -162,7 +162,7 @@ DATABASES:
     ENGINE: django.db.backends.postgresql
     NAME: eda
     USER: eda
-    PASSWORD: CHANGE-ME
+    PASSWORD: CHANGE-ME-eda
     HOST: ace-db
     PORT: 5432
 MEDIA_ROOT: /var/lib/ansible-automation-platform/eda/media
@@ -270,6 +270,7 @@ EnvironmentFile=/etc/default/eda
 User=eda
 Group=eda
 RuntimeDirectory=eda
+RuntimeDirectoryPreserve=yes
 ExecStart=${VENV}/gunicorn --name eda-api --bind unix:/run/eda/eda-api.sock --workers 2 aap_eda.wsgi --access-logfile -
 Restart=always
 RestartSec=3
@@ -287,6 +288,7 @@ EnvironmentFile=/etc/default/eda
 User=eda
 Group=eda
 RuntimeDirectory=eda
+RuntimeDirectoryPreserve=yes
 ExecStart=${VENV}/daphne -u /run/eda/eda-ws.sock aap_eda.asgi:application
 Restart=always
 RestartSec=3
@@ -350,6 +352,21 @@ sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-
   automation-eda-default-worker automation-eda-activation-worker
 
 curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/
+
+> **`RuntimeDirectoryPreserve=yes` is what lets the api and the websocket coexist.** Two of these
+> units declare `RuntimeDirectory=eda`, and systemd deletes a `RuntimeDirectory` when its unit
+> stops — so restarting `automation-eda-ws` removes `/run/eda` and takes `eda-api.sock` with it,
+> even though the api process is still running and still believes it is bound. nginx then answers
+> `502`, envoy turns that into `no healthy upstream`, and `systemctl is-active` reports `active`
+> for all five units the whole time:
+>
+> ```
+> sudo systemctl restart automation-eda-api && ls /run/eda   # eda-api.sock
+> sudo systemctl restart automation-eda-ws  && ls /run/eda   # eda-ws.sock — the api's is gone
+> ```
+>
+> The `tmpfiles.d` entry above creates the directory at boot; `RuntimeDirectoryPreserve` is what
+> stops a single unit tearing it down at runtime.
 
 > **Two workers, not one, and the status endpoint is what tells you.** `dispatcherd` takes a
 > `--worker-class` of either `DefaultWorker` or `ActivationWorker`, and EDA needs both: the default
