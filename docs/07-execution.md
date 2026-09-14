@@ -90,7 +90,6 @@ CA is built with receptor's own tooling, and it is a different CA from [Lab 3](0
 — a compromised web certificate must never be able to mint a mesh node.
 
 ```bash
-cd /etc/receptor/certs
 sudo -u awx /usr/local/bin/receptor --cert-init \
   commonname="ACE mesh CA" bits=4096 \
   outcert=/etc/receptor/certs/mesh-ca.crt outkey=/etc/receptor/certs/mesh-ca.key
@@ -107,10 +106,17 @@ for NODE in ace-controller ace-exec; do
   sudo -u awx /usr/local/bin/receptor --cert-signreq \
     req=/etc/receptor/certs/$NODE.req \
     cacert=/etc/receptor/certs/mesh-ca.crt cakey=/etc/receptor/certs/mesh-ca.key \
-    outcert=/etc/receptor/certs/$NODE.crt
+    outcert=/etc/receptor/certs/$NODE.crt verify=true
 done
 sudo chmod 0600 /etc/receptor/certs/*.key
 ```
+
+> **`verify=true` means "do not prompt", which is the opposite of how it reads.** Without it
+> `--cert-signreq` stops at `Sign certificate (yes/no)?` and waits on stdin. Interactively that is
+> merely a keystroke; in a script it is worse than a hang, because the prompt eats the *next line of
+> the script* as its answer — you get `Error: expected newline` followed by whatever fragment
+> survived, such as `bash: line 10: 600: command not found` from a half-consumed `chmod 0600`.
+
 
 Confirm the node ID actually landed in the certificate — this is the field the peer checks:
 
@@ -139,20 +145,29 @@ sudo chmod 0644 /etc/receptor/work_public_key.pem
 key never travel:
 
 ```bash
-sudo -u awx install -d -m 0750 /srv/ace/mesh
-sudo -u awx cp /etc/receptor/certs/mesh-ca.crt \
-               /etc/receptor/certs/ace-exec.crt \
-               /etc/receptor/certs/ace-exec.key \
-               /etc/receptor/work_public_key.pem /srv/ace/mesh/
+sudo install -d -m 0750 /srv/ace/mesh
+sudo cp /etc/receptor/certs/mesh-ca.crt \
+        /etc/receptor/certs/ace-exec.crt \
+        /etc/receptor/certs/ace-exec.key \
+        /etc/receptor/work_public_key.pem /srv/ace/mesh/
 ```
+
+> **Root, not `awx`, on both ends of the share** — the same convention
+> [Lab 3](03-internal-ca.md) uses. `/srv/ace` is `root:root 0755` and the export carries
+> `no_root_squash`, so root can write across it and the service user cannot:
+> `sudo -u awx install -d /srv/ace/mesh` fails with a bare `Permission denied` that looks like an
+> NFS problem and is not one.
 
 On **`ace-exec`**:
 
 ```bash
-sudo -u awx cp /srv/ace/mesh/mesh-ca.crt /srv/ace/mesh/ace-exec.crt \
-               /srv/ace/mesh/ace-exec.key /etc/receptor/certs/
-sudo -u awx cp /srv/ace/mesh/work_public_key.pem /etc/receptor/
+sudo cp /srv/ace/mesh/mesh-ca.crt /srv/ace/mesh/ace-exec.crt \
+        /srv/ace/mesh/ace-exec.key /etc/receptor/certs/
+sudo cp /srv/ace/mesh/work_public_key.pem /etc/receptor/
+sudo chown awx:awx /etc/receptor/certs/mesh-ca.crt /etc/receptor/certs/ace-exec.crt \
+                   /etc/receptor/certs/ace-exec.key /etc/receptor/work_public_key.pem
 sudo chmod 0600 /etc/receptor/certs/ace-exec.key
+sudo chmod 0644 /etc/receptor/work_public_key.pem
 ```
 
 Then, back on the controller, take the courier copy away — it has served its purpose:
@@ -185,11 +200,17 @@ own — this is the one piece an execution node installs that a hybrid node gets
 
 ```bash
 sudo dnf -y install python3 python3-pip
-sudo -u awx python3 -m venv /var/lib/receptor/venv
-sudo -u awx /var/lib/receptor/venv/bin/pip install --upgrade pip
-sudo -u awx /var/lib/receptor/venv/bin/pip install ansible-runner
-/var/lib/receptor/venv/bin/ansible-runner --version
+sudo install -d -o awx -g awx -m 0755 /opt/ansible-runner
+sudo -u awx python3 -m venv /opt/ansible-runner/venv
+sudo -u awx /opt/ansible-runner/venv/bin/pip install --upgrade pip
+sudo -u awx /opt/ansible-runner/venv/bin/pip install ansible-runner
+sudo -u awx /opt/ansible-runner/venv/bin/ansible-runner --version
 ```
+
+> **In `/opt`, not under `/var/lib/receptor`.** That directory is receptor's datadir — it is `0700`
+> and receptor writes work units into it. A venv buried there is unreadable to anything but `awx`
+> and mixes tooling in with runtime state, so it goes where this build puts everything else it
+> compiles: `/opt`, alongside `/opt/awx` and `/opt/jewel` on their own nodes.
 
 ### receptor.conf
 
@@ -223,7 +244,7 @@ sudo -u awx tee /etc/receptor/receptor.conf >/dev/null <<'EOF'
 
 - work-command:
     worktype: ansible-runner
-    command: /var/lib/receptor/venv/bin/ansible-runner
+    command: /opt/ansible-runner/venv/bin/ansible-runner
     params: worker
     allowruntimeparams: true
     verifysignature: true
@@ -267,11 +288,18 @@ systemctl is-active receptor
 Only the controller may reach the mesh port:
 
 ```bash
+sudo dnf -y install firewalld
+sudo systemctl enable --now firewalld
 sudo firewall-cmd --permanent \
   --add-rich-rule='rule family=ipv4 source address=192.168.1.42/32 port port=27199 protocol=tcp accept'
 sudo firewall-cmd --reload
 sudo firewall-cmd --list-rich-rules
 ```
+
+> **Install firewalld first — Fedora Cloud Base does not ship it**, so `firewall-cmd` is
+> `command not found` on a fresh node and the rule is silently never added. Unlike
+> [Lab 6](06-controller.md)'s gateway, turning it on here breaks nothing: `ace-exec` mounts
+> `/srv/ace` as a *client* and serves nothing but the mesh port.
 
 ---
 
@@ -401,9 +429,35 @@ separate facts:
 ```bash
 sudo -u awx awx-manage provision_instance --hostname=ace-exec --node_type=execution
 sudo -u awx awx-manage register_queue --queuename=default --hostnames=ace-exec
+
+# Where the controller should dial it. This has to exist before the peer link:
+# register_peers refuses an instance with no address.
+sudo -u awx awx-manage add_receptor_address \
+  --instance ace-exec --address ace-exec --port 27199 --protocol tcp --canonical
+
 sudo -u awx awx-manage register_peers ace-controller --peers ace-exec
 sudo -u awx awx-manage list_instances
 ```
+
+> **`register_peers` fails with `Peer ace-exec does not have a receptor address` if you skip the
+> middle step.** Receptor already knows how to reach the node — that is what `tcp-peer` in
+> `receptor.conf` is — but AWX keeps its own topology in the database and will not link two
+> instances until the target has an address row. The two facts are stored separately and neither
+> derives the other, which is why this lab registers the same connection twice in two different
+> places.
+
+`ace-controller` in `controlplane`, `ace-exec` in `default`, and both heartbeating with a real
+capacity:
+
+```
+[controlplane capacity=28]
+        ace-controller capacity=28 node_type=control version=24.6.2.dev932+g9fdfc95d3
+[default capacity=18]
+        ace-exec capacity=18 node_type=execution version=ansible-runner-2.4.3
+```
+
+A `version=ansible-runner-???` and `capacity=0` on the execution node means it has been registered
+but has not reported in — check the peer link before anything else.
 
 `ace-controller` in `controlplane`, `ace-exec` in `default`, and capacity on the execution node once
 it heartbeats.
@@ -433,7 +487,7 @@ the websocket.
 | `unknown work type ansible-runner` | `worktype` on `ace-exec` does not match what the controller submits |
 | Peer never connects, no TLS error | firewalld on `ace-exec`, or `ace-exec` unresolvable in `/etc/hosts` |
 | TLS handshake fails | wrong CA on one end, or a certificate with no node-ID extension |
-| Fails instantly, empty `result_traceback` | EE cannot start — linger, or the ansible-runner venv |
+| Fails instantly, empty `result_traceback` | EE cannot start — linger, or `/opt/ansible-runner/venv` |
 | Live output never updates | websocket path — check the `/api/controller/v2/websocket/` prefix |
 
 ## Verify
