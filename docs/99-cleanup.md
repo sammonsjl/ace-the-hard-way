@@ -11,8 +11,8 @@ Everything you built lives inside the six VMs — destroying them destroys the p
 1. **Your recorded pins** — the AWX, ansible-ui and jewel commit SHAs, the package versions, and the
    EE digest. They are what makes *your* build reproducible. If you kept them in the repo or your
    notes, you are done; if they only exist in shell history on the VMs, copy them out now.
-2. **A Lab A2-style backup** (`SECRET_KEY` + `pg_dump`), optional — worth it only if you might
-   resurrect this build later instead of rebuilding from Lab 1.
+2. **A backup**, optional — the four `SECRET_KEY`s and a `pg_dump` of the four databases. Worth it
+   only if you might resurrect this build later instead of rebuilding from Lab 1.
 
 ## Burn it down
 
@@ -45,7 +45,7 @@ pvesm list local --content snippets
 pvesm list local --content import
 ```
 
-`qm list` should show none of `140`–`144`. Anything left under `snippets` named `ace-*-user-data.yaml`,
+`qm list` should show none of `140`–`145`. Anything left under `snippets` named `ace-*-user-data.yaml`,
 or an `ace-fedora-*.qcow2` under `import`, is a leftover you can delete — though if you dropped the
 image from state above, that last one is deliberate. More than one `ace-fedora-*.qcow2` means you
 have rebuilt across a Fedora release; the older one is safe to remove.
