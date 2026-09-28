@@ -34,7 +34,8 @@ labs: the engine here, the execution path in [Lab 7](07-execution.md).
 ## What you will have at the end
 
 The controller registered behind the gateway and visible in the console — projects, templates and
-inventories all browsable — reporting healthy capacity, and **completely unable to run anything**.
+inventories all browsable — and **completely unable to run anything**: until receptor exists in
+[Lab 7](07-execution.md), it cannot even schedule.
 
 That last part is deliberate, and the end of this lab shows you exactly what it looks like.
 
@@ -1323,49 +1324,55 @@ Refresh, and the banner is gone.
 > re-indented or reworked `OpenLicense`; open `licensing.py` and add `compliant=True` to that
 > `dict()` by hand.
 
-Browse around. Everything reads correctly. Back on **ace-controller**, the controller is genuinely
-healthy:
+Browse around. Everything reads correctly — the API, the console, the gateway's view of the
+controller. Now look at the node itself. Back on **ace-controller**:
 
 ```bash
 sudo -u awx awx-manage list_instances
 ```
 
-Now try to use it. **Automation Execution → Projects → Demo Project**, and click **sync**.
-
-It goes `Pending → Running → Error`, and the traceback ends:
-
 ```
-  File "/opt/awx/awx/main/tasks/receptor.py", line 404, in run
-    self.config_data = read_receptor_config()
-  File "/opt/awx/awx/main/tasks/receptor.py", line 129, in read_receptor_config
-    with open(__RECEPTOR_CONF, 'r') as f:
-FileNotFoundError: [Errno 2] No such file or directory: '/etc/receptor/receptor.conf'
+[controlplane capacity=0]
+	ace-controller capacity=0 node_type=control version=?
 ```
 
-**That is the correct result for this lab.** Nothing is broken. The dispatcher did its job: it
-picked up the work, decided this node should run it, and went looking for the local receptor —
-which does not exist yet.
+Red, no capacity, no version — exactly what section 6 said to expect. The API answers because uwsgi
+is up; the node reports nothing because the dispatcher is not.
 
-Note *where* it failed, because it is earlier than you might guess. AWX did not try the socket and
-get refused; it never got that far. `read_receptor_config()` opens
-`/etc/receptor/receptor.conf` — the hardcoded path [Lab 7](07-execution.md) explains — before any
-connection is attempted, and this lab has not created that file. You only see a
-`ConnectionRefusedError` from `receptorctl/socket_interface.py` if the config exists and the
-daemon is not listening, which is the *next* failure along: it is what you get if you write
-`receptor.conf` in Lab 7 and then mistype the unit.
+Now try to use it anyway. **Automation Execution → Projects → Demo Project**, and click **sync**.
 
-Two things are worth taking from that error.
+It goes to **Pending**, and stays there. No error, no traceback, nothing in the job output — it
+never leaves the queue. **That is the correct result for this lab.** Nothing is broken.
 
-**Capacity is not capability.** The instance reports `capacity=11` and shows green, because
-capacity is computed from this machine's CPU and memory. It says how much work the node *could*
-take, not whether any path exists to run it. A node can look perfectly healthy and be unable to
-execute a single playbook.
+The reason is in the dispatcher's log, not the job's:
 
-**And the split is real, not an artifact of this tutorial.** Scheduling and execution are separate
+```bash
+sudo tail -5 /var/log/supervisor/awx-dispatcher.log
+```
+
+```
+CommandError: Receptor config not found after 10s
+```
+
+The dispatcher is the process that takes work off the queue and decides which node runs it, and it
+will not start until `/etc/receptor/receptor.conf` exists — the hardcoded path [Lab
+7](07-execution.md) explains. So nothing picks the job up. It is not failing; it is waiting.
+
+> Older AWX builds got one step further: the dispatcher started, took the job, and failed it with
+> `FileNotFoundError: [Errno 2] No such file or directory: '/etc/receptor/receptor.conf'` in the
+> job's traceback. Since AAP-89010 (AWX commit `3ab18fd58f`, August 2026) the dispatcher refuses to
+> start at all without that file, so the failure moved out of the job and into the scheduler. If
+> your `devel` predates that and you see the traceback instead, it is the same missing file.
+
+Leave it pending. Once Lab 7 writes the receptor config and the dispatcher stays up, the node
+reports capacity and this sync is picked up on its own. Lab 7 has you sync again anyway, to watch
+one go through live.
+
+**The split is real, not an artifact of this tutorial.** Scheduling and execution are separate
 concerns joined by a signed message over a socket. That is what makes it possible to put execution
 on other machines, in other networks, behind firewalls you do not control — and it is why the
-thing you are missing is a *missing configuration file for another daemon* rather than a missing
-feature.
+thing you are missing is a *configuration file for another daemon* rather than a missing feature.
+Current AWX makes the point bluntly: without receptor, the controller will not even schedule.
 
 [Lab 7](07-execution.md) builds the other end of that socket.
 
@@ -1377,6 +1384,10 @@ sudo -u awx awx-manage list_instances
 systemctl is-active nginx supervisord automation-controller
 curl -s https://ace-controller/api/v2/ping/ | python3 -m json.tool | head -5
 ```
+
+Every program `RUNNING` except `awx-dispatcher`, which shows a few seconds of uptime because it keeps
+restarting, and the node at `capacity=0`. Both are the receptor wait from section 6, and both clear
+in Lab 7.
 
 From **ace-gateway**, through the platform door:
 
