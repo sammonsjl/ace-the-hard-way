@@ -243,7 +243,7 @@ sudo -u eda bash -c 'umask 022 && aap-eda-manage collectstatic --noinput --clear
 
 ## The service family (systemd)
 
-Four units, one shared environment file. The workers use **dispatcherd** over pg_notify —
+Five units, one shared environment file. The workers use **dispatcherd** over pg_notify —
 the same task engine as the controller ([Lab 6](06-controller.md)), no separate broker:
 
 ```bash
@@ -352,6 +352,7 @@ sudo systemctl enable --now automation-eda-api automation-eda-ws automation-eda-
   automation-eda-default-worker automation-eda-activation-worker
 
 curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/
+```
 
 > **`RuntimeDirectoryPreserve=yes` is what lets the api and the websocket coexist.** Two of these
 > units declare `RuntimeDirectory=eda`, and systemd deletes a `RuntimeDirectory` when its unit
@@ -370,7 +371,8 @@ curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/
 
 > **Two workers, not one, and the status endpoint is what tells you.** `dispatcherd` takes a
 > `--worker-class` of either `DefaultWorker` or `ActivationWorker`, and EDA needs both: the default
-> worker drains the general task queue, the activation worker runs rulebook activations. Start only
+> worker drains the general task queue, the activation worker runs rulebook activations — as podman
+> containers, the decision-environment equivalent of the controller's EEs. Start only
 > the default one and everything looks fine — all units `active`, the API answering `200` — while
 > `/api/eda/v1/status/` quietly reports:
 >
@@ -382,24 +384,6 @@ curl -s --unix-socket /run/eda/eda-api.sock http://localhost/api/eda/v1/status/
 > `Worker queue [activation] was found to not be healthy`. With both workers running the endpoint
 > returns `{"status":"good"}`, and that is the check to trust — `systemctl is-active` cannot see
 > this.
-```
-
-> **`{"status": "degraded", "message": "Dispatcherd workers unavailable"}` is the correct, permanent
-> answer here — not a startup race that clears on its own.** `check_dispatcherd_workers_health()`
-> in `aap_eda/core/health.py` requires *both* the default worker above and an activation worker
-> listening on `RULEBOOK_WORKER_QUEUES` (`activation`, by default) before it reports healthy. This
-> lab intentionally does not run an `ActivationWorker` — see the note right below — so the second
-> half of that check fails every time it is asked, not only in the few seconds after start.
-> `journalctl -u automation-eda-default-worker` will still show `pg_notify … established` and real
-> tasks running: the default worker is genuinely healthy, and `degraded` is EDA accurately
-> reporting that it can register with the platform but cannot run a rulebook activation — which
-> stays true until the fifth unit below exists.
-
-> **Production note:** the full EDA also runs an **ActivationWorker**
-> (`aap-eda-manage dispatcherd --worker-class ActivationWorker`), which launches rulebook
-> activations as podman containers — the decision-environment equivalent of the controller's
-> EEs. Add it as a fifth unit when you want to run activations; the API, scheduler, and
-> default worker above are enough to bring EDA up and register it with the platform.
 
 ## nginx
 
