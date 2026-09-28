@@ -1364,9 +1364,11 @@ will not start until `/etc/receptor/receptor.conf` exists — the hardcoded path
 > start at all without that file, so the failure moved out of the job and into the scheduler. If
 > your `devel` predates that and you see the traceback instead, it is the same missing file.
 
-Leave it pending. Once Lab 7 writes the receptor config and the dispatcher stays up, the node
-reports capacity and this sync is picked up on its own. Lab 7 has you sync again anyway, to watch
-one go through live.
+Leave it pending, and expect it to end in **Error** — that is not a new problem. The moment Lab 7
+writes the receptor config the dispatcher starts and takes this job, seconds before the receptor
+daemon it hands work to is running, so it fails in under a second with
+`ValueError: Socket path does not exist: /run/awx-receptor/receptor.sock`. Lab 7 has you sync again
+once the mesh is up, and that one succeeds.
 
 **The split is real, not an artifact of this tutorial.** Scheduling and execution are separate
 concerns joined by a signed message over a socket. That is what makes it possible to put execution
