@@ -455,9 +455,11 @@ node, a `galaxy` service under `/api/galaxy/`, plus the container-registry route
 did it with `curl`, which was fine for four calls. The hub needs nine, every one of them
 referencing another row by primary key, so from here on it is worth a small helper.
 
-Save this as `register.py` on **ace-gateway** — Lab 9 reuses it as-is:
+On **ace-gateway**, in your home directory. The helpers go in a file of their own, which Lab 9
+imports unchanged:
 
-```python
+```bash
+tee ~/register.py >/dev/null <<'EOF'
 #!/usr/bin/env python3
 """Helpers for registering a service with the gateway's REST API.
 
@@ -510,12 +512,17 @@ def ensure(path, name, body):
     new = call("POST", path, body)["id"]
     print(f"  + {name} (id {new})")
     return new
+EOF
 ```
 
-Then append the hub's own rows to the bottom of that same file and run it with
-`python3 register.py`:
+The hub's rows go in a second script that imports those helpers. Run it — it asks for the gateway
+admin password unless `GW_PW` is set:
 
-```python
+```bash
+tee ~/register-hub.py >/dev/null <<'EOF'
+#!/usr/bin/env python3
+from register import call, ensure, find
+
 st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
 hp  = find("/http_ports/", "API Port")
 hub = ensure("/service_clusters/", "hub", {"name": "hub", "service_type": st["hub"]})
@@ -530,7 +537,12 @@ for nm, gp in [("hub container registry", "/v2/"), ("pulp content", "/pulp/"),
         continue
     call("POST", "/routes/", {"name": nm, "gateway_path": gp, "service_path": gp, "http_port": hp,
         "service_cluster": hub, "is_service_https": True, "service_port": 443, "enable_gateway_auth": True})
+EOF
+python3 ~/register-hub.py
 ```
+
+The cluster, node and service each print `+` when created and `=` when already there; the four
+routes are skipped silently if they exist. Either way a re-run creates nothing twice.
 
 Then mint the hub's service secret and add it to the pulp settings so galaxy_ng trusts the
 gateway back (the api-slug is **`galaxy`**, not `hub`):

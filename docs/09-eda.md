@@ -498,11 +498,14 @@ curl -sk https://127.0.0.1:443/api/eda/v1/status/ -o /dev/null -w "eda via nginx
 
 ## Register behind the gateway
 
-Same REST-with-PKs pattern as everything before it. Reuse [Lab 8](08-hub.md)'s `register.py`
-helpers — swap its hub rows for these, or append these to a copy. One EDA cluster/node/service,
-then the service secret:
+Same REST-with-PKs pattern as everything before it, and the same helpers: [Lab 8](08-hub.md)'s
+`~/register.py` is imported unchanged. On **ace-gateway**, one EDA cluster, node and service:
 
-```python
+```bash
+tee ~/register-eda.py >/dev/null <<'EOF'
+#!/usr/bin/env python3
+from register import call, ensure, find
+
 st  = {t["name"]: t["id"] for t in call("GET", "/service_types/")["results"]}
 hp  = find("/http_ports/", "API Port")
 eda = ensure("/service_clusters/", "eda", {"name": "eda", "service_type": st["eda"]})
@@ -512,7 +515,11 @@ ensure("/services/", "eda api",
        {"name": "eda api", "api_slug": "eda", "http_port": hp, "service_cluster": eda,
         "is_service_https": True, "service_path": "/api/eda/", "service_port": 443,
         "order": 3, "node_tags": "api"})
+EOF
+python3 ~/register-eda.py
 ```
+
+Then the service secret:
 
 ```bash
 sudo -u gateway aap-gateway-manage generate_service_secret eda
