@@ -108,8 +108,13 @@ for NODE in ace-controller ace-exec; do
     cacert=/etc/receptor/certs/mesh-ca.crt cakey=/etc/receptor/certs/mesh-ca.key \
     outcert=/etc/receptor/certs/$NODE.crt verify=true
 done
-sudo chmod 0600 /etc/receptor/certs/*.key
+sudo sh -c 'chmod 0600 /etc/receptor/certs/*.key'
 ```
+
+> **The `sh -c` is load-bearing.** A bare `sudo chmod 0600 /etc/receptor/certs/*.key` fails with
+> `cannot access '/etc/receptor/certs/*.key'` even though the keys are there: *your* shell expands
+> the glob before `sudo` runs, and `/etc/receptor/certs` is `awx`-owned `0750`, so as `fedora` it
+> matches nothing and `chmod` gets the literal string. `sh -c` moves the expansion inside `sudo`.
 
 > **`verify=true` means "do not prompt", which is the opposite of how it reads.** Without it
 > `--cert-signreq` stops at `Sign certificate (yes/no)?` and waits on stdin. Interactively that is
@@ -121,7 +126,7 @@ sudo chmod 0600 /etc/receptor/certs/*.key
 Confirm the node ID actually landed in the certificate — this is the field the peer checks:
 
 ```bash
-openssl x509 -in /etc/receptor/certs/ace-exec.crt -noout -text | grep -A3 'Subject Alternative Name'
+sudo -u awx openssl x509 -in /etc/receptor/certs/ace-exec.crt -noout -text | grep -A3 'Subject Alternative Name'
 ```
 
 You are looking for `othername` with that OID, not just the DNS name.
