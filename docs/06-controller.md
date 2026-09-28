@@ -1270,7 +1270,7 @@ neat illustration of building a product's shape out of upstream parts.
 
 The console renders that banner whenever `!awxConfig.license_info.compliant`, reading the
 controller's `/api/controller/v2/config/`. AWX from source reports itself through `OpenLicense`,
-whose `validate()` returns exactly four keys:
+whose `validate()` returns exactly four keys. On **ace-controller**:
 
 ```bash
 sed -n '/^class OpenLicense/,/^$/p' /opt/awx/awx/main/utils/licensing.py
@@ -1279,7 +1279,7 @@ sed -n '/^class OpenLicense/,/^$/p' /opt/awx/awx/main/utils/licensing.py
 No `compliant` key at all — and the console reads *missing* as *non-compliant*. An open license is
 unlimited; there is nothing to be out of compliance with. The UI was written expecting the payload
 a subscription-bearing build sends, and an open build simply doesn't send that field. Make it say
-what is already true:
+what is already true — still on **ace-controller**:
 
 ```bash
 grep -q 'compliant=True' /opt/awx/awx/main/utils/licensing.py || \
@@ -1300,13 +1300,16 @@ sudo systemctl restart automation-controller
 
 Give envoy a couple of minutes to re-admit the upstream after the restart — on the reference build
 this took about **two and a half minutes**, not the few seconds the restart itself takes, so do not
-read a `504` at the one-minute mark as a broken patch. Watch it flip rather than guessing:
+read a `504` at the one-minute mark as a broken patch. Watch it flip rather than guessing.
+
+On **ace-gateway** — envoy's admin port listens only on the gateway's own loopback, so on the
+controller this is refused and looks like envoy is down:
 
 ```bash
 curl -s "http://127.0.0.1:19000/stats?filter=-443-nodes_.*membership_(healthy|total)"
 ```
 
-Then:
+Then, from any machine — this goes through the platform door:
 
 ```bash
 curl -sk -u admin:CHANGE-ME https://192.168.1.41/api/controller/v2/config/ \
@@ -1320,7 +1323,8 @@ Refresh, and the banner is gone.
 > re-indented or reworked `OpenLicense`; open `licensing.py` and add `compliant=True` to that
 > `dict()` by hand.
 
-Browse around. Everything reads correctly. The controller is genuinely healthy:
+Browse around. Everything reads correctly. Back on **ace-controller**, the controller is genuinely
+healthy:
 
 ```bash
 sudo -u awx awx-manage list_instances
