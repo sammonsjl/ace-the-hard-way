@@ -1303,7 +1303,7 @@ this took about **two and a half minutes**, not the few seconds the restart itse
 read a `504` at the one-minute mark as a broken patch. Watch it flip rather than guessing:
 
 ```bash
-curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep membership_healthy
+curl -s "http://127.0.0.1:19000/stats?filter=-443-nodes_.*membership_(healthy|total)"
 ```
 
 Then:

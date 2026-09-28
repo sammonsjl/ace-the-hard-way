@@ -566,7 +566,7 @@ curl -skL -u "admin:CHANGE-ME" https://192.168.1.41/api/galaxy/_ui/v1/me/ \
 > but budget **a couple of minutes**, not a few seconds. On the reference run it answered `503`
 > steadily for about two minutes before flipping. Watch it rather than guessing:
 > ```bash
-> curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep membership_healthy
+> curl -s "http://127.0.0.1:19000/stats?filter=-443-nodes_.*membership_(healthy|total)"
 > ```
 
 ## The payoff — it appears in the console

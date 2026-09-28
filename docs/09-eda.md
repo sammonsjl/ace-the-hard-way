@@ -534,7 +534,7 @@ sudo systemctl restart automation-eda-api automation-eda-default-worker automati
 > EDA briefly out of service *through the gateway* even though `curl -sk https://ace-eda/...`
 > answers 200 locally. Watch it flip rather than guessing:
 > ```bash
-> curl -s "http://127.0.0.1:19000/stats?filter=cluster-.*-443-nodes_api" | grep membership_healthy
+> curl -s "http://127.0.0.1:19000/stats?filter=-443-nodes_.*membership_(healthy|total)"
 > ```
 > `membership_total: 1` with `membership_healthy: 0` means registration worked and the health check
 > has not passed yet — a different problem from an empty cluster, which would mean the node tag on
