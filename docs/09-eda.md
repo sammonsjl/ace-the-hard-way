@@ -519,11 +519,18 @@ EOF
 python3 ~/register-eda.py
 ```
 
-Then the service secret:
+Then mint EDA's service secret, still on **ace-gateway**:
 
 ```bash
 sudo -u gateway aap-gateway-manage generate_service_secret eda
+```
 
+Copy the **last line** it prints — the `colorama` line above it is a warning, not part of the
+secret.
+
+On **ace-eda**, add it to EDA's settings, replacing `PASTE-THE-EDA-SECRET` in `vim`:
+
+```bash
 sudo tee -a /etc/ansible-automation-platform/eda/settings.yaml >/dev/null <<'EOF'
 RESOURCE_SERVER:
   URL: https://192.168.1.41

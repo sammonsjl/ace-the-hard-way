@@ -544,12 +544,20 @@ python3 ~/register-hub.py
 The cluster, node and service each print `+` when created and `=` when already there; the four
 routes are skipped silently if they exist. Either way a re-run creates nothing twice.
 
-Then mint the hub's service secret and add it to the pulp settings so galaxy_ng trusts the
-gateway back (the api-slug is **`galaxy`**, not `hub`):
+Then mint the hub's service secret, still on **ace-gateway** (the api-slug is **`galaxy`**, not
+`hub`):
 
 ```bash
 sudo -u gateway aap-gateway-manage generate_service_secret galaxy
+```
 
+Copy the **last line** it prints — that is the secret. The `colorama` line above it is a harmless
+warning ([Lab 6](06-controller.md) explains it), and it must not end up in the key.
+
+On **ace-hub**, add it to the pulp settings so galaxy_ng trusts the gateway back. The block goes in
+with a placeholder; `vim` is where you replace `PASTE-THE-GALAXY-SECRET` with what you copied:
+
+```bash
 sudo tee -a /etc/pulp/settings.py >/dev/null <<'EOF'
 RESOURCE_SERVER = {
     "URL": "https://192.168.1.41",
