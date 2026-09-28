@@ -82,12 +82,12 @@ EOF
 
 ## 2. The mesh CA
 
-Run this **on `ace-controller`**.
-
 Receptor authenticates a peer by the **node ID inside its certificate**, carried in a private
 extension (OID `1.3.6.1.4.1.2312.19.1`) that `openssl req` will not produce on its own. So the mesh
 CA is built with receptor's own tooling, and it is a different CA from [Lab 3](03-internal-ca.md)'s
 — a compromised web certificate must never be able to mint a mesh node.
+
+Run this **on `ace-controller`**.
 
 ```bash
 sudo -u awx /usr/local/bin/receptor --cert-init \
