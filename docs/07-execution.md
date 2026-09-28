@@ -222,6 +222,20 @@ sudo -u awx -H bash -c 'cd /var/lib/awx && podman unshare cat /proc/self/uid_map
 > Note the `-H` and the `cd`: `sudo -u awx` alone keeps your own `HOME` and working directory, and
 > podman fails with `cannot chdir to /home/<you>: Permission denied` before it does anything useful.
 
+> **Why `enable-linger`.** Rootless podman lives in a user's session: its runtime state goes in
+> `/run/user/<uid>`, and it places each container under that user's own systemd manager
+> (`user@<uid>.service`). systemd creates both when a user logs in and removes them at logout — and
+> `awx` never logs in. Its containers are started by receptor, a system service. Lingering tells
+> systemd to create them at boot and keep them, with no login at all:
+>
+> ```bash
+> ls -ld /run/user/$(id -u awx)
+> systemctl is-active user@$(id -u awx).service
+> ```
+>
+> Skip it, and the first job fails in podman, with an error [section 4](#4-ace-controller-peer-to-it)
+> shows is easy to misread.
+
 ### ansible-runner
 
 The control node gets `ansible-runner` inside the AWX venv. This node has no AWX, so it needs its
