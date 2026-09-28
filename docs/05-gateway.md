@@ -296,7 +296,8 @@ being root. On ace-controller the same line names `awx` instead, for the same re
 
 > **The two requirements files install separately, and must.** `requirements.txt` is fully
 > hash-pinned — 900-odd `--hash=sha256:` lines — while `requirements_git.txt` is a single
-> `git+https://` URL for `django-ansible-base`. Hash-checking in pip is a *mode*, not a per-line
+> `git+https://` URL for `django-ansible-base` (**DAB** — the library every platform service
+> builds on for login, JWT and RBAC). Hash-checking in pip is a *mode*, not a per-line
 > property: feed it one file containing both and it refuses the whole install with
 > `Can't verify hashes for these requirements because we don't have a way to hash version control
 > repositories`. Two `pip install -r` calls keep the hashed set hash-checked and let the VCS

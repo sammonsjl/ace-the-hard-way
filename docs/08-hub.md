@@ -75,8 +75,8 @@ Python **3.12**, the same interpreter as the gateway, controller and EDA.
 > **This lab used to say 3.11, and that is worth knowing if you have run it before.** galaxy_ng
 > once pinned `setuptools<66`, which calls `pkgutil.ImpImporter` — removed in Python 3.12 — so the
 > hub was the one component built on a different interpreter. Both halves of that have since
-> moved: galaxy_ng now allows `setuptools<=81`, and `django-ansible-base` requires **Python
-> >= 3.12**. Build this venv on 3.11 today and the install stops with:
+> moved: galaxy_ng now allows `setuptools<=81`, and `django-ansible-base` (**DAB**, the library
+> each service uses to trust the gateway's login) requires **Python >= 3.12**. Build this venv on 3.11 today and the install stops with:
 >
 > ```
 > ERROR: Package 'django-ansible-base' requires a different Python: 3.11.16 not in '>=3.12'

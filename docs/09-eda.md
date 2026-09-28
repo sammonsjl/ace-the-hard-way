@@ -87,7 +87,7 @@ component that reaches the cache across the network, and the next section opens 
 ## Build toolchain
 
 Same native-build story as the gateway and the controller — `cryptography`, `psycopg`, and
-`python-ldap` (pulled in through DAB's authentication extras) all compile against system headers.
+`python-ldap` (pulled in through the authentication extras of **DAB**, `django-ansible-base`) all compile against system headers.
 This box has neither Python 3.12 nor a compiler yet; every other component's lab installs its own
 toolchain explicitly, and EDA is no exception even though it is easy to reach this step assuming
 `python3.12` is already there:
