@@ -458,7 +458,7 @@ take it as an argument.
 
 Jewel loads `/etc/ansible-automation-platform/gateway/settings.py` automatically: its own
 `settings.py` calls `load_python_file_with_injected_context('{etc}/settings.py')`, and `{etc}` is
-that directory. No settings-module environment variable is involved.
+that directory. No settings-module environment variable is involved.  
 
 ```bash
 sudo -u gateway bash -c 'umask 077; head -c 48 /dev/urandom | base64 -w0 > /etc/ansible-automation-platform/gateway/SECRET_KEY'
@@ -517,7 +517,7 @@ EOF
 sudo vim /etc/ansible-automation-platform/gateway/settings.py
 ```
 
-The URLs carry **no port**, because envoy will own 443 on this host.
+Be sure to set the correct database password in the settings.py file. The URLs carry **no port**, because envoy will own 443 on this host.
 
 `ENVOY_HOSTNAME` is **`ace-gateway`, not `127.0.0.1`**, and that matters more than it looks. The
 gateway calls *itself* through envoy during service registration, over TLS, and validates the
@@ -549,8 +549,7 @@ sudo -u gateway aap-gateway-manage authenticators --initialize
 > including the superuser you just made, is rejected with
 > `{"detail":"Invalid username/password."}`. The console renders, the password is right, the user
 > exists and is a superuser, and the form simply refuses. The tell is
-> `aap-gateway-manage shell -c "from ansible_base.authentication.models import Authenticator;
-> print(Authenticator.objects.all())"` returning an empty list.
+> `sudo -u gateway aap-gateway-manage shell -c "from ansible_base.authentication.models import Authenticator; print(Authenticator.objects.all())"` returning an empty list.
 >
 > The `authenticators` subcommand comes from `django-ansible-base`, not from jewel's own command
 > set, so it will not appear in jewel's `management/commands/` directory.

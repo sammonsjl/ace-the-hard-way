@@ -8,13 +8,13 @@ A Proxmox node ready to run the six lab VMs, and a workstation that can drive it
 
 ### The Proxmox host
 
-| | |
-|---|---|
-| **Proxmox VE** | **8.4 or newer.** The configuration imports a downloaded cloud image straight into a VM disk, which needs the `import` content type. That landed in 8.4. Built and tested on 9.2. |
-| **RAM** | **32 GB comfortable.** `terraform/variables.tf` allocates 25 GB across six VMs. It also ships the laptop-scale numbers (15.5 GB total) as a comment — use those and 16 GB is workable, at the cost of the console build leaning on swap in [Lab 5](05-gateway.md). |
-| **Disk** | ~180 GB free on the VM datastore. Six 60 GiB disks, but thin-provisioned: they start near empty and grow to roughly 15–20 GB each as you build. On thick storage, budget the full 360 GB. |
-| **CPU** | 4 cores workable, 8 comfortable. The configuration asks for 18 vCPU across the six VMs, which deliberately overcommits — the nodes idle most of the time, and the two long compiles are on different machines. |
-| **Network** | A bridge onto a network with DHCP-free space you control, and outbound internet. The VMs pull from GitHub, PyPI, npm, quay.io and the Fedora mirrors. Nothing here works air-gapped. |
+|                |                                                                                                                                                                                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Proxmox VE** | **8.4 or newer.** The configuration imports a downloaded cloud image straight into a VM disk, which needs the `import` content type. That landed in 8.4. Built and tested on 9.2.                                                                                  |
+| **RAM**        | **32 GB comfortable.** `terraform/variables.tf` allocates 25 GB across six VMs. It also ships the laptop-scale numbers (15.5 GB total) as a comment — use those and 16 GB is workable, at the cost of the console build leaning on swap in [Lab 5](05-gateway.md). |
+| **Disk**       | ~180 GB free on the VM datastore. Six 60 GiB disks, but thin-provisioned: they start near empty and grow to roughly 15–20 GB each as you build. On thick storage, budget the full 360 GB.                                                                          |
+| **CPU**        | 4 cores workable, 8 comfortable. The configuration asks for 18 vCPU across the six VMs, which deliberately overcommits — the nodes idle most of the time, and the two long compiles are on different machines.                                                     |
+| **Network**    | A bridge onto a network with DHCP-free space you control, and outbound internet. The VMs pull from GitHub, PyPI, npm, quay.io and the Fedora mirrors. Nothing here works air-gapped.                                                                               |
 
 ### Your workstation
 

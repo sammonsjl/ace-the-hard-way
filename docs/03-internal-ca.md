@@ -36,7 +36,7 @@ tooling, on a machine that has receptor installed. This CA's only job is to auth
 runs over TLS: each node gets a certificate signed by *this* CA (one cert doing both client- and
 server-auth, covering client connections, the cluster gossip bus, and replication alike), and it
 trusts its peers because the CA already lives in the system trust store every node shares. But this
-tutorial runs a single Redis over a unix socket with no TLS at all — so, like the mesh, the clustered
+tutorial runs a single Redis over a unix socket with no TLS at all — the clustered
 path never engages and Redis never presents a certificate here.
 
 ## What you will have at the end

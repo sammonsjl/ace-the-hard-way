@@ -264,17 +264,9 @@ Three things about it are worth knowing, because each one is a way it can look f
 
   Each should report `192.168.1.41:/srv/ace nfs4`. The `ls` first is deliberate — it pokes the
   automount into mounting, which `findmnt` alone would not do.
-
-> **Why not share the repo itself?** The libvirt build of this lab mounted the repo into each VM
-> over virtiofs, which is neat when the hypervisor is the machine you are sitting at. Proxmox is
-> not: the repo is on your workstation and the VMs are somewhere else entirely. Since nothing in the
-> tutorial ever reads a repo file from inside a VM — every source checkout is a `git clone` over the
-> network — the share only ever needed to move certificates between the six nodes, and NFS between
-> the nodes themselves does that without involving your workstation at all.
-
 ## Bring them current
 
-A cloud image is a snapshot of some Tuesday months ago, so all six VMs boot well behind their own
+A cloud image is a snapshot and needs updated, so all six VMs boot well behind their own
 repos — several hundred packages, including a kernel. Update the estate now, in one loop:
 
 ```bash

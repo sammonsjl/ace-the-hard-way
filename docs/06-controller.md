@@ -98,7 +98,7 @@ failure if you don't is `stat() failed (13: Permission denied)` on every static 
 
 We track `devel` rather than a release tag: release tags are cut against AWX's containerised
 deployment story, while `devel` is where the packaging behaviour this tutorial leans on actually
-lives. The trade is reproducibility — `devel` moves daily — so **record the commit you built**.
+lives. The trade is reproducibility — `devel` moves daily.
 
 ```bash
 sudo dnf -y install \
@@ -818,7 +818,7 @@ bounce one component without tearing down the node, but tearing down the node ta
 it.
 
 > Unlike a single-box build, the database and the gateway are on *other machines* here — so this
-> unit's blast radius is exactly this component, which is what it should always have been.
+> unit's blast radius is exactly this component.
 
 ### SELinux, and start
 
@@ -1357,12 +1357,6 @@ CommandError: Receptor config not found after 10s
 The dispatcher is the process that takes work off the queue and decides which node runs it, and it
 will not start until `/etc/receptor/receptor.conf` exists — the hardcoded path [Lab
 7](07-execution.md) explains. So nothing picks the job up. It is not failing; it is waiting.
-
-> Older AWX builds got one step further: the dispatcher started, took the job, and failed it with
-> `FileNotFoundError: [Errno 2] No such file or directory: '/etc/receptor/receptor.conf'` in the
-> job's traceback. Since AAP-89010 (AWX commit `3ab18fd58f`, August 2026) the dispatcher refuses to
-> start at all without that file, so the failure moved out of the job and into the scheduler. If
-> your `devel` predates that and you see the traceback instead, it is the same missing file.
 
 Leave it pending, and expect it to end in **Error** — that is not a new problem. The moment Lab 7
 writes the receptor config the dispatcher starts and takes this job, seconds before the receptor
